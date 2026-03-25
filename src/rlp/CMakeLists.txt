@@ -14,6 +14,12 @@ target_link_libraries(rlp PUBLIC
         fmt::fmt
 )
 
+target_include_directories(rlp PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../include>
+        $<INSTALL_INTERFACE:include>
+        $<BUILD_INTERFACE:${crypto3_INCLUDE_DIR}>
+)
+
 # Install headers
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../../include/rlp/
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rlp

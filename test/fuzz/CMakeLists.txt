@@ -22,7 +22,7 @@ set(FUZZING_FLAGS
 function(add_fuzz_target target_name source_file)
     add_executable(${target_name} ${source_file})
     
-    target_link_libraries(${target_name} PRIVATE rlp)
+    target_link_libraries(${target_name} PRIVATE evmbridge)
     
     # Add fuzzing flags
     target_compile_options(${target_name} PRIVATE ${FUZZING_FLAGS} -Wno-unused-result)

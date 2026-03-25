@@ -47,11 +47,10 @@ if(BUILD_TESTING)
     find_package(GTest CONFIG REQUIRED)
 endif()
 
-set(CMAKE_INSTALL_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}/rlp/")
+set(CMAKE_INSTALL_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}/evmrelay")
 
 add_subdirectory(src)
 
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/evmrelay" FILES_MATCHING PATTERN "*.h*")
 set(evmrelay_CONFIG_DESTINATION_DIR "lib/cmake/evmrelay")
 
 install(EXPORT evmrelay

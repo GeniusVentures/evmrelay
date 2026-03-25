@@ -7,7 +7,7 @@ addtest(discv4_discovery_tests
 )
 
 target_link_libraries(discv4_discovery_tests
-    discv4
+    evmrelay
 )
 
 target_include_directories(discv4_discovery_tests PRIVATE
@@ -20,7 +20,7 @@ addtest(discv4_protocol_test
 )
 
 target_link_libraries(discv4_protocol_test
-    discv4
+    evmrelay
 )
 
 target_include_directories(discv4_protocol_test PRIVATE
@@ -42,7 +42,7 @@ addtest(discv4_client_test
 )
 
 target_link_libraries(discv4_client_test
-    discv4
+     evmrelay
 )
 
 target_include_directories(discv4_client_test PRIVATE
@@ -55,7 +55,7 @@ addtest(discv4_dial_scheduler_test
 )
 
 target_link_libraries(discv4_dial_scheduler_test
-    discv4
+    evmrelay
 )
 
 target_include_directories(discv4_dial_scheduler_test PRIVATE
@@ -68,7 +68,7 @@ addtest(discv4_enr_request_test
 )
 
 target_link_libraries(discv4_enr_request_test
-    discv4
+    evmrelay
 )
 
 target_include_directories(discv4_enr_request_test PRIVATE
@@ -81,7 +81,7 @@ addtest(discv4_enr_response_test
 )
 
 target_link_libraries(discv4_enr_response_test
-    discv4
+    evmrelay
 )
 
 target_include_directories(discv4_enr_response_test PRIVATE
@@ -94,7 +94,7 @@ addtest(discv4_enr_client_test
 )
 
 target_link_libraries(discv4_enr_client_test
-    discv4
+    evmrelay
 )
 
 target_include_directories(discv4_enr_client_test PRIVATE
@@ -107,7 +107,7 @@ addtest(discv4_enr_enrichment_test
 )
 
 target_link_libraries(discv4_enr_enrichment_test
-    discv4
+    evmrelay
 )
 
 target_include_directories(discv4_enr_enrichment_test PRIVATE
@@ -121,7 +121,7 @@ addtest(discv4_dial_filter_test
 )
 
 target_link_libraries(discv4_dial_filter_test
-    discv4
+    evmrelay
 )
 
 target_include_directories(discv4_dial_filter_test PRIVATE

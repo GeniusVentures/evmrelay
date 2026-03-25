@@ -6,7 +6,8 @@ addtest(rlp_encoder_tests
     rlp_encoder_tests.cpp
 )
 target_link_libraries(rlp_encoder_tests
-    rlp
+    evmrelay
+
 )
 
 # RLP decoder tests
@@ -14,7 +15,7 @@ addtest(rlp_decoder_tests
     rlp_decoder_tests.cpp
 )
 target_link_libraries(rlp_decoder_tests
-    rlp
+   evmrelay
 )
 
 # RLP endian tests
@@ -22,7 +23,7 @@ addtest(rlp_endian_tests
     rlp_endian_tests.cpp
 )
 target_link_libraries(rlp_endian_tests
-    rlp
+    evmrelay
 )
 
 # RLP edge cases tests
@@ -30,7 +31,7 @@ addtest(rlp_edge_cases
     rlp_edge_cases.cpp
 )
 target_link_libraries(rlp_edge_cases
-    rlp
+    evmrelay
 )
 
 # RLP benchmark tests
@@ -38,7 +39,7 @@ addtest(rlp_benchmark_tests
     rlp_benchmark_tests.cpp
 )
 target_link_libraries(rlp_benchmark_tests
-    rlp
+    evmrelay
 )
 
 # RLP property tests
@@ -46,7 +47,7 @@ addtest(rlp_property_tests
     rlp_property_tests.cpp
 )
 target_link_libraries(rlp_property_tests
-    rlp
+    evmrelay
 )
 
 # RLP comprehensive tests
@@ -54,7 +55,7 @@ addtest(rlp_comprehensive_tests
     rlp_comprehensive_tests.cpp
 )
 target_link_libraries(rlp_comprehensive_tests
-    rlp
+    evmrelay
 )
 
 # RLP ethereum tests
@@ -62,7 +63,7 @@ addtest(rlp_ethereum_tests
     rlp_ethereum_tests.cpp
 )
 target_link_libraries(rlp_ethereum_tests
-    rlp
+    evmrelay
 )
 
 # RLP random tests
@@ -70,7 +71,7 @@ addtest(rlp_random_tests
     rlp_random_tests.cpp
 )
 target_link_libraries(rlp_random_tests
-    rlp
+    evmrelay
 )
 
 # RLP type safety tests
@@ -78,7 +79,7 @@ addtest(rlp_type_safety_tests
     rlp_type_safety_tests.cpp
 )
 target_link_libraries(rlp_type_safety_tests
-    rlp
+    evmrelay
 )
 
 # RLP enhanced API tests
@@ -86,7 +87,7 @@ addtest(rlp_enhanced_api_tests
     rlp_enhanced_api_tests.cpp
 )
 target_link_libraries(rlp_enhanced_api_tests
-    rlp
+    evmrelay
 )
 
 # RLP streaming decoder tests
@@ -94,7 +95,7 @@ addtest(rlp_streaming_decoder_tests
     rlp_streaming_decoder_tests.cpp
 )
 target_link_libraries(rlp_streaming_decoder_tests
-    rlp
+    evmrelay
 )
 
 # RLP streaming simple API demo
@@ -102,7 +103,7 @@ addtest(rlp_streaming_simple_api_demo
     rlp_streaming_simple_api_demo.cpp
 )
 target_link_libraries(rlp_streaming_simple_api_demo
-    rlp
+    evmrelay
 )
 
 # RLP ethereum real world examples
@@ -110,7 +111,7 @@ addtest(rlp_ethereum_real_world_examples
     rlp_ethereum_real_world_examples.cpp
 )
 target_link_libraries(rlp_ethereum_real_world_examples
-    rlp
+    evmrelay
 )
 
 # RLP profiling tests
@@ -118,7 +119,7 @@ addtest(rlp_profiling_tests
     rlp_profiling_tests.cpp
 )
 target_link_libraries(rlp_profiling_tests
-    rlp
+    evmrelay
 )
 
 # Suppress nodiscard warnings in test code for cleaner output

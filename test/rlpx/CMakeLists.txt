@@ -7,7 +7,7 @@ addtest(rlpx_crypto_tests
 )
 
 target_link_libraries(rlpx_crypto_tests
-    rlpx
+    evmrelay
 )
 
 target_include_directories(rlpx_crypto_tests PRIVATE
@@ -20,7 +20,7 @@ addtest(rlpx_frame_cipher_tests
 )
 
 target_link_libraries(rlpx_frame_cipher_tests
-    rlpx
+    evmrelay
 )
 
 target_include_directories(rlpx_frame_cipher_tests PRIVATE
@@ -33,8 +33,7 @@ addtest(rlpx_protocol_messages_tests
 )
 
 target_link_libraries(rlpx_protocol_messages_tests
-    rlpx
-    rlp
+    evmrelay
 )
 
 target_include_directories(rlpx_protocol_messages_tests PRIVATE
@@ -47,8 +46,7 @@ addtest(rlpx_session_tests
 )
 
 target_link_libraries(rlpx_session_tests
-    rlpx
-    rlp
+    evmrelay
 )
 
 target_include_directories(rlpx_session_tests PRIVATE
@@ -61,7 +59,7 @@ addtest(rlpx_state_tests
 )
 
 target_link_libraries(rlpx_state_tests
-    rlpx
+    evmrelay
 )
 
 target_include_directories(rlpx_state_tests PRIVATE
@@ -74,8 +72,7 @@ addtest(rlpx_message_routing_tests
 )
 
 target_link_libraries(rlpx_message_routing_tests
-    rlpx
-    rlp
+    evmrelay
 )
 
 target_include_directories(rlpx_message_routing_tests PRIVATE
@@ -88,8 +85,7 @@ addtest(rlpx_socket_lifecycle_tests
 )
 
 target_link_libraries(rlpx_socket_lifecycle_tests
-    rlpx
-    rlp
+    evmrelay
 )
 
 target_include_directories(rlpx_socket_lifecycle_tests PRIVATE
@@ -102,7 +98,7 @@ addtest(rlpx_handshake_vectors_tests
 )
 
 target_link_libraries(rlpx_handshake_vectors_tests
-    rlpx
+    evmrelay
 )
 
 target_include_directories(rlpx_handshake_vectors_tests PRIVATE
@@ -115,7 +111,7 @@ addtest(rlpx_snappy_tests
 )
 
 target_link_libraries(rlpx_snappy_tests
-    rlpx
+    evmrelay
 )
 
 target_include_directories(rlpx_snappy_tests PRIVATE

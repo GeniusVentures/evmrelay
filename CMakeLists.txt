@@ -11,9 +11,9 @@ add_definitions(-D_WIN32_WINNT=0x0601)
 add_definitions(-DBOOST_BIND_GLOBAL_PLACEHOLDERS)
 
 # Project definition
-project(rlp
+project(evmrelay
         VERSION 1.0.0
-        DESCRIPTION "rlp/rlpx/discv4/discv5/eth library for C++"
+        DESCRIPTION "evm bridge with rlp/rlpx/discv4/discv5/eth library for C++"
         LANGUAGES C CXX
 )
 
@@ -47,23 +47,23 @@ if(BUILD_TESTING)
     find_package(GTest CONFIG REQUIRED)
 endif()
 
+set(CMAKE_INSTALL_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}/rlp/")
+
 add_subdirectory(src)
 
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/rlp" FILES_MATCHING PATTERN "*.h*")
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/generated" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/rlp" FILES_MATCHING PATTERN "*.h*")
 
-set(rlp_CONFIG_DESTINATION_DIR "lib/cmake/rlp")
-install(EXPORT rlp
-        FILE rlpTargets.cmake
-        NAMESPACE rlp::
-        DESTINATION ${rlp_CONFIG_DESTINATION_DIR}
+set(evmrelay_CONFIG_DESTINATION_DIR "lib/cmake/rlp")
+install(EXPORT evmrelay
+        FILE evmrelayTargets.cmake
+        NAMESPACE evmrelay::
+        DESTINATION ${evmrelay_CONFIG_DESTINATION_DIR}
 )
 
 include(CMakePackageConfigHelpers)
 
 # generate the config file that is includes the exports
 configure_package_config_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.cmake.in
-        "${CMAKE_CURRENT_BINARY_DIR}/rlpConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/evmrelayConfig.cmake"
         INSTALL_DESTINATION ${rlp_CONFIG_DESTINATION_DIR}
         NO_SET_AND_CHECK_MACRO
         NO_CHECK_REQUIRED_COMPONENTS_MACRO
@@ -71,14 +71,14 @@ configure_package_config_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.cmake.in
 
 # generate the version file for the config file
 write_basic_package_version_file(
-        "${CMAKE_CURRENT_BINARY_DIR}/rlpConfigVersion.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/evmrelayConfigVersion.cmake"
         VERSION "${PROJECT_VERSION}"
         COMPATIBILITY AnyNewerVersion
 )
 
 # install the configuration file
 install(FILES
-        ${CMAKE_CURRENT_BINARY_DIR}/rlpConfig.cmake
-        ${CMAKE_CURRENT_BINARY_DIR}/rlpConfigVersion.cmake
-        DESTINATION ${rlp_CONFIG_DESTINATION_DIR}
+        ${CMAKE_CURRENT_BINARY_DIR}/evmrelayConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/evmrelayConfigVersion.cmake
+        DESTINATION ${evmrelay_CONFIG_DESTINATION_DIR}
 )

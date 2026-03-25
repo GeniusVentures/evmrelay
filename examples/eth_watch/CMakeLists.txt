@@ -12,7 +12,7 @@ include_directories(
 
 target_link_libraries(eth_watch
     PUBLIC
-    discv4
+    evmrelay
     Boost::json
 )
 

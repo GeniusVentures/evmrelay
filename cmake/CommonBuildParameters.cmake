@@ -133,7 +133,7 @@ endif()
 # Install Headers
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/include/" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" FILES_MATCHING PATTERN "*.h*")
 
-install(TARGETS ${PROJECT_NAME} EXPORT RLPTargets
+install(TARGETS ${PROJECT_NAME} EXPORT evmrelayTargets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -144,36 +144,36 @@ install(TARGETS ${PROJECT_NAME} EXPORT RLPTargets
 )
 
 install(
-        EXPORT rlp
-        FILE rlpTargets.cmake
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/rlp
-        NAMESPACE rlp::
+        EXPORT evmrelay
+        FILE evmrelayTargets.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/evmrelay
+        NAMESPACE evmrelay::
 )
 
 include(CMakePackageConfigHelpers)
 
 # generate the config file that is includes the exports
 configure_package_config_file(${PROJECT_ROOT}/cmake/config.cmake.in
-        "${CMAKE_CURRENT_BINARY_DIR}/rlpConfig.cmake"
-        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/rlp
+        "${CMAKE_CURRENT_BINARY_DIR}/evmrelayConfig.cmake"
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/evmrelay
         NO_SET_AND_CHECK_MACRO
         NO_CHECK_REQUIRED_COMPONENTS_MACRO
 )
 
 # generate the version file for the config file
 write_basic_package_version_file(
-        "${CMAKE_CURRENT_BINARY_DIR}/rlpConfigVersion.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/evmrelayConfigVersion.cmake"
         VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}"
         COMPATIBILITY AnyNewerVersion
 )
 
 # install the configuration file
 install(FILES
-        ${CMAKE_CURRENT_BINARY_DIR}/rlpConfigVersion.cmake
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/rlp
+        ${CMAKE_CURRENT_BINARY_DIR}/evmrelayConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/evmrelay
 )
 
 install(FILES
-        ${CMAKE_CURRENT_BINARY_DIR}/rlpConfig.cmake
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/rlp
+        ${CMAKE_CURRENT_BINARY_DIR}/evmrelayConfig.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/evmrelay
 )

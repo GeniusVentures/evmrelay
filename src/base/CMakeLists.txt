@@ -1,4 +1,4 @@
-add_library(rlp_logger
+add_library(rlp_logger OBJECT
     ../../include/base/rlp-logger.hpp
     rlp-logger.cpp
 )
@@ -15,15 +15,14 @@ target_link_libraries(rlp_logger
     fmt::fmt
 )
 
-install(TARGETS rlp_logger EXPORT rlp
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
-
 # Install headers
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../../include/base/
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/base
+        FILES_MATCHING PATTERN "*.hpp"
+)
+
+install(DIRECTORY
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include/discovery/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/discovery
         FILES_MATCHING PATTERN "*.hpp"
 )

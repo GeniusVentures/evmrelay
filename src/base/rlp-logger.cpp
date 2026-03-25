@@ -1,4 +1,4 @@
-#include "../../include/base/rlp-logger.hpp"
+#include "base/rlp-logger.hpp"
 #include <iostream>
 #include <mutex>
 #include <spdlog/sinks/stdout_color_sinks.h>

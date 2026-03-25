@@ -1,5 +1,5 @@
 # Define the static library target
-add_library(discv4 STATIC
+add_library(discv4 OBJECT
         ${CMAKE_CURRENT_LIST_DIR}/packet_factory.cpp
         ${CMAKE_CURRENT_LIST_DIR}/discv4_packet.cpp
         ${CMAKE_CURRENT_LIST_DIR}/discv4_ping.cpp
@@ -10,35 +10,21 @@ add_library(discv4 STATIC
         ${CMAKE_CURRENT_LIST_DIR}/discv4_enr_response.cpp
 )
 
+# Link public dependencies
+target_link_libraries(discv4 PUBLIC
+        libsecp256k1::secp256k1
+        spdlog::spdlog
+        fmt::fmt
+)
+
 target_include_directories(discv4 PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../include>
         $<INSTALL_INTERFACE:include>
         $<BUILD_INTERFACE:${crypto3_INCLUDE_DIR}>
 )
 
-# Link public dependencies
-target_link_libraries(discv4 PUBLIC
-    rlpx
-    Boost::context
-    Boost::coroutine
-)
-
-# Ensure C++17 standard
-target_compile_features(discv4 PUBLIC cxx_std_17)
-
-# Explicitly install public headers to the base include directory
-install(FILES
-        # discv4 Peer Discovery
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../include/discv4/discovery.hpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../include/discv4/packet_factory.hpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../include/discv4/discv4_packet.hpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../include/discv4/discv4_ping.hpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../include/discv4/discv4_pong.hpp
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/discv4
-)
-
-install(DIRECTORY
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../include/discv4/
+# Install headers
+install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../../include/discv4/
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/discv4
         FILES_MATCHING PATTERN "*.hpp"
 )

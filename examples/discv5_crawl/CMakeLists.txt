@@ -6,7 +6,7 @@ add_executable(discv5_crawl
 )
 
 target_link_libraries(discv5_crawl PRIVATE
-    discv5
+    evmrelay
     Boost::boost
 )
 

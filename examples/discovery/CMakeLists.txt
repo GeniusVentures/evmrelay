@@ -10,7 +10,7 @@ include_directories(
 
 target_link_libraries(test_discovery
     PRIVATE
-    discv4
+    evmrelay
     Boost::json
 )
 
@@ -33,14 +33,14 @@ add_executable(test_discv5_connect
 
 target_link_libraries(test_enr_survey
     PRIVATE
-    discv4
+    evmrelay
     Boost::boost
     Boost::json
 )
 
 target_link_libraries(test_discv5_connect
     PUBLIC
-    discv5
+    evmrelay
     Boost::json
 )
 

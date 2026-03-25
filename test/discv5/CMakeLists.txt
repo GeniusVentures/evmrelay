@@ -6,7 +6,7 @@ addtest(discv5_enr_test
 )
 
 target_link_libraries(discv5_enr_test
-    discv5
+    evmrelay
 )
 
 target_include_directories(discv5_enr_test PRIVATE
@@ -18,7 +18,7 @@ addtest(discv5_bootnodes_test
 )
 
 target_link_libraries(discv5_bootnodes_test
-    discv5
+    evmrelay
 )
 
 target_include_directories(discv5_bootnodes_test PRIVATE
@@ -30,7 +30,7 @@ addtest(discv5_crawler_test
 )
 
 target_link_libraries(discv5_crawler_test
-    discv5
+    evmrelay
 )
 
 target_include_directories(discv5_crawler_test PRIVATE
@@ -42,7 +42,7 @@ addtest(discv5_client_test
 )
 
 target_link_libraries(discv5_client_test
-    discv5
+    evmrelay
 )
 
 target_include_directories(discv5_client_test PRIVATE

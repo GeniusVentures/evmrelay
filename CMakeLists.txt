@@ -13,11 +13,7 @@ add_definitions(-DBOOST_BIND_GLOBAL_PLACEHOLDERS)
 # Project definition
 project(evmrelay
         VERSION 1.0.0
-<<<<<<< Updated upstream
-        DESCRIPTION "evm bridge with rlp/rlpx/discv4/discv5/eth library for C++"
-=======
         DESCRIPTION "evmrelay and rlp/rlpx/discv4/discv5/eth library for C++"
->>>>>>> Stashed changes
         LANGUAGES C CXX
 )
 
@@ -55,14 +51,9 @@ set(CMAKE_INSTALL_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}/rlp/")
 
 add_subdirectory(src)
 
-<<<<<<< Updated upstream
-
-set(evmrelay_CONFIG_DESTINATION_DIR "lib/cmake/rlp")
-=======
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/evmrelay" FILES_MATCHING PATTERN "*.h*")
-
 set(evmrelay_CONFIG_DESTINATION_DIR "lib/cmake/evmrelay")
->>>>>>> Stashed changes
+
 install(EXPORT evmrelay
         FILE evmrelayTargets.cmake
         NAMESPACE evmrelay::
@@ -74,11 +65,7 @@ include(CMakePackageConfigHelpers)
 # generate the config file that is includes the exports
 configure_package_config_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.cmake.in
         "${CMAKE_CURRENT_BINARY_DIR}/evmrelayConfig.cmake"
-<<<<<<< Updated upstream
-        INSTALL_DESTINATION ${rlp_CONFIG_DESTINATION_DIR}
-=======
         INSTALL_DESTINATION ${evmrelay_CONFIG_DESTINATION_DIR}
->>>>>>> Stashed changes
         NO_SET_AND_CHECK_MACRO
         NO_CHECK_REQUIRED_COMPONENTS_MACRO
 )

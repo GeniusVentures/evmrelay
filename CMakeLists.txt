@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 
 set(
         CMAKE_TOOLCHAIN_FILE
-        "${CMAKE_SOURCE_DIR}/cmake/toolchain/cxx17.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/toolchain/cxx17.cmake"
         CACHE
         FILEPATH
         "Default toolchain"

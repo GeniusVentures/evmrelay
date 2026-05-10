@@ -6,6 +6,10 @@ add_library(eth OBJECT
         ${CMAKE_CURRENT_LIST_DIR}/abi_decoder.cpp
         ${CMAKE_CURRENT_LIST_DIR}/chain_tracker.cpp
         ${CMAKE_CURRENT_LIST_DIR}/eth_watch_service.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/eth_peer_session.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/eth_handshake_guard.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/eth_session_channel.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/eth_watch_runner.cpp
 )
 
 target_include_directories(eth PUBLIC
@@ -19,5 +23,3 @@ install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../../include/eth/
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/eth
         FILES_MATCHING PATTERN "*.hpp"
 )
-
-

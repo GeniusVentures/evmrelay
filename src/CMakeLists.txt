@@ -41,12 +41,14 @@ target_include_directories(evmrelay PUBLIC
 # Link public dependencies
 target_link_libraries(evmrelay PUBLIC
     Boost::boost
+    Boost::json
     Boost::context
     Boost::coroutine
     libsecp256k1::secp256k1
     OpenSSL::SSL
     OpenSSL::Crypto
     Snappy::snappy
+    ZLIB::ZLIB
     spdlog::spdlog
     fmt::fmt
 )

@@ -4,7 +4,7 @@ add_executable(test_discovery
     test_discovery.cpp
 )
 
-include_directories(
+target_include_directories(test_discovery PRIVATE
     ${PROJECT_SOURCE_DIR}/include
 )
 
@@ -29,6 +29,14 @@ add_executable(test_enr_survey
 
 add_executable(test_discv5_connect
     test_discv5_connect.cpp
+)
+
+target_include_directories(test_enr_survey PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+)
+
+target_include_directories(test_discv5_connect PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
 )
 
 target_link_libraries(test_enr_survey

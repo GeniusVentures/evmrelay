@@ -85,9 +85,22 @@ if(POLICY CMP0167)
         cmake_policy(SET CMP0167 OLD)
 endif()
 
+# OpenSSL
+set(OpenSSL_DIR "${_THIRDPARTY_BUILD_DIR}/openssl/build/lib/cmake/OpenSSL" CACHE PATH "Path to OpenSSL install folder")
+set(OPENSSL_ROOT_DIR "${_THIRDPARTY_BUILD_DIR}/openssl/build" CACHE PATH "Path to OpenSSL install root folder")
+set(OPENSSL_USE_STATIC_LIBS ON CACHE BOOL "OpenSSL use static libs")
+set(OPENSSL_MSVC_STATIC_RT ON CACHE BOOL "OpenSSL use static RT")
+set(OPENSSL_INCLUDE_DIR "${_THIRDPARTY_BUILD_DIR}/openssl/build/include" CACHE PATH "Path to OpenSSL include folder")
+
+find_package(OpenSSL REQUIRED CONFIG)
+
 # header only libraries must not be added here
 find_package(Boost REQUIRED COMPONENTS date_time filesystem random regex system thread log log_setup program_options json context coroutine)
 include_directories(${Boost_INCLUDE_DIRS})
+
+# zlib
+set(ZLIB_ROOT "${_THIRDPARTY_BUILD_DIR}/zlib")
+find_package(ZLIB REQUIRED)
 
 # fmt
 set(fmt_DIR "${_THIRDPARTY_BUILD_DIR}/fmt/lib/cmake/fmt")

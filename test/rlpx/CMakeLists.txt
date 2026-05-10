@@ -118,3 +118,15 @@ target_include_directories(rlpx_snappy_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/include
 )
 
+# Capability negotiation tests
+addtest(rlpx_capability_negotiation_tests
+    ${CMAKE_CURRENT_LIST_DIR}/capability_negotiation_test.cpp
+)
+
+target_link_libraries(rlpx_capability_negotiation_tests
+    evmrelay
+)
+
+target_include_directories(rlpx_capability_negotiation_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+)

@@ -6,14 +6,13 @@ add_executable(eth_watch
 )
 
 # Include project headers
-include_directories(
+target_include_directories(eth_watch PRIVATE
     ${PROJECT_SOURCE_DIR}/include
 )
 
 target_link_libraries(eth_watch
-    PUBLIC
+    PRIVATE
     evmrelay
-    Boost::json
 )
 
 # boost::coroutines performs stack switching that confuses ASan on macOS ARM64:

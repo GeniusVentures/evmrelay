@@ -128,7 +128,21 @@ target_include_directories(discv4_dial_filter_test PRIVATE
     ${CMAKE_SOURCE_DIR}/include
 )
 
+# bootstrap_peers JSON loading tests
+addtest(discv4_bootstrap_peers_test
+    ${CMAKE_CURRENT_LIST_DIR}/bootstrap_peers_test.cpp
+)
+
+target_link_libraries(discv4_bootstrap_peers_test
+    evmrelay
+)
+
+target_include_directories(discv4_bootstrap_peers_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+)
+
 set_tests_properties(discv4_client_test PROPERTIES ENVIRONMENT "ASAN_OPTIONS=halt_on_error=0")
 set_tests_properties(discv4_enr_client_test PROPERTIES ENVIRONMENT "ASAN_OPTIONS=halt_on_error=0")
 set_tests_properties(discv4_enr_enrichment_test PROPERTIES ENVIRONMENT "ASAN_OPTIONS=halt_on_error=0")
 set_tests_properties(discv4_dial_filter_test PROPERTIES ENVIRONMENT "ASAN_OPTIONS=halt_on_error=0")
+set_tests_properties(discv4_bootstrap_peers_test PROPERTIES ENVIRONMENT "ASAN_OPTIONS=halt_on_error=0")

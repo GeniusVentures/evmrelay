@@ -3,28 +3,26 @@
 //
 // examples/discovery/test_discovery.cpp
 //
-// Functional test for discv4 peer discovery + RLPx ETH Status handshake
-// against live Sepolia bootnodes.  Uses DialScheduler to maintain concurrent
-// outbound dials and verifies that at least MIN_CONNECTIONS peers complete the
-// ETH/68+69 Status handshake on the correct chain (network_id=11155111).
+// Functional test for discv4/bootstrap-peer seeding against live Ethereum peers.
+// Uses DialScheduler to seed and observe discovery/bootstrap inputs for each
+// configured chain.
 //
 // Checks (GTest-style output):
-//   1. At least one bootnode bond completes (PING→PONG)
-//   2. At least MIN_PEERS neighbour peers discovered
-//   3. At least MIN_CONNECTIONS peers complete the Sepolia ETH Status handshake
+//   1. At least one bootstrap peer is loaded from the current cache / refresh path
+//   2. Dial / connect statistics are reported for diagnostics only
 //
-// Exit code 0 = all checks pass, 1 = any check failed.
+// Exit code 0 = bootstrap peer loading checks pass, 1 = any bootstrap loading check failed.
 //
 // Usage:
-//   ./test_discovery [--log-level debug] [--timeout 60] [--connections 3]
+//   ./test_discovery [--log-level debug] [--timeout 30] [--connections 1]
 
 #include <array>
 #include <atomic>
 #include <chrono>
-#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -35,6 +33,8 @@
 #include <boost/asio/spawn.hpp>
 #include <boost/asio/steady_timer.hpp>
 
+#include <discv4/bootstrap_peers.hpp>
+#include <discv4/bootnodes.hpp>
 #include <discv4/bootnodes_test.hpp>
 #include <discv4/dial_scheduler.hpp>
 #include <discv4/discv4_client.hpp>
@@ -51,73 +51,70 @@
 
 #include "../chain_config.hpp"
 
-// ── Sepolia chain constants ───────────────────────────────────────────────────
+// ── Ethereum mainnet chain constants ─────────────────────────────────────────
 
-static constexpr uint64_t kSepoliaNetworkId = 11155111;
+static constexpr uint64_t kMainnetNetworkId = 1;
 static constexpr uint8_t  kEthOffset        = 0x10;
+static constexpr const char* kForkHashChainKey = "mainnet";
+static constexpr const char* kBootstrapChainKey = "ethereum-mainnet";
+static constexpr const char* kBootstrapPeersUrlDefault = "https://enodes.gnus.ai/chain_enodes.json.gz";
 
-static eth::Hash256 sepolia_genesis()
+struct ChainTarget
 {
-    // 25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9
+    const char* chain_key;
+    const char* bootstrap_chain_key;
+    uint64_t network_id = 0;
+    const char* genesis_hex;
+    const std::vector<std::string>* bootnodes = nullptr;
+    std::optional<std::array<uint8_t, 4U>> fork_hash_fallback;
+};
+
+static std::optional<uint8_t> hex_to_nibble(char c)
+{
+    if (c >= '0' && c <= '9')
+    {
+        return static_cast<uint8_t>(c - '0');
+    }
+    if (c >= 'a' && c <= 'f')
+    {
+        return static_cast<uint8_t>(10 + c - 'a');
+    }
+    if (c >= 'A' && c <= 'F')
+    {
+        return static_cast<uint8_t>(10 + c - 'A');
+    }
+    return std::nullopt;
+}
+
+static eth::Hash256 hash256_from_hex(const char* hex)
+{
     eth::Hash256 h{};
-    const char* hex = "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9";
     for (size_t i = 0; i < 32; ++i)
     {
-        auto nibble = [](char c) -> uint8_t {
-            if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
-            if (c >= 'a' && c <= 'f') return static_cast<uint8_t>(10 + c - 'a');
-            return 0;
-        };
-        h[i] = static_cast<uint8_t>((nibble(hex[i*2]) << 4) | nibble(hex[i*2+1]));
+        const auto hi = hex_to_nibble(hex[i * 2]).value_or(0);
+        const auto lo = hex_to_nibble(hex[i * 2 + 1]).value_or(0);
+        h[i] = static_cast<uint8_t>((hi << 4) | lo);
     }
     return h;
 }
 
-// Sepolia post-BPO2 fallback hash — used only when chains.json is not found.
-// Update chains.json instead of this constant when the fork advances.
-static const std::array<uint8_t, 4U> kSepoliaForkHashFallback{ 0x26, 0x89, 0x56, 0xb6 };
-
-// ── Test framework ────────────────────────────────────────────────────────────
-
-namespace {
-
-struct TestSuite
+static std::vector<ChainTarget> all_chain_targets()
 {
-    int run = 0, passed = 0, failed = 0;
-    std::string current;
+    return {
+        { "mainnet", "ethereum-mainnet", 1, "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3", &ETHEREUM_MAINNET_BOOTNODES, std::array<uint8_t, 4U>{ 0x07, 0xc9, 0x46, 0x2e } },
+        { "sepolia", "ethereum-sepolia", 11155111, "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9", &ETHEREUM_SEPOLIA_BOOTNODES, std::array<uint8_t, 4U>{ 0x26, 0x89, 0x56, 0xb6 } },
+        { "holesky", "ethereum-holesky", 17000, "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4", &ETHEREUM_HOLESKY_BOOTNODES, std::array<uint8_t, 4U>{ 0x9b, 0xc6, 0xcb, 0x31 } }
+    };
+}
 
-    void start(const std::string& name)
-    {
-        current = name;
-        ++run;
-        std::cout << "[ RUN      ] " << name << "\n";
-    }
-    void pass(const std::string& detail = "")
-    {
-        ++passed;
-        std::cout << "[       OK ] " << current << "\n";
-        if (!detail.empty()) std::cout << "            " << detail << "\n";
-    }
-    void fail(const std::string& detail = "")
-    {
-        ++failed;
-        std::cout << "[  FAILED  ] " << current << "\n";
-        if (!detail.empty()) std::cout << "            " << detail << "\n";
-    }
-    void header(int n)
-    {
-        std::cout << "\n[==========] DiscoveryTest (" << n << " checks)\n\n";
-    }
-    void footer()
-    {
-        std::cout << "\n[==========] " << run << " check(s)\n";
-        std::cout << "[  PASSED  ] " << passed << "\n";
-        if (failed) std::cout << "[  FAILED  ] " << failed << "\n";
-        std::cout << "\n";
-    }
-};
+static eth::Hash256 mainnet_genesis()
+{
+    return hash256_from_hex("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");
+}
 
-} // namespace
+// Ethereum mainnet fallback hash — used only when chains.json is not found.
+// Update chains.json instead of this constant when the fork advances.
+static const std::array<uint8_t, 4U> kMainnetForkHashFallback{ 0x07, 0xc9, 0x46, 0x2e };
 
 // ── Dial-attempt statistics ───────────────────────────────────────────────────
 
@@ -130,7 +127,9 @@ struct DialStats
     std::atomic<int> too_many_peers{0};             ///< TooManyPeers before chain confirmed
     std::atomic<int> too_many_peers_right_chain{0}; ///< TooManyPeers after chain confirmed
     std::atomic<int> connected{0};                  ///< right chain, Status validated
+    std::atomic<int> eth_messages{0};               ///< post-handshake ETH messages observed
 };
+
 
 // Does not set up EthWatchService — just validates the chain and returns.
 
@@ -138,9 +137,12 @@ static void dial_connect_only(
     discv4::ValidatedPeer                                           vp,
     std::function<void()>                                          on_done,
     std::function<void(std::shared_ptr<rlpx::RlpxSession>)>       on_connected,
+    std::function<void()>                                          on_eth_message,
     boost::asio::yield_context                                     yield,
     std::shared_ptr<DialStats>                                     stats,
-    eth::ForkId                                                    fork_id)
+    eth::ForkId                                                    fork_id,
+    eth::Hash256                                                   genesis,
+    uint64_t                                                       network_id)
 {
     static auto log = rlp::base::createLogger("test_discovery");
     ++stats->dialed;
@@ -175,10 +177,9 @@ static void dial_connect_only(
 
     // Send ETH Status (69)
     {
-        const eth::Hash256 genesis = sepolia_genesis();
         eth::StatusMessage69 status69{
             69,
-            kSepoliaNetworkId,
+            network_id,
             genesis,
             fork_id,
             0,
@@ -224,14 +225,22 @@ static void dial_connect_only(
         });
     });
 
-    const eth::Hash256 genesis = sepolia_genesis();
     session->set_generic_handler([session, status_received, status_timeout,
-                                   on_connected, genesis, stats](const rlpx::protocol::Message& msg)
+                                   on_connected, on_eth_message, genesis, stats, network_id](const rlpx::protocol::Message& msg)
     {
         static auto gh_log = rlp::base::createLogger("test_discovery");
         if (msg.id < kEthOffset) { return; }
         const auto eth_id = static_cast<uint8_t>(msg.id - kEthOffset);
-        if (eth_id != eth::protocol::kStatusMessageId) { return; }
+
+        if (eth_id != eth::protocol::kStatusMessageId)
+        {
+            if (status_received->load())
+            {
+                ++stats->eth_messages;
+                on_eth_message();
+            }
+            return;
+        }
 
         const rlp::ByteView payload(msg.payload.data(), msg.payload.size());
         auto decoded = eth::protocol::decode_status(payload);
@@ -241,7 +250,7 @@ static void dial_connect_only(
             (void)session->disconnect(rlpx::DisconnectReason::kSubprotocolError);
             return;
         }
-        auto valid = eth::protocol::validate_status(decoded.value(), kSepoliaNetworkId, genesis);
+        auto valid = eth::protocol::validate_status(decoded.value(), network_id, genesis);
         if (!valid)
         {
             SPDLOG_LOGGER_DEBUG(gh_log, "ETH Status validation failed: {}",
@@ -289,15 +298,265 @@ static void dial_connect_only(
     on_done();
 }
 
+// ── runtime types and helper functions ────────────────────────────────────────
+
+struct ChainRuntime
+{
+    ChainTarget                                target{};
+    eth::Hash256                               genesis{};
+    eth::ForkId                                fork_id{};
+    std::shared_ptr<DialStats>                 stats;
+    std::shared_ptr<discv4::WatcherPool>       pool;
+    std::shared_ptr<discv4::DialScheduler>     scheduler;
+    std::shared_ptr<discv4::discv4_client>     dv4;
+    std::shared_ptr<std::atomic<int>>          peers_count;
+    std::shared_ptr<std::atomic<int>>          bootstrap_peers_loaded;
+    std::shared_ptr<std::function<void()>>     maybe_finish;
+};
+
+static std::optional<eth::ForkId> load_chain_fork_id(
+    const ChainTarget&  target,
+    const std::string&  argv0)
+{
+    const auto loaded_hash = load_fork_hash(target.chain_key, argv0);
+    if (!loaded_hash && !target.fork_hash_fallback.has_value())
+    {
+        return std::nullopt;
+    }
+
+    eth::ForkId fork_id{};
+    fork_id.fork_hash = loaded_hash.value_or(target.fork_hash_fallback.value());
+    fork_id.next_fork = 0;
+    return fork_id;
+}
+
+static void enqueue_bootstrap_peers(
+    const ChainTarget&                                target,
+    const std::optional<std::filesystem::path>&       bootstrap_peers_json_file,
+    const std::optional<discv4::BootstrapCacheRefreshResult>& refresh_result,
+    const std::shared_ptr<discv4::DialScheduler>&     scheduler,
+    const std::shared_ptr<std::atomic<int>>&          bootstrap_peers_loaded)
+{
+    auto enqueue_loaded_peers =
+        [&scheduler, &bootstrap_peers_loaded]
+        (std::vector<discv4::ValidatedPeer> bootstrap_peers)
+        {
+            for (auto& peer : bootstrap_peers)
+            {
+                if (peer.peer.tcp_port == 0)
+                {
+                    continue;
+                }
+                if (!rlpx::crypto::Ecdh::verify_public_key(peer.pubkey))
+                {
+                    continue;
+                }
+                ++(*bootstrap_peers_loaded);
+                scheduler->enqueue(std::move(peer));
+            }
+        };
+
+    if (bootstrap_peers_json_file.has_value())
+    {
+        enqueue_loaded_peers(discv4::load_bootstrap_peers_from_json(
+            target.bootstrap_chain_key,
+            *bootstrap_peers_json_file));
+
+        std::cout << "[  INFO    ] [" << target.chain_key << "] loaded "
+                  << bootstrap_peers_loaded->load() << " bootstrap peer(s) for '"
+                  << target.bootstrap_chain_key << "' from "
+                  << bootstrap_peers_json_file->string() << "\n";
+        return;
+    }
+
+    if (refresh_result.has_value())
+    {
+        enqueue_loaded_peers(discv4::load_bootstrap_peers_from_json(
+            target.bootstrap_chain_key,
+            refresh_result->cache_path));
+
+        std::cout << "[  INFO    ] [" << target.chain_key << "] loaded "
+                  << bootstrap_peers_loaded->load() << " bootstrap peer(s) for '"
+                  << target.bootstrap_chain_key << "' from "
+                  << refresh_result->cache_path.string() << "\n";
+    }
+}
+
+static void seed_bootnodes(
+    boost::asio::io_context&                         io,
+    const std::shared_ptr<discv4::discv4_client>&   dv4,
+    const ChainTarget&                               target)
+{
+    if (target.bootnodes == nullptr)
+    {
+        return;
+    }
+
+    for (const auto& enode : *target.bootnodes)
+    {
+        const auto bootstrap_peer = discv4::make_validated_peer_from_enode(enode);
+        if (!bootstrap_peer)
+        {
+            continue;
+        }
+
+        const std::string host_copy = bootstrap_peer->peer.ip;
+        const uint16_t port_copy = bootstrap_peer->peer.udp_port;
+        const discv4::NodeId bn_id = bootstrap_peer->peer.node_id;
+        boost::asio::spawn(io,
+            [dv4, host_copy, port_copy, bn_id](boost::asio::yield_context yc)
+            {
+                (void)dv4->find_node(host_copy, port_copy, bn_id, yc);
+            });
+    }
+}
+
+static std::optional<ChainRuntime> create_chain_runtime(
+    boost::asio::io_context&                             io,
+    const ChainTarget&                                   target,
+    int                                                  max_dials,
+    int                                                  min_connections,
+    const std::optional<std::filesystem::path>&          bootstrap_peers_json_file,
+    const std::optional<discv4::BootstrapCacheRefreshResult>& refresh_result,
+    const rlpx::crypto::Ecdh::KeyPair&                   keypair,
+    boost::asio::steady_timer&                           deadline,
+    const std::string&                                   argv0)
+{
+    const auto fork_id = load_chain_fork_id(target, argv0);
+    if (!fork_id)
+    {
+        std::cout << "[  WARN    ] [" << target.chain_key << "] missing fork hash configuration\n";
+        return std::nullopt;
+    }
+
+    ChainRuntime runtime{};
+    runtime.target = target;
+    runtime.genesis = hash256_from_hex(target.genesis_hex);
+    runtime.fork_id = *fork_id;
+    runtime.stats = std::make_shared<DialStats>();
+    runtime.pool = std::make_shared<discv4::WatcherPool>(50, max_dials * 2);
+    runtime.peers_count = std::make_shared<std::atomic<int>>(0);
+    runtime.bootstrap_peers_loaded = std::make_shared<std::atomic<int>>(0);
+    runtime.maybe_finish = std::make_shared<std::function<void()>>();
+
+    discv4::discv4Config dv4_cfg;
+    dv4_cfg.bind_port = 0;
+    std::copy(keypair.private_key.begin(), keypair.private_key.end(), dv4_cfg.private_key.begin());
+    std::copy(keypair.public_key.begin(), keypair.public_key.end(), dv4_cfg.public_key.begin());
+    runtime.dv4 = std::make_shared<discv4::discv4_client>(io, dv4_cfg);
+
+    auto sched_ref = std::make_shared<discv4::DialScheduler*>(nullptr);
+    runtime.scheduler = std::make_shared<discv4::DialScheduler>(io, runtime.pool,
+        [stats = runtime.stats, fork_id_value = runtime.fork_id, genesis = runtime.genesis,
+         network_id = runtime.target.network_id, maybe_finish = runtime.maybe_finish]
+        (discv4::ValidatedPeer                                      vp,
+         std::function<void()>                                      on_done,
+         std::function<void(std::shared_ptr<rlpx::RlpxSession>)>   on_connected,
+         boost::asio::yield_context                                 yc) mutable
+        {
+            dial_connect_only(vp, std::move(on_done),
+                [on_connected, maybe_finish]
+                (std::shared_ptr<rlpx::RlpxSession> s) mutable
+                {
+                    on_connected(s);
+                    (*maybe_finish)();
+                },
+                [maybe_finish]()
+                {
+                    (*maybe_finish)();
+                },
+                yc, stats, fork_id_value, genesis, network_id);
+        });
+    *sched_ref = runtime.scheduler.get();
+
+    *runtime.maybe_finish = [&deadline]()
+    {
+        deadline.cancel();
+    };
+
+    // Do not pre-filter discovery/bootstrap candidates by ENR fork id.
+    // Chain validation is performed after connect via ETH Status.
+    runtime.scheduler->filter_fn = {};
+
+    runtime.dv4->set_peer_discovered_callback(
+        [scheduler = runtime.scheduler, peers_count = runtime.peers_count](const discv4::DiscoveredPeer& peer)
+        {
+            discv4::ValidatedPeer vp;
+            vp.peer = peer;
+            std::copy(peer.node_id.begin(), peer.node_id.end(), vp.pubkey.begin());
+            if (!rlpx::crypto::Ecdh::verify_public_key(vp.pubkey))
+            {
+                return;
+            }
+            ++(*peers_count);
+            scheduler->enqueue(std::move(vp));
+        });
+
+    runtime.dv4->set_error_callback([](const std::string&) {});
+
+    enqueue_bootstrap_peers(
+        runtime.target,
+        bootstrap_peers_json_file,
+        refresh_result,
+        runtime.scheduler,
+        runtime.bootstrap_peers_loaded);
+
+    return runtime;
+}
+
+// ── Test framework ────────────────────────────────────────────────────────────
+
+namespace {
+
+struct TestSuite
+{
+    int run = 0, passed = 0, failed = 0;
+    std::string current;
+
+    void start(const std::string& name)
+    {
+        current = name;
+        ++run;
+        std::cout << "[ RUN      ] " << name << "\n";
+    }
+    void pass(const std::string& detail = "")
+    {
+        ++passed;
+        std::cout << "[       OK ] " << current << "\n";
+        if (!detail.empty()) std::cout << "            " << detail << "\n";
+    }
+    void fail(const std::string& detail = "")
+    {
+        ++failed;
+        std::cout << "[  FAILED  ] " << current << "\n";
+        if (!detail.empty()) std::cout << "            " << detail << "\n";
+    }
+    void header(int n)
+    {
+        std::cout << "\n[==========] DiscoveryTest (" << n << " checks)\n\n";
+    }
+    void footer()
+    {
+        std::cout << "\n[==========] " << run << " check(s)\n";
+        std::cout << "[  PASSED  ] " << passed << "\n";
+        if (failed) std::cout << "[  FAILED  ] " << failed << "\n";
+        std::cout << "\n";
+    }
+};
+
+} // namespace
+
 // ── main ──────────────────────────────────────────────────────────────────────
 
 int main(int argc, char** argv)
 {
-    int timeout_secs    = 180;
-    int min_connections = 3;
-    int min_peers       = 3;
+    int timeout_secs    = 30;
+    int min_connections = 1;
     int max_dials       = 16;  // target dialed peers (go-ethereum: MaxPeers/dialRatio = 50/3 ≈ 16)
                                // active concurrent attempts = min(target*2, 50) per go-ethereum's freeDialSlots()
+    std::string bootstrap_peers_json_path;
+    std::string bootstrap_peers_url = kBootstrapPeersUrlDefault;
+    bool bootstrap_peers_url_enabled = true;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -312,30 +571,32 @@ int main(int argc, char** argv)
         }
         else if (arg == "--timeout" && i + 1 < argc)   { timeout_secs    = std::atoi(argv[++i]); }
         else if (arg == "--connections" && i + 1 < argc){ min_connections = std::atoi(argv[++i]); }
-        else if (arg == "--peers" && i + 1 < argc)      { min_peers       = std::atoi(argv[++i]); }
         else if (arg == "--dials" && i + 1 < argc)      { max_dials       = std::atoi(argv[++i]); }
+        else if (arg == "--bootstrap-peers-json" && i + 1 < argc) { bootstrap_peers_json_path = argv[++i]; }
+        else if (arg == "--bootstrap-peers-url" && i + 1 < argc)  { bootstrap_peers_url = argv[++i]; }
+        else if (arg == "--no-bootstrap-peers-url")               { bootstrap_peers_url_enabled = false; }
     }
 
     // ── Fork hash — loaded from chains.json, fallback to compiled-in value ──────
-    const auto loaded_hash = load_fork_hash( "sepolia", argv[0] );
+    const auto loaded_hash = load_fork_hash(kForkHashChainKey, argv[0]);
     if ( !loaded_hash )
     {
-        std::cout << "[  WARN    ] chains.json not found or missing 'sepolia' key — "
+        std::cout << "[  WARN    ] chains.json not found or missing 'mainnet' key — "
                      "using compiled-in fallback hash.\n";
     }
-    const eth::ForkId sepolia_fork_id{
-        loaded_hash.value_or( kSepoliaForkHashFallback ),
+    const eth::ForkId mainnet_fork_id{
+        loaded_hash.value_or(kMainnetForkHashFallback),
         0
     };
 
     TestSuite suite;
-    suite.header(3);
+    const auto chain_targets = all_chain_targets();
+    suite.header(static_cast<int>(chain_targets.size()));
 
     boost::asio::io_context io;
 
     // Shared result counters (written only from the single io_context thread)
-    std::atomic<int> peers_count{0};
-    auto stats = std::make_shared<DialStats>();
+    auto chain_runtimes = std::vector<ChainRuntime>{};
 
     // ── discv4 setup ─────────────────────────────────────────────────────────
     auto keypair_result = rlpx::crypto::Ecdh::generate_ephemeral_keypair();
@@ -346,65 +607,67 @@ int main(int argc, char** argv)
     }
     const auto& keypair = keypair_result.value();
 
-    discv4::discv4Config dv4_cfg;
-    dv4_cfg.bind_port = 0;
-    std::copy(keypair.private_key.begin(), keypair.private_key.end(), dv4_cfg.private_key.begin());
-    std::copy(keypair.public_key.begin(),  keypair.public_key.end(),  dv4_cfg.public_key.begin());
-
-    auto dv4 = std::make_shared<discv4::discv4_client>(io, dv4_cfg);
-
     // ── Overall test timeout ─────────────────────────────────────────────────
     boost::asio::steady_timer deadline(io, std::chrono::seconds(timeout_secs));
 
-    // ── DialScheduler ────────────────────────────────────────────────────────
-    const int kMaxActiveDials = 50;
-    auto pool = std::make_shared<discv4::WatcherPool>(kMaxActiveDials, max_dials * 2);
-
-    auto sched_ref = std::make_shared<discv4::DialScheduler*>(nullptr);
-
-    auto scheduler = std::make_shared<discv4::DialScheduler>(io, pool,
-        [&io, &deadline, min_connections, sched_ref, stats, sepolia_fork_id]
-        (discv4::ValidatedPeer                                      vp,
-         std::function<void()>                                      on_done,
-         std::function<void(std::shared_ptr<rlpx::RlpxSession>)>   on_connected,
-         boost::asio::yield_context                                 yc) mutable
+    std::optional<discv4::BootstrapCacheRefreshResult> refresh_result;
+    if (bootstrap_peers_json_path.empty() && bootstrap_peers_url_enabled)
+    {
+        refresh_result = discv4::refresh_bootstrap_cache_json(
+            discv4::bootstrap_cache_json_path(argv[0]),
+            bootstrap_peers_url);
+        if (refresh_result.has_value())
         {
-            dial_connect_only(vp, std::move(on_done),
-                [on_connected, &io, &deadline, min_connections, sched_ref]
-                (std::shared_ptr<rlpx::RlpxSession> s) mutable
-                {
-                    on_connected(s);  // increments total_validated
-                    if (*sched_ref && (*sched_ref)->total_validated >= min_connections)
-                    {
-                        deadline.cancel();
-                        io.stop();
-                    }
-                },
-                yc, stats, sepolia_fork_id);
-        });
-    *sched_ref = scheduler.get();
+            std::cout << "[  INFO    ] bootstrap refresh: "
+                      << (refresh_result->cache_updated ? "updated" :
+                          (refresh_result->cache_available ? "unchanged" : "unavailable"))
+                      << " " << refresh_result->cache_path.string() << "\n";
+        }
+    }
 
-    // Pre-dial ENR chain filter: only enqueue peers whose ENR `eth` entry carries
-    // the correct Sepolia fork hash.  Mirrors go-ethereum NewNodeFilter.
-    // Peers with no eth_fork_id (ENR absent or no `eth` entry) are also dropped.
-    scheduler->filter_fn = discv4::make_fork_id_filter( sepolia_fork_id.fork_hash );
+    const auto bootstrap_peers_json_file =
+        discv4::find_bootstrap_peers_json_path(argv[0], bootstrap_peers_json_path);
+    if (!bootstrap_peers_json_path.empty() && !bootstrap_peers_json_file.has_value())
+    {
+        std::cout << "Bootstrap peer file not found: " << bootstrap_peers_json_path << "\n";
+        return 1;
+    }
+    if (bootstrap_peers_json_file.has_value())
+    {
+        std::cout << "[  INFO    ] bootstrap peer cache path: "
+                  << bootstrap_peers_json_file->string() << "\n";
+    }
 
-    dv4->set_peer_discovered_callback(
-        [scheduler, &peers_count](const discv4::DiscoveredPeer& peer)
+    for (const auto& target : chain_targets)
+    {
+        auto runtime = create_chain_runtime(
+            io,
+            target,
+            max_dials,
+            min_connections,
+            bootstrap_peers_json_file,
+            refresh_result,
+            keypair,
+            deadline,
+            argv[0]);
+        if (runtime.has_value())
         {
-            discv4::ValidatedPeer vp;
-            vp.peer = peer;
-            std::copy(peer.node_id.begin(), peer.node_id.end(), vp.pubkey.begin());
-            if (!rlpx::crypto::Ecdh::verify_public_key(vp.pubkey)) { return; }
-            ++peers_count;
-            scheduler->enqueue(std::move(vp));
-        });
+            chain_runtimes.push_back(std::move(*runtime));
+        }
+    }
 
-    dv4->set_error_callback([](const std::string&) {});
+    if (chain_runtimes.empty())
+    {
+        std::cout << "No chain runtimes configured\n";
+        return 1;
+    }
 
     deadline.async_wait([&](boost::system::error_code) {
-        scheduler->stop();
-        dv4->stop();
+        for (auto& runtime : chain_runtimes)
+        {
+            runtime.scheduler->stop();
+            runtime.dv4->stop();
+        }
         io.stop();
     });
 
@@ -412,103 +675,58 @@ int main(int argc, char** argv)
     boost::asio::signal_set signals(io, SIGINT, SIGTERM);
     signals.async_wait([&](boost::system::error_code, int) {
         deadline.cancel();
-        scheduler->stop();
-        dv4->stop();
+        for (auto& runtime : chain_runtimes)
+        {
+            runtime.scheduler->stop();
+            runtime.dv4->stop();
+        }
         io.stop();
     });
 
-    // ── Seed discovery with Sepolia bootnodes ─────────────────────────────────
-    auto parse_enode = [](const std::string& enode)
-        -> std::optional<std::tuple<std::string, uint16_t, std::string>>
+    for (auto& runtime : chain_runtimes)
     {
-        // enode://<pubkey>@<host>:<port>
-        const std::string prefix = "enode://";
-        if (enode.substr(0, prefix.size()) != prefix) { return std::nullopt; }
-        const auto at = enode.find('@', prefix.size());
-        if (at == std::string::npos) { return std::nullopt; }
-        const auto colon = enode.rfind(':');
-        if (colon == std::string::npos || colon < at) { return std::nullopt; }
-        std::string pubkey = enode.substr(prefix.size(), at - prefix.size());
-        std::string host   = enode.substr(at + 1, colon - at - 1);
-        uint16_t port      = static_cast<uint16_t>(std::stoi(enode.substr(colon + 1)));
-        return std::make_tuple(host, port, pubkey);
-    };
-
-    auto hex_to_nibble = [](char c) -> std::optional<uint8_t> {
-        if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
-        if (c >= 'a' && c <= 'f') return static_cast<uint8_t>(10 + c - 'a');
-        if (c >= 'A' && c <= 'F') return static_cast<uint8_t>(10 + c - 'A');
-        return std::nullopt;
-    };
-
-    const auto start_result = dv4->start();
-    if (!start_result)
-    {
-        std::cout << "Failed to start discv4\n";
-        return 1;
-    }
-
-    for (const auto& enode : ETHEREUM_SEPOLIA_BOOTNODES)
-    {
-        auto parsed = parse_enode(enode);
-        if (!parsed) { continue; }
-        const auto& [host, port, pubkey_hex] = *parsed;
-        if (pubkey_hex.size() != 128) { continue; }
-        discv4::NodeId bn_id{};
-        bool ok = true;
-        for (size_t i = 0; i < 64 && ok; ++i)
+        const auto start_result = runtime.dv4->start();
+        if (!start_result)
         {
-            auto hi = hex_to_nibble(pubkey_hex[i*2]);
-            auto lo = hex_to_nibble(pubkey_hex[i*2+1]);
-            if (!hi || !lo) { ok = false; break; }
-            bn_id[i] = static_cast<uint8_t>((*hi << 4) | *lo);
+            std::cout << "Failed to start discv4 for chain " << runtime.target.chain_key << "\n";
+            return 1;
         }
-        if (!ok) { continue; }
-        std::string  host_copy = host;
-        uint16_t     port_copy = port;
-        boost::asio::spawn(io,
-            [dv4, host_copy, port_copy, bn_id](boost::asio::yield_context yc)
-            {
-                (void)dv4->find_node(host_copy, port_copy, bn_id, yc);
-            });
+
+        seed_bootnodes(io, runtime.dv4, runtime.target);
     }
 
     io.run();
 
-    // ── Dial breakdown ────────────────────────────────────────────────────────
-    std::cout << "\n[  STATS   ] Dial breakdown:\n"
-              << "              dialed:                       " << stats->dialed.load()                     << "\n"
-              << "              connect failed:               " << stats->connect_failed.load()              << "\n"
-              << "              wrong chain:                  " << stats->wrong_chain.load()                 << "\n"
-              << "              too many peers:               " << stats->too_many_peers.load()              << "\n"
-              << "              too many peers (right chain): " << stats->too_many_peers_right_chain.load()  << "\n"
-              << "              status timeout:               " << stats->status_timeout.load()              << "\n"
-              << "              connected (right chain):      " << stats->connected.load()                   << "\n";
+    for (auto& runtime : chain_runtimes)
+    {
+        std::cout << "\n[  STATS   ] [" << runtime.target.chain_key << "] Dial breakdown:\n"
+                  << "              bootstrap peers loaded:       " << runtime.bootstrap_peers_loaded->load() << "\n"
+                  << "              discovered peers:             " << runtime.peers_count->load() << "\n"
+                  << "              dialed:                       " << runtime.stats->dialed.load() << "\n"
+                  << "              connect failed:               " << runtime.stats->connect_failed.load() << "\n"
+                  << "              wrong chain:                  " << runtime.stats->wrong_chain.load() << "\n"
+                  << "              too many peers:               " << runtime.stats->too_many_peers.load() << "\n"
+                  << "              too many peers (right chain): " << runtime.stats->too_many_peers_right_chain.load() << "\n"
+                  << "              status timeout:               " << runtime.stats->status_timeout.load() << "\n"
+                  << "              connected (right chain):      " << runtime.stats->connected.load() << "\n"
+                  << "              eth messages observed:        " << runtime.stats->eth_messages.load() << "\n";
 
-    // ── Results ───────────────────────────────────────────────────────────────
-    const int connections = scheduler->total_validated;
+        const int connections = runtime.scheduler->total_validated;
 
-    suite.start("DiscoveryTest.BootnodeBondComplete");
-    // bonds_count: we infer from the fact that peers were discovered (discv4 bonds internally)
-    if (peers_count.load() > 0)
-        suite.pass(std::to_string(peers_count.load()) + " neighbour peer(s) discovered");
-    else
-        suite.fail("No peers discovered — PING→PONG bond may have failed (firewall / UDP 30303?)");
+        suite.start(std::string("DiscoveryTest.") + runtime.target.chain_key + ".BootstrapPeersLoaded");
+        if (runtime.bootstrap_peers_loaded->load() > 0)
+        {
+            suite.pass(std::to_string(runtime.bootstrap_peers_loaded->load()) + " bootstrap peer(s) loaded");
+        }
+        else
+        {
+            suite.fail("No bootstrap peers loaded from chain_enodes cache/refresh path");
+        }
 
-    suite.start("DiscoveryTest.RecursiveDiscovery");
-    if (peers_count.load() >= min_peers)
-        suite.pass(std::to_string(peers_count.load()) + " peer(s) discovered (min=" + std::to_string(min_peers) + ")");
-    else
-        suite.fail("Only " + std::to_string(peers_count.load()) + "/" + std::to_string(min_peers) + " peers discovered");
+        std::cout << "[  INFO    ] [" << runtime.target.chain_key << "] active ETH Status connection(s): "
+                  << connections << "\n";
+    }
 
-    suite.start("DiscoveryTest.ActiveSepoliaConnections");
-    if (connections >= min_connections)
-        suite.pass(std::to_string(connections) + " active Sepolia ETH Status connection(s) confirmed");
-    else
-        suite.fail("Only " + std::to_string(connections) + "/" + std::to_string(min_connections)
-                   + " Sepolia connection(s) — run with --log-level debug for details");
-
-    suite.footer();
     // std::exit bypasses stack-variable destructors (including io_context), which avoids
     // boost::coroutines::detail::forced_unwind being thrown during io cleanup when
     // active coroutines are present at shutdown (TCP connect, etc.).

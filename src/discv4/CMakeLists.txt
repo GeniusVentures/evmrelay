@@ -1,5 +1,6 @@
 # Define the static library target
 add_library(discv4 OBJECT
+        ${CMAKE_CURRENT_LIST_DIR}/bootstrap_peers.cpp
         ${CMAKE_CURRENT_LIST_DIR}/packet_factory.cpp
         ${CMAKE_CURRENT_LIST_DIR}/discv4_packet.cpp
         ${CMAKE_CURRENT_LIST_DIR}/discv4_ping.cpp
@@ -12,6 +13,10 @@ add_library(discv4 OBJECT
 
 # Link public dependencies
 target_link_libraries(discv4 PUBLIC
+        OpenSSL::SSL
+        OpenSSL::Crypto
+        Boost::json
+        ZLIB::ZLIB
         libsecp256k1::secp256k1
         spdlog::spdlog
         fmt::fmt

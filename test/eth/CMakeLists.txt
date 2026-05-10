@@ -17,6 +17,14 @@ target_link_libraries(eth_handshake_test
     evmrelay
 )
 
+# ETH handshake guard tests
+addtest(eth_handshake_guard_test
+    eth_handshake_guard_test.cpp
+)
+target_link_libraries(eth_handshake_guard_test
+    evmrelay
+)
+
 # ETH objects tests
 addtest(eth_objects_test
     eth_objects_test.cpp
@@ -89,4 +97,26 @@ target_link_libraries(gnus_contracts_test
     evmrelay
 )
 
+# ETH peer session tests
+addtest(eth_peer_session_test
+    eth_peer_session_test.cpp
+)
+target_link_libraries(eth_peer_session_test
+    evmrelay
+)
 
+# ETH watch runner tests
+addtest(eth_watch_runner_test
+    eth_watch_runner_test.cpp
+)
+target_link_libraries(eth_watch_runner_test
+    evmrelay
+)
+
+# ETH watch mock peer tests
+addtest(eth_watch_mock_peer_test
+    eth_watch_mock_peer_test.cpp
+)
+target_link_libraries(eth_watch_mock_peer_test
+    evmrelay
+)

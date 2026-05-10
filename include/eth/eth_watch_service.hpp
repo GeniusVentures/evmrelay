@@ -29,6 +29,21 @@ using DecodedEventCallback = std::function<void(
 /// @param payload     Encoded message bytes.
 using SendCallback = std::function<void(uint8_t eth_msg_id, std::vector<uint8_t> payload)>;
 
+/// @brief Snapshot of live EthWatchService traffic counters.
+struct WatchStatsSnapshot
+{
+    uint64_t eth_messages_seen = 0;
+    uint64_t new_block_hashes_messages = 0;
+    uint64_t new_block_messages = 0;
+    uint64_t receipts_messages = 0;
+    uint64_t decode_failures = 0;
+    uint64_t receipts_requested = 0;
+    uint64_t receipts_processed = 0;
+    uint64_t logs_seen = 0;
+    uint64_t matched_logs = 0;
+    uint64_t discarded_logs = 0;
+};
+
 /// @brief Ties together EventWatcher, ABI decoding, and eth message dispatch.
 ///
 /// Usage:
@@ -96,6 +111,12 @@ public:
         return watcher_.subscription_count();
     }
 
+    /// @brief Return a snapshot of the live watcher counters.
+    [[nodiscard]] WatchStatsSnapshot stats() const noexcept
+    {
+        return stats_;
+    }
+
     /// @brief Process a raw eth wire message payload.
     ///
     /// Call this from your generic_handler with the eth-layer message id
@@ -138,7 +159,7 @@ private:
     /// @brief Context stored for an outstanding GetReceipts request.
     struct PendingRequest
     {
-        Hash256  block_hash;
+        Hash256  block_hash{};
         uint64_t block_number = 0;
     };
 
@@ -156,6 +177,7 @@ private:
     std::vector<Subscription> subscriptions_;
     EventWatchId              next_id_     = 1;
     uint64_t                  next_req_id_ = 1;
+    WatchStatsSnapshot        stats_{};
 
     /// Outstanding GetReceipts requests keyed by request_id.
     std::map<uint64_t, PendingRequest> pending_requests_;

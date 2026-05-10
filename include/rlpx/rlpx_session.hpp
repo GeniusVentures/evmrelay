@@ -20,6 +20,7 @@ using HelloHandler = std::function<void(const protocol::HelloMessage&)>;
 using DisconnectHandler = std::function<void(const protocol::DisconnectMessage&)>;
 using PingHandler = std::function<void(const protocol::PingMessage&)>;
 using PongHandler = std::function<void(const protocol::PongMessage&)>;
+using EthMessageHandler = std::function<void(uint8_t, const ByteBuffer&)>;
 
 // Session creation parameters for outbound connections
 struct SessionConnectParams {
@@ -79,6 +80,15 @@ public:
     [[nodiscard]] VoidResult
     post_message(framing::Message message) noexcept;
 
+    /// @brief Receive message with timeout during protocol startup handshakes.
+    /// @param timeout Maximum time to wait for one inbound message.
+    /// @param yield Boost.Asio stackful coroutine context.
+    /// @return Next message on success, SessionError on timeout or transport failure.
+    [[nodiscard]] Result<framing::Message>
+    receive_message_with_timeout(
+        std::chrono::steady_clock::duration timeout,
+        boost::asio::yield_context          yield) noexcept;
+
     /// @brief Receive message (stackful coroutine pull model).
     /// @param yield Boost.Asio stackful coroutine context.
     /// @return Next message on success, SessionError on failure.
@@ -117,6 +127,10 @@ public:
         generic_handler_ = std::move(handler);
     }
 
+    void set_eth_message_handler(EthMessageHandler handler) noexcept {
+        eth_message_handler_ = std::move(handler);
+    }
+
     // State queries
     [[nodiscard]] SessionState state() const noexcept {
         return state_.load(std::memory_order_acquire);
@@ -137,6 +151,33 @@ public:
     {
         return negotiated_eth_version_;
     }
+
+    /// @brief Return the negotiated ETH subprotocol message-id base offset.
+    /// @return Wire-level ETH base offset when a common ETH capability was negotiated; 0 otherwise.
+    [[nodiscard]] uint8_t negotiated_eth_offset() const noexcept
+    {
+        return negotiated_eth_offset_;
+    }
+
+    /// @brief Test helper that selects the highest supported ETH version from capabilities.
+    /// @param capabilities Peer HELLO capabilities.
+    /// @return Highest supported ETH version, or 0 if none.
+    [[nodiscard]] static uint8_t negotiate_eth_version_for_test(
+        const std::vector<protocol::Capability>& capabilities) noexcept;
+
+    /// @brief Test helper that computes the negotiated ETH wire offset from capabilities.
+    /// @param capabilities Peer HELLO capabilities.
+    /// @return ETH wire offset, or 0 if no ETH capability was negotiated.
+    [[nodiscard]] static uint8_t negotiate_eth_offset_for_test(
+        const std::vector<protocol::Capability>& capabilities) noexcept;
+
+    /// @brief Test helper that normalizes a wire-level ETH message id using the negotiated offset.
+    /// @param wire_message_id Wire-level RLPx message id.
+    /// @param negotiated_eth_offset Negotiated ETH subprotocol offset.
+    /// @return ETH-local message id when the wire id belongs to ETH; std::nullopt otherwise.
+    [[nodiscard]] static std::optional<uint8_t> normalize_eth_message_id_for_test(
+        uint8_t wire_message_id,
+        uint8_t negotiated_eth_offset) noexcept;
 
     // Access to cipher secrets if needed (grouped values)
     [[nodiscard]] const auth::FrameSecrets& cipher_secrets() const noexcept;
@@ -170,6 +211,7 @@ private:
     // Peer metadata - stored as member for const reference access
     PeerInfo peer_info_;
     uint8_t negotiated_eth_version_{0U};
+    uint8_t negotiated_eth_offset_{0U};
     bool is_initiator_;
 
     // Message channels (lock-free, hidden Boost types)
@@ -183,6 +225,7 @@ private:
     PingHandler ping_handler_;
     PongHandler pong_handler_;
     MessageHandler generic_handler_;
+    EthMessageHandler eth_message_handler_;
 };
 
 } // namespace rlpx

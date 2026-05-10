@@ -26,6 +26,41 @@ using tcp = asio::ip::tcp;
 
 namespace {
 
+inline constexpr uint8_t kBaseProtocolLength = 16U;
+inline constexpr uint8_t kUnknownProtocolLength = 1U;
+inline constexpr uint8_t kSnapProtocolLength = 8U;
+
+Result<framing::Message> receive_stream_message_with_timeout(
+    framing::MessageStream&      stream,
+    asio::any_io_executor       executor,
+    asio::yield_context         yield) noexcept
+{
+    std::shared_ptr<boost::system::error_code> timer_error = std::make_shared<boost::system::error_code>();
+    auto timer = std::make_shared<asio::steady_timer>(executor, kProtocolHandshakeTimeout);
+    timer->async_wait([&stream, timer_error](const boost::system::error_code& ec)
+    {
+        *timer_error = ec;
+        if (!ec)
+        {
+            stream.close();
+        }
+    });
+
+    auto message_result = stream.receive_message(yield);
+    timer->cancel();
+
+    if (!message_result)
+    {
+        if (*timer_error != asio::error::operation_aborted)
+        {
+            return SessionError::kHandshakeFailed;
+        }
+        return message_result.error();
+    }
+
+    return message_result;
+}
+
 uint8_t negotiate_eth_version(const std::vector<protocol::Capability>& capabilities) noexcept
 {
     uint8_t negotiated_version = 0U;
@@ -46,6 +81,78 @@ uint8_t negotiate_eth_version(const std::vector<protocol::Capability>& capabilit
     }
 
     return negotiated_version;
+}
+
+uint8_t capability_wire_length(const protocol::Capability& capability) noexcept
+{
+    if (capability.name == "eth")
+    {
+        if (capability.version == eth::kEthProtocolVersion69)
+        {
+            return 18U;
+        }
+        if (capability.version >= eth::kEthProtocolVersion66 &&
+            capability.version <= eth::kEthProtocolVersion68)
+        {
+            return 17U;
+        }
+        return 0U;
+    }
+
+    if (capability.name == "snap")
+    {
+        return kSnapProtocolLength;
+    }
+
+    return kUnknownProtocolLength;
+}
+
+bool capability_less(const protocol::Capability& lhs, const protocol::Capability& rhs) noexcept
+{
+    if (lhs.name != rhs.name)
+    {
+        return lhs.name < rhs.name;
+    }
+    return lhs.version < rhs.version;
+}
+
+uint8_t negotiate_eth_offset(const std::vector<protocol::Capability>& capabilities) noexcept
+{
+    std::vector<protocol::Capability> sorted_capabilities = capabilities;
+    std::sort(sorted_capabilities.begin(), sorted_capabilities.end(), capability_less);
+
+    uint8_t offset = kBaseProtocolLength;
+    std::optional<protocol::Capability> matched_eth;
+    uint8_t matched_eth_offset = 0U;
+
+    for (const auto& capability : sorted_capabilities)
+    {
+        const uint8_t length = capability_wire_length(capability);
+        if (length == 0U)
+        {
+            continue;
+        }
+
+        if (capability.name == "eth")
+        {
+            if (!matched_eth.has_value() || capability.version > matched_eth->version)
+            {
+                if (matched_eth.has_value())
+                {
+                    offset = static_cast<uint8_t>(offset - capability_wire_length(*matched_eth));
+                }
+                matched_eth = capability;
+                matched_eth_offset = offset;
+                offset = static_cast<uint8_t>(offset + length);
+                continue;
+            }
+            continue;
+        }
+
+        offset = static_cast<uint8_t>(offset + length);
+    }
+
+    return matched_eth.has_value() ? matched_eth_offset : 0U;
 }
 
 } // namespace
@@ -107,32 +214,69 @@ RlpxSession::~RlpxSession() {
 
 // Move operations - need special handling for atomic
 RlpxSession::RlpxSession(RlpxSession&& other) noexcept
-    : state_(other.state_.load(std::memory_order_acquire))
-    , stream_(std::move(other.stream_))
+    : stream_(std::move(other.stream_))
     , peer_info_(std::move(other.peer_info_))
     , negotiated_eth_version_(other.negotiated_eth_version_)
+    , negotiated_eth_offset_(other.negotiated_eth_offset_)
     , is_initiator_(other.is_initiator_)
     , send_channel_(std::move(other.send_channel_))
     , recv_channel_(std::move(other.recv_channel_))
-{
+    , hello_handler_(std::move(other.hello_handler_))
+    , disconnect_handler_(std::move(other.disconnect_handler_))
+    , ping_handler_(std::move(other.ping_handler_))
+    , pong_handler_(std::move(other.pong_handler_))
+    , generic_handler_(std::move(other.generic_handler_)) {
+    state_.store(other.state_.load(std::memory_order_acquire), std::memory_order_release);
 }
 
 RlpxSession& RlpxSession::operator=(RlpxSession&& other) noexcept {
     if (this != &other) {
-        state_.store(other.state_.load(std::memory_order_acquire), std::memory_order_release);
         stream_ = std::move(other.stream_);
         peer_info_ = std::move(other.peer_info_);
         negotiated_eth_version_ = other.negotiated_eth_version_;
+        negotiated_eth_offset_ = other.negotiated_eth_offset_;
         is_initiator_ = other.is_initiator_;
         send_channel_ = std::move(other.send_channel_);
         recv_channel_ = std::move(other.recv_channel_);
+        hello_handler_ = std::move(other.hello_handler_);
+        disconnect_handler_ = std::move(other.disconnect_handler_);
+        ping_handler_ = std::move(other.ping_handler_);
+        pong_handler_ = std::move(other.pong_handler_);
+        generic_handler_ = std::move(other.generic_handler_);
+        state_.store(other.state_.load(std::memory_order_acquire), std::memory_order_release);
     }
     return *this;
+}
+
+uint8_t RlpxSession::negotiate_eth_version_for_test(
+    const std::vector<protocol::Capability>& capabilities) noexcept
+{
+    return negotiate_eth_version(capabilities);
+}
+
+uint8_t RlpxSession::negotiate_eth_offset_for_test(
+    const std::vector<protocol::Capability>& capabilities) noexcept
+{
+    return negotiate_eth_offset(capabilities);
+}
+
+std::optional<uint8_t> RlpxSession::normalize_eth_message_id_for_test(
+    uint8_t wire_message_id,
+    uint8_t negotiated_eth_offset) noexcept
+{
+    if (negotiated_eth_offset == 0U || wire_message_id < negotiated_eth_offset)
+    {
+        return std::nullopt;
+    }
+
+    return static_cast<uint8_t>(wire_message_id - negotiated_eth_offset);
 }
 
 // Factory for outbound connections
 Result<std::shared_ptr<RlpxSession>>
 RlpxSession::connect(const SessionConnectParams& params, asio::yield_context yield) noexcept {
+    static auto log = rlp::base::createLogger("rlpx.session");
+
     // Step 1: Establish TCP connection with timeout
     auto executor = yield.get_executor();
 
@@ -160,6 +304,7 @@ RlpxSession::connect(const SessionConnectParams& params, asio::yield_context yie
     if (!hs_result) {
         return hs_result.error();
     }
+    SPDLOG_LOGGER_INFO(log, "connect: auth handshake completed");
     auto& hs = hs_result.value();
 
     // Step 3: Build MessageStream with derived frame secrets
@@ -185,6 +330,8 @@ RlpxSession::connect(const SessionConnectParams& params, asio::yield_context yie
         std::move(peer_info),
         true  // is_initiator
     ));
+
+    SPDLOG_LOGGER_INFO(log, "connect: session created, sending local HELLO");
 
     // Step 5: Send our HELLO (initiator sends first)
     protocol::HelloMessage hello;
@@ -215,13 +362,20 @@ RlpxSession::connect(const SessionConnectParams& params, asio::yield_context yie
     if (!send_result) {
         return send_result.error();
     }
+    SPDLOG_LOGGER_INFO(log, "connect: local HELLO sent");
 
     // Step 6: Receive peer HELLO
-    auto recv_result = session->stream_->receive_message(yield);
+    SPDLOG_LOGGER_INFO(log, "connect: waiting for peer HELLO");
+    auto recv_result = receive_stream_message_with_timeout(*session->stream_, executor, yield);
     if (!recv_result) {
+        SPDLOG_LOGGER_INFO(log, "connect: peer HELLO receive failed with error {}",
+                           static_cast<int>(recv_result.error()));
         return recv_result.error();
     }
     auto& peer_msg = recv_result.value();
+    SPDLOG_LOGGER_INFO(log, "connect: first peer message id=0x{:02x} payload_size={}",
+                       peer_msg.id,
+                       peer_msg.payload.size());
     {
         static auto log = rlp::base::createLogger("rlpx.session");
         SPDLOG_LOGGER_DEBUG(log, "connect: first message from peer, id=0x{:02x} payload_size={}", peer_msg.id, peer_msg.payload.size());
@@ -233,6 +387,11 @@ RlpxSession::connect(const SessionConnectParams& params, asio::yield_context yie
             session->peer_info_.client_id     = peer_hello.value().client_id;
             session->peer_info_.listen_port   = peer_hello.value().listen_port;
             session->negotiated_eth_version_  = negotiate_eth_version(peer_hello.value().capabilities);
+            session->negotiated_eth_offset_   = negotiate_eth_offset(peer_hello.value().capabilities);
+            SPDLOG_LOGGER_INFO(log, "connect: peer HELLO decoded client='{}' p2p_version={} caps={}",
+                               peer_hello.value().client_id,
+                               static_cast<int>(peer_hello.value().protocol_version),
+                               peer_hello.value().capabilities.size());
             static auto log = rlp::base::createLogger("rlpx.session");
             SPDLOG_LOGGER_DEBUG(log, "connect: peer HELLO ok, client='{}' port={} caps={}",
                 peer_hello.value().client_id,
@@ -240,10 +399,14 @@ RlpxSession::connect(const SessionConnectParams& params, asio::yield_context yie
                 peer_hello.value().capabilities.size());
             SPDLOG_LOGGER_DEBUG(log, "connect: negotiated eth version={}",
                 static_cast<int>(session->negotiated_eth_version_));
+            SPDLOG_LOGGER_DEBUG(log, "connect: negotiated eth offset=0x{:02x}",
+                session->negotiated_eth_offset_);
 
             // RLPx spec: enable Snappy compression if both sides advertise p2p version >= 5.
             if (peer_hello.value().protocol_version >= kProtocolVersion) {
                 session->stream_->enable_compression();
+                SPDLOG_LOGGER_INFO(log, "connect: Snappy enabled for peer p2p version {}",
+                                   static_cast<int>(peer_hello.value().protocol_version));
                 SPDLOG_LOGGER_DEBUG(log, "connect: Snappy compression enabled (peer p2p v{})",
                     peer_hello.value().protocol_version);
             }
@@ -254,20 +417,25 @@ RlpxSession::connect(const SessionConnectParams& params, asio::yield_context yie
         } else {
             static auto log = rlp::base::createLogger("rlpx.session");
             SPDLOG_LOGGER_WARN(log, "connect: peer HELLO decode failed, payload_size={}", peer_msg.payload.size());
+            return SessionError::kHandshakeFailed;
         }
     } else if (peer_msg.id == kDisconnectMessageId) {
         static auto log = rlp::base::createLogger("rlpx.session");
         auto disc = protocol::DisconnectMessage::decode(peer_msg.payload);
+        SPDLOG_LOGGER_INFO(log, "connect: peer sent Disconnect before HELLO");
         SPDLOG_LOGGER_DEBUG(log, "connect: peer sent Disconnect before HELLO, reason={}",
             disc ? static_cast<int>(disc.value().reason) : -1);
         return SessionError::kHandshakeFailed;
     } else {
         static auto log = rlp::base::createLogger("rlpx.session");
+        SPDLOG_LOGGER_INFO(log, "connect: unexpected first peer message id=0x{:02x}", peer_msg.id);
         SPDLOG_LOGGER_WARN(log, "connect: expected HELLO (0x00) but got id=0x{:02x}", peer_msg.id);
+        return SessionError::kHandshakeFailed;
     }
 
     // Step 7: Activate session and start I/O loops
     session->state_.store(SessionState::kActive, std::memory_order_release);
+    SPDLOG_LOGGER_INFO(log, "connect: session activated, starting I/O loops");
 
     asio::spawn(
         executor,
@@ -313,6 +481,48 @@ VoidResult RlpxSession::post_message(framing::Message message) noexcept {
 }
 
 // Receive message
+Result<framing::Message>
+RlpxSession::receive_message_with_timeout(
+    std::chrono::steady_clock::duration timeout,
+    asio::yield_context                 yield) noexcept
+{
+    auto current_state = state();
+
+    if (current_state != SessionState::kActive)
+    {
+        if (current_state == SessionState::kClosed || current_state == SessionState::kError)
+        {
+            return SessionError::kConnectionFailed;
+        }
+        return SessionError::kNotConnected;
+    }
+
+    asio::steady_timer timer(yield.get_executor());
+    timer.expires_after(timeout);
+
+    for (;;)
+    {
+        auto msg = recv_channel_->try_pop();
+        if (msg)
+        {
+            timer.cancel();
+            return std::move(*msg);
+        }
+
+        boost::system::error_code ec;
+        timer.async_wait(asio::redirect_error(yield, ec));
+        if (ec == asio::error::operation_aborted)
+        {
+            continue;
+        }
+        if (ec)
+        {
+            return SessionError::kConnectionFailed;
+        }
+        return SessionError::kHandshakeFailed;
+    }
+}
+
 Result<framing::Message>
 RlpxSession::receive_message(asio::yield_context yield) noexcept {
     auto current_state = state();
@@ -503,6 +713,14 @@ void RlpxSession::route_message(const protocol::Message& msg) noexcept {
             break;
 
         default:
+            if (eth_message_handler_) {
+                const uint8_t negotiated_eth_offset = negotiated_eth_offset_;
+                const auto eth_message_id = normalize_eth_message_id_for_test(msg.id, negotiated_eth_offset);
+                if (eth_message_id.has_value()) {
+                    eth_message_handler_(*eth_message_id, msg.payload);
+                    return;
+                }
+            }
             // Unknown message type - call generic handler if set
             if (generic_handler_) {
                 generic_handler_(msg);

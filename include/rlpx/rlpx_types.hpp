@@ -134,6 +134,7 @@ inline constexpr uint8_t kProtocolVersion = 5;
 
 // Timing constants
 inline constexpr auto kTcpConnectionTimeout  = std::chrono::seconds(10);
+inline constexpr auto kProtocolHandshakeTimeout = std::chrono::seconds(5);
 inline constexpr auto kSendLoopPollInterval  = std::chrono::milliseconds(10);
 
 // Conversion functions for interop with rlp library

@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <rlpx/protocol/messages.hpp>
+#include <rlpx/rlpx_session.hpp>
 
 using namespace rlpx;
 using namespace rlpx::protocol;
@@ -189,4 +190,20 @@ TEST_F(MessageRoutingTest, MultipleMessageTypes) {
     EXPECT_TRUE(messages[0].is_hello());
     EXPECT_TRUE(messages[1].is_ping());
     EXPECT_TRUE(messages[2].is_disconnect());
+}
+
+TEST_F(MessageRoutingTest, NegotiatedEthWireIdNormalizesToLocalEthId) {
+    const auto local_eth_id = rlpx::RlpxSession::normalize_eth_message_id_for_test(0x11, 0x10);
+    ASSERT_TRUE(local_eth_id.has_value());
+    EXPECT_EQ(*local_eth_id, 0x01);
+}
+
+TEST_F(MessageRoutingTest, WireIdBelowNegotiatedEthOffsetDoesNotNormalize) {
+    const auto local_eth_id = rlpx::RlpxSession::normalize_eth_message_id_for_test(0x03, 0x10);
+    EXPECT_FALSE(local_eth_id.has_value());
+}
+
+TEST_F(MessageRoutingTest, ZeroNegotiatedEthOffsetDoesNotNormalize) {
+    const auto local_eth_id = rlpx::RlpxSession::normalize_eth_message_id_for_test(0x10, 0x00);
+    EXPECT_FALSE(local_eth_id.has_value());
 }

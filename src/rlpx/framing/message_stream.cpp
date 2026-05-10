@@ -4,6 +4,7 @@
 #include <rlpx/framing/message_stream.hpp>
 #include <rlp/rlp_encoder.hpp>
 #include <rlp/rlp_decoder.hpp>
+#include <base/rlp-logger.hpp>
 #include <snappy.h>
 #include <cstring>
 
@@ -87,20 +88,26 @@ VoidResult MessageStream::send_message(const MessageSendParams& params, asio::yi
 }
 
 Result<Message> MessageStream::receive_message(asio::yield_context yield) noexcept {
+    static auto log = rlp::base::createLogger("rlpx.frame");
+
     // Receive encrypted frame from socket
     auto frame_result = receive_frame(yield);
     if ( !frame_result || frame_result.value().empty() ) {
+        SPDLOG_LOGGER_INFO(log, "receive_message: receive_frame failed or returned empty payload");
         return SessionError::kInvalidMessage;
     }
         
         const auto& frame_data = frame_result.value();
-        
+        SPDLOG_LOGGER_INFO(log, "receive_message: frame decrypted payload_size={}", frame_data.size());
+
         // go-ethereum wire format: RLP-encoded uint(code) || payload (maybe Snappy-compressed)
         // Mirrors go-ethereum p2p/rlpx/rlpx.go: Read() = rlp.SplitUint64 + snappy.Decode(rest)
         rlp::RlpDecoder id_decoder(detail::to_rlp_view(frame_data));
 
         uint64_t msg_id = 0;
         if (!id_decoder.read(msg_id)) {
+            SPDLOG_LOGGER_INFO(log, "receive_message: failed to decode message id from frame payload_size={}",
+                               frame_data.size());
             return SessionError::kInvalidMessage;
         }
 
@@ -114,6 +121,8 @@ Result<Message> MessageStream::receive_message(asio::yield_context yield) noexce
                     reinterpret_cast<const char*>(remaining_view.data()),
                     remaining_view.size(),
                     &uncompressed_len)) {
+                SPDLOG_LOGGER_INFO(log, "receive_message: failed to read Snappy length for msg_id=0x{:02x}",
+                                   static_cast<uint8_t>(msg_id));
                 return SessionError::kInvalidMessage;
             }
             payload.resize(uncompressed_len);
@@ -121,12 +130,18 @@ Result<Message> MessageStream::receive_message(asio::yield_context yield) noexce
                     reinterpret_cast<const char*>(remaining_view.data()),
                     remaining_view.size(),
                     reinterpret_cast<char*>(payload.data()))) {
+                SPDLOG_LOGGER_INFO(log, "receive_message: Snappy decode failed for msg_id=0x{:02x}",
+                                   static_cast<uint8_t>(msg_id));
                 return SessionError::kInvalidMessage;
             }
         } else if (!remaining_view.empty()) {
             payload.assign(remaining_view.begin(), remaining_view.end());
         }
 
+        SPDLOG_LOGGER_INFO(log, "receive_message: decoded msg_id=0x{:02x} payload_size={} compression_enabled={}",
+                           static_cast<uint8_t>(msg_id),
+                           payload.size(),
+                           compression_enabled_);
         Message msg{static_cast<uint8_t>(msg_id), std::move(payload)};
         return msg;
 }

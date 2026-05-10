@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <rlpx/protocol/messages.hpp>
+#include <rlpx/rlpx_session.hpp>
 
 using namespace rlpx;
 using namespace rlpx::protocol;
@@ -174,3 +175,36 @@ TEST_F(RlpxSessionTest, HelloMessageLargeClientId) {
     EXPECT_EQ(decoded.value().client_id.size(), 256);
 }
 
+TEST_F(RlpxSessionTest, NormalizeEthMessageIdRejectsIdsBelowOffset) {
+    const auto normalized = RlpxSession::normalize_eth_message_id_for_test(0x0f, 0x10);
+
+    EXPECT_FALSE(normalized.has_value());
+}
+
+TEST_F(RlpxSessionTest, NormalizeEthMessageIdReturnsRelativeIdAtOrAboveOffset) {
+    const auto normalized = RlpxSession::normalize_eth_message_id_for_test(0x12, 0x10);
+
+    ASSERT_TRUE(normalized.has_value());
+    EXPECT_EQ(*normalized, 0x02);
+}
+
+TEST_F(RlpxSessionTest, NegotiateEthVersionReturnsHighestSupportedVersion) {
+    std::vector<Capability> capabilities = {
+        Capability{"snap", 1},
+        Capability{"eth", 66},
+        Capability{"eth", 69},
+        Capability{"eth", 67}
+    };
+
+    EXPECT_EQ(RlpxSession::negotiate_eth_version_for_test(capabilities), 69U);
+}
+
+TEST_F(RlpxSessionTest, NegotiateEthOffsetAccountsForSortedCapabilities) {
+    std::vector<Capability> capabilities = {
+        Capability{"snap", 1},
+        Capability{"eth", 66},
+        Capability{"eth", 69}
+    };
+
+    EXPECT_EQ(RlpxSession::negotiate_eth_offset_for_test(capabilities), 16U);
+}

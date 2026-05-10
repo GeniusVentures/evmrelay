@@ -91,7 +91,8 @@ public:
     /// @param logs          Logs to process.
     /// @param block_number  Block number the logs belong to.
     /// @param block_hash    Hash of that block.
-    void process_block_logs(
+    /// @return Number of logs that matched at least one subscription.
+    size_t process_block_logs(
         const std::vector<codec::LogEntry>& logs,
         uint64_t                            block_number,
         const codec::Hash256&               block_hash) noexcept;
@@ -101,7 +102,8 @@ public:
     /// @param tx_hash       Hash of the transaction that generated the receipt.
     /// @param block_number  Block number the receipt belongs to.
     /// @param block_hash    Hash of that block.
-    void process_receipt(
+    /// @return Number of logs that matched at least one subscription.
+    size_t process_receipt(
         const codec::Receipt& receipt,
         const codec::Hash256& tx_hash,
         uint64_t              block_number,

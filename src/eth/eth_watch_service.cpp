@@ -107,6 +107,7 @@ void EthWatchService::request_receipts(const Hash256& block_hash,
     }
 
     pending_requests_[req_id] = {block_hash, block_number};
+    ++stats_.receipts_requested;
     send_cb_(protocol::kGetReceiptsMessageId, std::move(encoded.value()));
 }
 
@@ -116,11 +117,15 @@ void EthWatchService::request_receipts(const Hash256& block_hash,
 
 void EthWatchService::process_message(uint8_t eth_msg_id, rlp::ByteView payload) noexcept
 {
+    ++stats_.eth_messages_seen;
+
     if (eth_msg_id == protocol::kNewBlockHashesMessageId)
     {
+        ++stats_.new_block_hashes_messages;
         auto decoded = protocol::decode_new_block_hashes(payload);
         if (!decoded)
         {
+            ++stats_.decode_failures;
             return;
         }
         for (const auto& entry : decoded.value().entries)
@@ -132,9 +137,11 @@ void EthWatchService::process_message(uint8_t eth_msg_id, rlp::ByteView payload)
 
     if (eth_msg_id == protocol::kNewBlockMessageId)
     {
+        ++stats_.new_block_messages;
         auto decoded = protocol::decode_new_block(payload);
         if (!decoded)
         {
+            ++stats_.decode_failures;
             return;
         }
         // NewBlock does not include a block hash on the wire — use zeroed sentinel.
@@ -146,9 +153,11 @@ void EthWatchService::process_message(uint8_t eth_msg_id, rlp::ByteView payload)
 
     if (eth_msg_id == protocol::kReceiptsMessageId)
     {
+        ++stats_.receipts_messages;
         auto decoded = protocol::decode_receipts(payload);
         if (!decoded)
         {
+            ++stats_.decode_failures;
             return;
         }
 
@@ -195,9 +204,14 @@ void EthWatchService::process_receipts(
     const Hash256&                     block_hash) noexcept
 {
     const size_t count = std::min(receipts.size(), tx_hashes.size());
+    stats_.receipts_processed += static_cast<uint64_t>(count);
     for (size_t i = 0; i < count; ++i)
     {
-        watcher_.process_receipt(receipts[i], tx_hashes[i], block_number, block_hash);
+        const size_t log_count = receipts[i].logs.size();
+        const size_t matched = watcher_.process_receipt(receipts[i], tx_hashes[i], block_number, block_hash);
+        stats_.logs_seen += static_cast<uint64_t>(log_count);
+        stats_.matched_logs += static_cast<uint64_t>(matched);
+        stats_.discarded_logs += static_cast<uint64_t>(log_count - matched);
     }
 }
 

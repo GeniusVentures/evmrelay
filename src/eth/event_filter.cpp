@@ -77,18 +77,21 @@ void EventWatcher::unwatch(WatchId id) noexcept
         subscriptions_.end());
 }
 
-void EventWatcher::process_block_logs(
+size_t EventWatcher::process_block_logs(
     const std::vector<codec::LogEntry>& logs,
     uint64_t                            block_number,
     const codec::Hash256&               block_hash) noexcept
 {
+    size_t matched_logs = 0;
     uint32_t log_index = 0;
     for (const auto& log : logs)
     {
+        bool matched = false;
         for (const auto& sub : subscriptions_)
         {
             if (sub.filter.matches(log, block_number))
             {
+                matched = true;
                 MatchedEvent event{
                     log,
                     block_number,
@@ -99,23 +102,31 @@ void EventWatcher::process_block_logs(
                 sub.callback(event);
             }
         }
+        if (matched)
+        {
+            ++matched_logs;
+        }
         ++log_index;
     }
+    return matched_logs;
 }
 
-void EventWatcher::process_receipt(
+size_t EventWatcher::process_receipt(
     const codec::Receipt& receipt,
     const codec::Hash256& tx_hash,
     uint64_t              block_number,
     const codec::Hash256& block_hash) noexcept
 {
+    size_t matched_logs = 0;
     uint32_t log_index = 0;
     for (const auto& log : receipt.logs)
     {
+        bool matched = false;
         for (const auto& sub : subscriptions_)
         {
             if (sub.filter.matches(log, block_number))
             {
+                matched = true;
                 MatchedEvent event{
                     log,
                     block_number,
@@ -126,8 +137,13 @@ void EventWatcher::process_receipt(
                 sub.callback(event);
             }
         }
+        if (matched)
+        {
+            ++matched_logs;
+        }
         ++log_index;
     }
+    return matched_logs;
 }
 
 } // namespace eth

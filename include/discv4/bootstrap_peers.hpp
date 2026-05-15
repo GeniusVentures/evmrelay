@@ -1,7 +1,8 @@
-// Copyright 2025 GeniusVentures
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Genius Ventures, Inc.
+// SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_DISCV4_BOOTSTRAP_PEERS_HPP
+#define EVMRELAY_INCLUDE_DISCV4_BOOTSTRAP_PEERS_HPP
 
 #include <discv4/chain_peers.hpp>
 
@@ -46,3 +47,5 @@ BootstrapSignatureVerificationResult verify_bootstrap_json_signature(
     const std::string& expected_signer_address);
 
 } // namespace discv4
+
+#endif // EVMRELAY_INCLUDE_DISCV4_BOOTSTRAP_PEERS_HPP

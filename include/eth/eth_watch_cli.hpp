@@ -1,7 +1,8 @@
-// Copyright 2025 GeniusVentures
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Genius Ventures, Inc.
+// SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_ETH_ETH_WATCH_CLI_HPP
+#define EVMRELAY_INCLUDE_ETH_ETH_WATCH_CLI_HPP
 
 #include <base/parse_utility.hpp>
 #include <eth/abi_decoder.hpp>
@@ -155,3 +156,5 @@ inline EventRegistry& event_registry()
 }
 
 } // namespace eth::cli
+
+#endif // EVMRELAY_INCLUDE_ETH_ETH_WATCH_CLI_HPP

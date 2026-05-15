@@ -1,5 +1,5 @@
-// Copyright 2025 GeniusVentures
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Genius Ventures, Inc.
+// SPDX-License-Identifier: MIT
 
 /// @file enr_client_test.cpp
 /// @brief Unit tests for discv4_client::request_enr() send and reply-matching paths.

@@ -1,5 +1,5 @@
-// Copyright 2025 GeniusVentures
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Genius Ventures, Inc.
+// SPDX-License-Identifier: MIT
 
 /// @file discv5_client_test.cpp
 /// @brief Unit tests for discv5_client lifecycle and receive-loop behaviour.

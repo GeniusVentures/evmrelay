@@ -1,5 +1,5 @@
-// Copyright 2025 GeniusVentures
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Genius Ventures, Inc.
+// SPDX-License-Identifier: MIT
 
 /// @file dial_filter_test.cpp
 /// @brief Unit tests for DialScheduler::filter_fn and make_fork_id_filter().

@@ -1,7 +1,8 @@
-// Copyright 2025 GeniusVentures
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Genius Ventures, Inc.
+// SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_BASE_PARSE_UTILITY_HPP
+#define EVMRELAY_INCLUDE_BASE_PARSE_UTILITY_HPP
 
 #include <array>
 #include <cstdint>
@@ -45,3 +46,5 @@ template <size_t N>
 }
 
 } // namespace rlp::base::parse
+
+#endif // EVMRELAY_INCLUDE_BASE_PARSE_UTILITY_HPP

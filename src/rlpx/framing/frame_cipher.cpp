@@ -1,5 +1,5 @@
-// Copyright 2025 GeniusVentures
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Genius Ventures, Inc.
+// SPDX-License-Identifier: MIT
 //
 // go-ethereum rlpx frame cipher — exact port of sessionState / hashMAC.
 // Reference: go-ethereum/p2p/rlpx/rlpx.go

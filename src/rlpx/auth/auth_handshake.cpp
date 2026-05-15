@@ -1,5 +1,5 @@
-// Copyright 2025 GeniusVentures
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Genius Ventures, Inc.
+// SPDX-License-Identifier: MIT
 
 #include <rlpx/auth/auth_handshake.hpp>
 #include <rlpx/auth/ecies_cipher.hpp>

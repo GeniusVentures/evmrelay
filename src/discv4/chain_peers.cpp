@@ -1,5 +1,5 @@
-// Copyright 2025 GeniusVentures
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Genius Ventures, Inc.
+// SPDX-License-Identifier: MIT
 
 #include <discv4/chain_peers.hpp>
 #include <discv4/discv4_packet.hpp>

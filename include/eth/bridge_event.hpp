@@ -1,7 +1,8 @@
-// Copyright 2025 GeniusVentures
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Genius Ventures, Inc.
+// SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_ETH_BRIDGE_EVENT_HPP
+#define EVMRELAY_INCLUDE_ETH_BRIDGE_EVENT_HPP
 
 #include <eth/eth_receipt_source.hpp>
 #include <set>
@@ -95,3 +96,5 @@ struct ReceiptLogVerificationResult
     const BridgeEventClaim&  claim) noexcept;
 
 } // namespace eth
+
+#endif // EVMRELAY_INCLUDE_ETH_BRIDGE_EVENT_HPP

@@ -1,5 +1,5 @@
-// Copyright 2025 GeniusVentures
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Genius Ventures, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef discv4_ERROR_HPP
 #define discv4_ERROR_HPP

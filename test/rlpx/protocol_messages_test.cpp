@@ -1,5 +1,5 @@
-// Copyright 2025 GeniusVentures
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Genius Ventures, Inc.
+// SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
 #include <rlpx/protocol/messages.hpp>

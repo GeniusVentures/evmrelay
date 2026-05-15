@@ -1,5 +1,5 @@
-// Copyright 2025 GeniusVentures
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Genius Ventures, Inc.
+// SPDX-License-Identifier: MIT
 
 /// @file gnus_contracts_test.cpp
 /// @brief Tests that EthWatchService correctly filters Transfer events for the

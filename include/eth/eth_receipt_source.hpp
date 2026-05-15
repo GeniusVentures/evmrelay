@@ -1,7 +1,8 @@
-// Copyright 2025 GeniusVentures
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Genius Ventures, Inc.
+// SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_ETH_ETH_RECEIPT_SOURCE_HPP
+#define EVMRELAY_INCLUDE_ETH_ETH_RECEIPT_SOURCE_HPP
 
 #include <eth/eth_watch_service.hpp>
 #include <functional>
@@ -85,3 +86,5 @@ private:
     std::optional<uint64_t> to_block   = std::nullopt);
 
 } // namespace eth
+
+#endif // EVMRELAY_INCLUDE_ETH_ETH_RECEIPT_SOURCE_HPP

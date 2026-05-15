@@ -1,5 +1,5 @@
-// Copyright 2025 GeniusVentures
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Genius Ventures, Inc.
+// SPDX-License-Identifier: MIT
 //
 // Validates derive_frame_secrets() against go-ethereum's known test vectors from
 // go-ethereum/p2p/rlpx/rlpx_test.go :: TestHandshakeForwardCompatibility

@@ -89,6 +89,14 @@ target_link_libraries(bridge_event_test
     evmrelay
 )
 
+# Chain finality policy tests
+addtest(finality_policy_test
+    finality_policy_test.cpp
+)
+target_link_libraries(finality_policy_test
+    evmrelay
+)
+
 # EthWatchCli tests
 addtest(eth_watch_cli_test
     eth_watch_cli_test.cpp

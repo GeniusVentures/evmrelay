@@ -77,12 +77,26 @@ ReceiptLogVerificationResult verify_receipt_log(
     {
         return {ReceiptLogVerificationError::kTxHashMismatch};
     }
-    if (claim.log_index >= receipt.receipt.logs.size())
+    size_t receipt_log_index = claim.log_index;
+    if (!receipt.log_indices.empty())
+    {
+        const auto it = std::find(
+            receipt.log_indices.begin(),
+            receipt.log_indices.end(),
+            claim.log_index);
+        if (it == receipt.log_indices.end())
+        {
+            return {ReceiptLogVerificationError::kLogIndexOutOfRange};
+        }
+        receipt_log_index = static_cast<size_t>(std::distance(receipt.log_indices.begin(), it));
+    }
+
+    if (receipt_log_index >= receipt.receipt.logs.size())
     {
         return {ReceiptLogVerificationError::kLogIndexOutOfRange};
     }
 
-    const auto& log = receipt.receipt.logs[claim.log_index];
+    const auto& log = receipt.receipt.logs[receipt_log_index];
     if (log.address != claim.bridge_contract)
     {
         return {ReceiptLogVerificationError::kContractMismatch};

@@ -107,7 +107,8 @@ public:
         const codec::Receipt& receipt,
         const codec::Hash256& tx_hash,
         uint64_t              block_number,
-        const codec::Hash256& block_hash) noexcept;
+        const codec::Hash256& block_hash,
+        uint32_t              first_log_index = 0) noexcept;
 
     /// @brief Return the number of active subscriptions.
     [[nodiscard]] size_t subscription_count() const noexcept
@@ -128,4 +129,3 @@ private:
 };
 
 } // namespace eth
-

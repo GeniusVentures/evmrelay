@@ -125,3 +125,15 @@ TEST(BridgeEventTest, VerifyReceiptLogRejectsOutOfRangeLogIndex)
     EXPECT_FALSE(result);
     EXPECT_EQ(result.error, eth::ReceiptLogVerificationError::kLogIndexOutOfRange);
 }
+
+TEST(BridgeEventTest, VerifyReceiptLogUsesExplicitRpcLogIndexes)
+{
+    auto claim = make_claim();
+    claim.log_index = 12;
+
+    auto receipt = make_matching_receipt(claim);
+    receipt.log_indices = {12};
+
+    const auto result = eth::verify_receipt_log(receipt, claim);
+    EXPECT_TRUE(result);
+}

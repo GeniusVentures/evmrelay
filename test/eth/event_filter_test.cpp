@@ -268,6 +268,33 @@ TEST(EventWatcherTest, ProcessReceiptDispatchesWithTxHash)
     EXPECT_EQ(received[0].log_index,    0u);
 }
 
+TEST(EventWatcherTest, ProcessReceiptUsesBlockLogIndexOffset)
+{
+    const auto addr = make_filled<eth::codec::Address>(0xAA);
+    const auto topic = make_filled<eth::codec::Hash256>(0x01);
+    const auto tx_hash = make_filled<eth::codec::Hash256>(0xDD);
+    const auto blk_hash = make_filled<eth::codec::Hash256>(0xEE);
+
+    eth::codec::Receipt receipt;
+    receipt.logs = {
+        make_log(addr, {topic}),
+        make_log(addr, {topic}),
+    };
+
+    eth::EventFilter filter;
+    filter.addresses.push_back(addr);
+
+    std::vector<eth::MatchedEvent> received;
+    eth::EventWatcher watcher;
+    watcher.watch(filter, [&](const eth::MatchedEvent& ev) { received.push_back(ev); });
+
+    watcher.process_receipt(receipt, tx_hash, 9000, blk_hash, 5);
+
+    ASSERT_EQ(received.size(), 2u);
+    EXPECT_EQ(received[0].log_index, 5u);
+    EXPECT_EQ(received[1].log_index, 6u);
+}
+
 TEST(EventWatcherTest, MultipleSubscribersReceiveIndependently)
 {
     eth::EventWatcher watcher;
@@ -317,4 +344,3 @@ TEST(EventWatcherTest, TopicSignatureMatching)
 
     EXPECT_EQ(matches, 2);
 }
-

@@ -235,6 +235,45 @@ TEST(EthWatchServiceTest, AnyContractWatchWithZeroAddress)
     EXPECT_EQ(call_count, 2);
 }
 
+TEST(EthWatchServiceTest, ProcessReceiptsUsesBlockWideLogIndexes)
+{
+    const auto token = make_filled<eth::codec::Address>(0xCC);
+    const auto from  = make_filled<eth::codec::Address>(0x11);
+    const auto to    = make_filled<eth::codec::Address>(0x22);
+
+    std::vector<eth::abi::AbiParam> params = {
+        {eth::abi::AbiParamKind::kAddress, true,  "from"},
+        {eth::abi::AbiParamKind::kAddress, true,  "to"},
+        {eth::abi::AbiParamKind::kUint,    false, "value"},
+    };
+
+    std::vector<uint32_t> log_indexes;
+    eth::EthWatchService svc;
+    svc.watch_event(token, "Transfer(address,address,uint256)", params,
+        [&log_indexes](const eth::MatchedEvent& ev, const std::vector<eth::abi::AbiValue>&)
+        {
+            log_indexes.push_back(ev.log_index);
+        });
+
+    eth::codec::Receipt first;
+    first.status = true;
+    first.logs.push_back(make_transfer_log(token, from, to, 1ULL));
+
+    eth::codec::Receipt second;
+    second.status = true;
+    second.logs.push_back(make_transfer_log(token, from, to, 2ULL));
+    second.logs.push_back(make_transfer_log(token, from, to, 3ULL));
+
+    const auto tx_a = make_filled<eth::Hash256>(0xA0);
+    const auto tx_b = make_filled<eth::Hash256>(0xB0);
+    svc.process_receipts({first, second}, {tx_a, tx_b}, 1, {});
+
+    ASSERT_EQ(log_indexes.size(), 3U);
+    EXPECT_EQ(log_indexes[0], 0U);
+    EXPECT_EQ(log_indexes[1], 1U);
+    EXPECT_EQ(log_indexes[2], 2U);
+}
+
 // ============================================================================
 // EthWatchService — process_message (wire message dispatch)
 // ============================================================================
@@ -443,4 +482,3 @@ TEST(EthWatchServiceTest, BlockRangeFilteringRespected)
 
     EXPECT_EQ(call_count, 1);
 }
-

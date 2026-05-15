@@ -115,10 +115,11 @@ size_t EventWatcher::process_receipt(
     const codec::Receipt& receipt,
     const codec::Hash256& tx_hash,
     uint64_t              block_number,
-    const codec::Hash256& block_hash) noexcept
+    const codec::Hash256& block_hash,
+    uint32_t              first_log_index) noexcept
 {
     size_t matched_logs = 0;
-    uint32_t log_index = 0;
+    uint32_t log_index = first_log_index;
     for (const auto& log : receipt.logs)
     {
         bool matched = false;
@@ -147,4 +148,3 @@ size_t EventWatcher::process_receipt(
 }
 
 } // namespace eth
-

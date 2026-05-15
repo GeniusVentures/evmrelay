@@ -14,10 +14,11 @@ namespace eth {
 /// @brief Receipt plus the chain context needed to verify and deduplicate a log.
 struct ReceiptResult
 {
-    codec::Receipt receipt;
-    Hash256        tx_hash{};
-    uint64_t       block_number = 0;
-    Hash256        block_hash{};
+    codec::Receipt       receipt;
+    Hash256              tx_hash{};
+    uint64_t             block_number = 0;
+    Hash256              block_hash{};
+    std::vector<uint32_t> log_indices;
 };
 
 /// @brief Receipts from one block, normalized across RLPx, RPC, or certified sources.

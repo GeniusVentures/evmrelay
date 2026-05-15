@@ -97,6 +97,14 @@ target_link_libraries(finality_policy_test
     evmrelay
 )
 
+# JSON-RPC encoding/parsing tests
+addtest(json_rpc_test
+    json_rpc_test.cpp
+)
+target_link_libraries(json_rpc_test
+    evmrelay
+)
+
 # EthWatchCli tests
 addtest(eth_watch_cli_test
     eth_watch_cli_test.cpp

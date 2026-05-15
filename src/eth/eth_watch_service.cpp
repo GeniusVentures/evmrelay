@@ -205,13 +205,20 @@ void EthWatchService::process_receipts(
 {
     const size_t count = std::min(receipts.size(), tx_hashes.size());
     stats_.receipts_processed += static_cast<uint64_t>(count);
+    uint32_t next_log_index = 0;
     for (size_t i = 0; i < count; ++i)
     {
         const size_t log_count = receipts[i].logs.size();
-        const size_t matched = watcher_.process_receipt(receipts[i], tx_hashes[i], block_number, block_hash);
+        const size_t matched = watcher_.process_receipt(
+            receipts[i],
+            tx_hashes[i],
+            block_number,
+            block_hash,
+            next_log_index);
         stats_.logs_seen += static_cast<uint64_t>(log_count);
         stats_.matched_logs += static_cast<uint64_t>(matched);
         stats_.discarded_logs += static_cast<uint64_t>(log_count - matched);
+        next_log_index += static_cast<uint32_t>(log_count);
     }
 }
 
@@ -228,5 +235,4 @@ void EthWatchService::process_new_block(const NewBlockMessage& msg,
 }
 
 } // namespace eth
-
 

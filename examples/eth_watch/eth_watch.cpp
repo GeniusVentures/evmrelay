@@ -3,62 +3,43 @@
 
 #include <array>
 #include <atomic>
-#include <deque>
 #include <functional>
-#include <iomanip>
 #include <boost/asio/spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/signal_set.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/redirect_error.hpp>
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/ssl/context.hpp>
-#include <boost/asio/ssl/stream.hpp>
-#include <boost/beast/core.hpp>
-#include <boost/beast/http.hpp>
-#include <boost/beast/version.hpp>
-#include <boost/beast/ssl.hpp>
-#include <charconv>
 #include <chrono>
-#include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
+
+#include <csignal>
 
 #include <eth/messages.hpp>
 #include <eth/eth_peer_session.hpp>
 #include <eth/eth_watch_runner.hpp>
 #include <eth/eth_watch_service.hpp>
 #include <eth/eth_watch_cli.hpp>
-#include <discv4/bootstrap_peers.hpp>
-#include <discv4/bootnodes.hpp>
-#include <discv4/bootnodes_test.hpp>
+#include <discv4/chain_peers.hpp>
 #include <discv4/dial_scheduler.hpp>
-#include <discv4/discv4_client.hpp>
 #include <rlpx/crypto/ecdh.hpp>
 #include <rlpx/rlpx_error.hpp>
 #include <rlpx/rlpx_session.hpp>
+#include <base/parse_utility.hpp>
 #include <base/rlp-logger.hpp>
 #include <eth/eth_handshake_guard.hpp>
 #include <eth/eth_handshake.hpp>
 
 namespace {
 
-inline constexpr const char* kDefaultBootstrapPeersUrl = "https://enodes.gnus.ai/chain_enodes.json.gz";
+inline constexpr const char* kDefaultChainPeersUrl = "https://enodes.gnus.ai/chain_enodes.json.gz";
 inline constexpr auto kWatchStatsInterval = std::chrono::seconds(4);
 
-namespace http = boost::beast::http;
-
-enum class DiscoveryMode {
-    kDiscv4,
-    kDiscv5,
-};
 
 struct Config {
     std::string host;
@@ -68,84 +49,18 @@ struct Config {
     std::vector<eth::cli::WatchSpec> watch_specs;
     bool prefer_direct_enode = false;
     bool fork_id_overridden = false;
+    bool use_chain_peer_cache = false;
     // ETH Status fields — must match the target chain
     uint64_t network_id = 1;
     eth::Hash256 genesis_hash{};
     eth::ForkId  fork_id{};   ///< EIP-2124 fork identifier; set per chain
-    // Discovery — set when --chain is used; empty when explicit host/port/pubkey given
-    std::vector<std::string> bootnode_enodes;
-    DiscoveryMode discovery_mode = DiscoveryMode::kDiscv4;
+    std::vector<discv4::ValidatedPeer> chain_peers;
 };
-
-std::optional<uint8_t> hex_to_nibble(char c) {
-    if (c >= '0' && c <= '9') {
-        return static_cast<uint8_t>(c - '0');
-    }
-    if (c >= 'a' && c <= 'f') {
-        return static_cast<uint8_t>(10 + (c - 'a'));
-    }
-    if (c >= 'A' && c <= 'F') {
-        return static_cast<uint8_t>(10 + (c - 'A'));
-    }
-    return std::nullopt;
-}
-
-template <size_t N>
-bool parse_hex_array(std::string_view hex, std::array<uint8_t, N>& out) {
-    if (hex.size() != N * 2) {
-        return false;
-    }
-    for (size_t i = 0; i < N; ++i) {
-        const size_t index = i * 2;
-        auto hi = hex_to_nibble(hex.at(index));
-        auto lo = hex_to_nibble(hex.at(index + 1));
-        if (!hi || !lo) {
-            return false;
-        }
-        out.at(i) = static_cast<uint8_t>(((*hi) << 4) | *lo);
-    }
-    return true;
-}
-
-std::optional<uint16_t> parse_uint16(std::string_view value) {
-    uint16_t out = 0;
-    auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), out);
-    if (ec != std::errc{} || ptr != value.data() + value.size()) {
-        return std::nullopt;
-    }
-    return out;
-}
-
-std::optional<uint8_t> parse_uint8(std::string_view value) {
-    unsigned int out = 0;
-    auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), out);
-    if (ec != std::errc{} || ptr != value.data() + value.size() || out > 0xFFU) {
-        return std::nullopt;
-    }
-    return static_cast<uint8_t>(out);
-}
-
-std::optional<uint64_t> parse_uint64(std::string_view value)
-{
-    uint64_t out = 0;
-    auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), out);
-    if (ec != std::errc{} || ptr != value.data() + value.size())
-    {
-        return std::nullopt;
-    }
-    return out;
-}
 
 std::optional<eth::Hash256> parse_hash256(std::string_view value)
 {
-    constexpr std::string_view kHexPrefix = "0x";
-    if (value.substr(0, kHexPrefix.size()) == kHexPrefix)
-    {
-        value.remove_prefix(kHexPrefix.size());
-    }
-
     eth::Hash256 hash{};
-    if (!parse_hex_array(value, hash))
+    if (!rlp::base::parse::hex_array(value, hash))
     {
         return std::nullopt;
     }
@@ -179,7 +94,7 @@ std::optional<Config> parse_enode(std::string_view enode) {
 
     const auto host_view = host_port.substr(0, colon_pos);
     const auto port_view = host_port.substr(colon_pos + 1);
-    auto port_value = parse_uint16(port_view);
+    auto port_value = rlp::base::parse::uint16_decimal(port_view);
     if (!port_value) {
         return std::nullopt;
     }
@@ -191,95 +106,55 @@ std::optional<Config> parse_enode(std::string_view enode) {
     return cfg;
 }
 
-// ---------------------------------------------------------------------------
-// Chain registry — all per-chain constants in one place.
-// Adding a new chain requires only one new entry in the map inside
-// load_chain_config below.
-// ---------------------------------------------------------------------------
-
-/// @brief Decode a 64-char hex literal into a Hash256.
-static eth::Hash256 hash_from_hex(const char* hex)
+void apply_chain_peer_config(
+    Config&                              config,
+    const discv4::ChainPeerConfig& chain_peer_config) noexcept
 {
-    eth::Hash256 out{};
-    for (size_t i = 0; i < 32; ++i)
+    config.canonical_chain_name = chain_peer_config.canonical_name;
+    config.network_id = chain_peer_config.network_id;
+    config.genesis_hash = chain_peer_config.genesis_hash;
+    config.chain_peers = chain_peer_config.nodes;
+    config.use_chain_peer_cache = !config.chain_peers.empty();
+    if (!config.fork_id_overridden && chain_peer_config.fork_id.has_value())
     {
-        const auto hi = hex_to_nibble(hex[(i * 2)]).value_or(0);
-        const auto lo = hex_to_nibble(hex[(i * 2) + 1]).value_or(0);
-        out.at(i) = static_cast<uint8_t>((hi << 4) | lo);
+        config.fork_id = *chain_peer_config.fork_id;
     }
-    return out;
 }
 
-struct ChainEntry
+std::optional<discv4::ChainPeerConfig> load_chain_peer_config(
+    const std::string&                   chain_name,
+    const std::string&                   argv0,
+    const std::string&                   chain_peers_json_path,
+    const std::string&                   chain_peers_url,
+    bool                                 chain_peers_url_enabled)
 {
-    const char*                     canonical_name;
-    const std::vector<std::string>* bootnodes;
-    uint64_t                        network_id;
-    const char*                     genesis_hex;
-    eth::ForkId                     fork_id{};  ///< EIP-2124; computed from genesis + past forks
-};
-
-/// @brief Look up chain config by name
-std::optional<Config> load_chain_config(std::string_view chain_name)
-{
-    // Fork-ids are pre-computed via EIP-2124 for each chain as of early 2025.
-    // Sepolia: MergeNetsplit@1735371, Shanghai@1677557088, Cancun@1706655072, Prague@1741159776
-    static const eth::ForkId kSepoliaForkId{ { 0xed, 0x88, 0xb5, 0xfd }, 0 };
-
-    static const std::unordered_map<std::string, ChainEntry> kChains = {
-        { "mainnet",      ChainEntry{ "ethereum-mainnet", &ETHEREUM_MAINNET_BOOTNODES, 1,        "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3" } },
-        { "ethereum-mainnet", ChainEntry{ "ethereum-mainnet", &ETHEREUM_MAINNET_BOOTNODES, 1,        "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3" } },
-        { "sepolia",      ChainEntry{ "ethereum-sepolia", &ETHEREUM_SEPOLIA_BOOTNODES, 11155111, "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9", kSepoliaForkId } },
-        { "ethereum-sepolia", ChainEntry{ "ethereum-sepolia", &ETHEREUM_SEPOLIA_BOOTNODES, 11155111, "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9", kSepoliaForkId } },
-        { "holesky",      ChainEntry{ "ethereum-holesky", &ETHEREUM_HOLESKY_BOOTNODES, 17000,    "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4" } },
-        { "ethereum-holesky", ChainEntry{ "ethereum-holesky", &ETHEREUM_HOLESKY_BOOTNODES, 17000,    "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4" } },
-        { "polygon",      ChainEntry{ "polygon-mainnet", &POLYGON_MAINNET_BOOTNODES,  137,      "a9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b" } },
-        { "polygon-mainnet", ChainEntry{ "polygon-mainnet", &POLYGON_MAINNET_BOOTNODES,  137,      "a9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b" } },
-        { "polygon-amoy", ChainEntry{ "polygon-amoy", &POLYGON_AMOY_BOOTNODES,     80002,    "0000000000000000000000000000000000000000000000000000000000000000" } },
-        { "bsc",          ChainEntry{ "bnb-smart-chain", &BSC_MAINNET_BOOTNODES,      56,       "0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b" } },
-        { "bnb-smart-chain", ChainEntry{ "bnb-smart-chain", &BSC_MAINNET_BOOTNODES,      56,       "0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b" } },
-        { "bsc-testnet",  ChainEntry{ "bnb-smart-chain-testnet", &BSC_TESTNET_STATICNODES,    97,       "6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe10" } },
-        { "bnb-smart-chain-testnet", ChainEntry{ "bnb-smart-chain-testnet", &BSC_TESTNET_STATICNODES,    97,       "6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe10" } },
-        { "base",         ChainEntry{ "base-mainnet", &BASE_MAINNET_BOOTNODES,     8453,     "f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd" } },
-        { "base-mainnet", ChainEntry{ "base-mainnet", &BASE_MAINNET_BOOTNODES,     8453,     "f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd" } },
-        { "base-sepolia", ChainEntry{ "base-sepolia", &BASE_SEPOLIA_BOOTNODES,     84532,    "0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4" } },
-    };
-
-    const auto it = kChains.find(std::string(chain_name));
-    if (it == kChains.end())
+    std::optional<discv4::ChainPeerCacheRefreshResult> refresh_result;
+    if (chain_peers_json_path.empty() && chain_peers_url_enabled)
     {
-        return std::nullopt;
+        refresh_result = discv4::refresh_chain_peer_cache_json(
+            discv4::chain_peer_cache_json_path(argv0),
+            chain_peers_url);
     }
 
-    const auto& entry = it->second;
-    if (entry.bootnodes->empty())
+    const auto chain_peers_json_file = discv4::find_chain_peer_cache_json_path(argv0, chain_peers_json_path);
+    if (chain_peers_json_file.has_value())
     {
-        static auto log = rlp::base::createLogger("eth_watch");
-        SPDLOG_LOGGER_ERROR(log, "No bootnodes configured for chain: {}", chain_name);
-        return std::nullopt;
+        return discv4::load_chain_peer_config_from_json(chain_name, *chain_peers_json_file);
     }
-
-    Config cfg;
-    cfg.canonical_chain_name = entry.canonical_name;
-    cfg.network_id   = entry.network_id;
-    cfg.genesis_hash = hash_from_hex(entry.genesis_hex);
-    cfg.fork_id      = entry.fork_id;
-    // Store all bootnodes for discv4 — host/port/pubkey filled in after discovery
-    for (const auto& bn : *entry.bootnodes)
+    if (refresh_result.has_value() && refresh_result->cache_available)
     {
-        cfg.bootnode_enodes.push_back(bn);
+        return discv4::load_chain_peer_config_from_json(chain_name, refresh_result->cache_path);
     }
-    return cfg;
+    return std::nullopt;
 }
 
-
-void print_usage(const char* exe) {
+void print_usage(const char* exe)
+{
     std::cout << "Usage:\n"
               << "  " << exe << " <host> <port> <peer_pubkey_hex>\n"
               << "  " << exe << " --chain <chain_name>\n"
-              << "  " << exe << " --chain <chain_name> --discovery-mode <discv4|discv5>\n"
-              << "  " << exe << " --chain <chain_name> --bootstrap-peers-json <path>\n"
-              << "  " << exe << " --chain <chain_name> --bootstrap-peers-url <url>\n"
+              << "  " << exe << " --chain <chain_name> --chain-peers-json <path>\n"
+              << "  " << exe << " --chain <chain_name> --chain-peers-url <url>\n"
               << "  " << exe << " --chain <chain_name> --direct-enode <enode://...>\n"
               << "\nDirect mode overrides:\n"
               << "  --network-id <uint64>            Override ETH Status network id\n"
@@ -296,10 +171,10 @@ void print_usage(const char* exe) {
               << "  " << exe << " 127.0.0.1 30303 <pubkey> --network-id 1337 --genesis-hash 0xfa742c20043b1d8a13ea6421d85e9678429f9f50c2e25b2814c61f7444504fec --log-level debug\n"
               << "  " << exe << " --chain mainnet --watch-contract 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 --watch-event Transfer(address,address,uint256)\n"
               << "\nAvailable chains:\n"
-              << "  Ethereum: mainnet, sepolia, holesky, ethereum-mainnet, ethereum-sepolia, ethereum-holesky\n"
-              << "  Polygon:  polygon, polygon-amoy, polygon-mainnet\n"
-              << "  BSC:      bsc, bsc-testnet, bnb-smart-chain, bnb-smart-chain-testnet\n"
-              << "  Base:     base, base-sepolia, base-mainnet\n";
+              << "  ethereum-mainnet, ethereum-sepolia, ethereum-holesky\n"
+              << "  polygon-mainnet, polygon-amoy\n"
+              << "  bnb-smart-chain, bnb-smart-chain-testnet\n"
+              << "  base-mainnet, base-sepolia\n";
 }
 
 /// @brief Attempts an RLPx connection to a peer and runs the ETH watch loop.
@@ -312,11 +187,13 @@ void run_watch(std::string host,
                uint64_t network_id,
                eth::Hash256 genesis_hash,
                eth::ForkId fork_id,
-               std::vector<eth::cli::WatchSpec> watch_specs,
-               std::function<void()> on_done,
-               std::function<void(std::shared_ptr<rlpx::RlpxSession>)> on_connected,
+               const std::vector<eth::cli::WatchSpec>& watch_specs,
+               const std::function<void()>& on_done,
+               const std::function<void(std::shared_ptr<rlpx::RlpxSession>)>& on_connected,
                boost::asio::yield_context yield)
 {
+    (void)on_connected;
+
     static auto log = rlp::base::createLogger("eth_watch");
 
     SPDLOG_LOGGER_DEBUG(log, "run_watch: begin host={} port={} network_id={}", host, port, network_id);
@@ -651,18 +528,8 @@ void run_watch(std::string host,
 
 std::optional<eth::ForkId> parse_fork_id_hash(std::string_view value)
 {
-    constexpr std::string_view kHexPrefix = "0x";
-    if (value.substr(0, kHexPrefix.size()) == kHexPrefix)
-    {
-        value.remove_prefix(kHexPrefix.size());
-    }
-
     eth::ForkId forkId{};
-    if (value.size() != forkId.fork_hash.size() * 2)
-    {
-        return std::nullopt;
-    }
-    if (!parse_hex_array(value, forkId.fork_hash))
+    if (!rlp::base::parse::hex_array(value, forkId.fork_hash))
     {
         return std::nullopt;
     }
@@ -671,7 +538,7 @@ std::optional<eth::ForkId> parse_fork_id_hash(std::string_view value)
 
 std::optional<uint64_t> parse_fork_id_next(std::string_view value)
 {
-    return parse_uint64(value);
+    return rlp::base::parse::uint64_decimal(value);
 }
 
 } // namespace
@@ -708,9 +575,27 @@ int main(int argc, char** argv) {
         std::optional<Config> config;
         int next_arg = 1;
         std::string chain_name;
-        std::string bootstrap_peers_json_path;
-        std::string bootstrap_peers_url = kDefaultBootstrapPeersUrl;
-        bool bootstrap_peers_url_enabled = true;
+        std::string chain_peers_json_path;
+        std::string chain_peers_url = kDefaultChainPeersUrl;
+        bool chain_peers_url_enabled = true;
+
+        for (int i = 1; i < argc; ++i)
+        {
+            const std::string_view arg(argv[i]);
+            if ((arg == "--chain-peers-json" || arg == "--bootstrap-peers-json") && i + 1 < argc)
+            {
+                chain_peers_json_path = argv[++i];
+            }
+            else if ((arg == "--chain-peers-url" || arg == "--bootstrap-peers-url") && i + 1 < argc)
+            {
+                chain_peers_url = argv[++i];
+                chain_peers_url_enabled = true;
+            }
+            else if (arg == "--no-chain-peers-url" || arg == "--no-bootstrap-peers-url")
+            {
+                chain_peers_url_enabled = false;
+            }
+        }
 
         if (std::string_view(argv[next_arg]) == "--chain") {
             if (argc < 3) {
@@ -718,18 +603,27 @@ int main(int argc, char** argv) {
                 return 1;
             }
             const std::string selected_chain_name = argv[next_arg + 1];
-            config = load_chain_config(selected_chain_name);
-            if (!config) {
+            next_arg += 2;
+
+            const auto chain_peer_config = load_chain_peer_config(
+                selected_chain_name,
+                argv[0],
+                chain_peers_json_path,
+                chain_peers_url,
+                chain_peers_url_enabled);
+            if (!chain_peer_config.has_value())
+            {
                 std::cout << "Unknown or unconfigured chain: " << selected_chain_name << "\n"
-                          << "Available: mainnet, sepolia, holesky, ethereum-mainnet, ethereum-sepolia, ethereum-holesky, "
-                          << "polygon, polygon-mainnet, polygon-amoy, bsc, bsc-testnet, bnb-smart-chain, "
-                          << "bnb-smart-chain-testnet, base, base-mainnet, base-sepolia\n";
+                          << "Expected chain metadata in chain peer cache/file.\n";
                 return 1;
             }
+
+            Config cfg{};
+            apply_chain_peer_config(cfg, *chain_peer_config);
+            config = std::move(cfg);
             chain_name = config->canonical_chain_name;
-            next_arg += 2;
         } else if (argc >= 4) {
-            const auto port_value = parse_uint16(argv[next_arg + 1]);
+            const auto port_value = rlp::base::parse::uint16_decimal(argv[next_arg + 1]);
             if (!port_value) {
                 std::cout << "Invalid port value.\n";
                 return 1;
@@ -788,21 +682,6 @@ int main(int argc, char** argv) {
                     return 1;
                 }
                 next_arg += 2;
-            } else if (arg == "--discovery-mode") {
-                if (next_arg + 1 >= argc) {
-                    std::cout << "--discovery-mode requires a value (discv4|discv5).\n";
-                    return 1;
-                }
-                const std::string_view mode(argv[next_arg + 1]);
-                if (mode == "discv4") {
-                    config->discovery_mode = DiscoveryMode::kDiscv4;
-                } else if (mode == "discv5") {
-                    config->discovery_mode = DiscoveryMode::kDiscv5;
-                } else {
-                    std::cout << "Unknown discovery mode: " << mode << "\n";
-                    return 1;
-                }
-                next_arg += 2;
             } else if (arg == "--direct-enode") {
                 if (next_arg + 1 >= argc) {
                     std::cout << "--direct-enode requires an enode argument.\n";
@@ -817,14 +696,13 @@ int main(int argc, char** argv) {
                 config->port = direct_config->port;
                 config->peer_pubkey_hex = direct_config->peer_pubkey_hex;
                 config->prefer_direct_enode = true;
-                config->bootnode_enodes.clear();
                 next_arg += 2;
             } else if (arg == "--network-id") {
                 if (next_arg + 1 >= argc) {
                     std::cout << "--network-id requires an integer argument.\n";
                     return 1;
                 }
-                const auto network_id = parse_uint64(argv[next_arg + 1]);
+                const auto network_id = rlp::base::parse::uint64_decimal(argv[next_arg + 1]);
                 if (!network_id) {
                     std::cout << "Invalid network id.\n";
                     return 1;
@@ -861,7 +739,7 @@ int main(int argc, char** argv) {
                     std::cout << "--fork-id-next requires an integer argument.\n";
                     return 1;
                 }
-                const auto fork_next = parse_uint64(argv[next_arg + 1]);
+                const auto fork_next = rlp::base::parse::uint64_decimal(argv[next_arg + 1]);
                 if (!fork_next) {
                     std::cout << "Invalid fork id next value.\n";
                     return 1;
@@ -869,23 +747,23 @@ int main(int argc, char** argv) {
                 config->fork_id.next_fork = *fork_next;
                 config->fork_id_overridden = true;
                 next_arg += 2;
-            } else if (arg == "--bootstrap-peers-json") {
+            } else if (arg == "--chain-peers-json" || arg == "--bootstrap-peers-json") {
                 if (next_arg + 1 >= argc) {
-                    std::cout << "--bootstrap-peers-json requires a file path.\n";
+                    std::cout << arg << " requires a file path.\n";
                     return 1;
                 }
-                bootstrap_peers_json_path = argv[next_arg + 1];
+                chain_peers_json_path = argv[next_arg + 1];
                 next_arg += 2;
-            } else if (arg == "--bootstrap-peers-url") {
+            } else if (arg == "--chain-peers-url" || arg == "--bootstrap-peers-url") {
                 if (next_arg + 1 >= argc) {
-                    std::cout << "--bootstrap-peers-url requires a URL.\n";
+                    std::cout << arg << " requires a URL.\n";
                     return 1;
                 }
-                bootstrap_peers_url = argv[next_arg + 1];
-                bootstrap_peers_url_enabled = true;
+                chain_peers_url = argv[next_arg + 1];
+                chain_peers_url_enabled = true;
                 next_arg += 2;
-            } else if (arg == "--no-bootstrap-peers-url") {
-                bootstrap_peers_url_enabled = false;
+            } else if (arg == "--no-chain-peers-url" || arg == "--no-bootstrap-peers-url") {
+                chain_peers_url_enabled = false;
                 next_arg += 1;
             } else {
                 std::cout << "Unknown argument: " << arg << "\n";
@@ -906,38 +784,10 @@ int main(int argc, char** argv) {
             io.stop();
         });
 
-        // dv4 declared outside the if-block so it lives past io.run().
-        // If --chain mode is not used, this stays null (no-op).
-        std::shared_ptr<discv4::discv4_client> dv4;
-
-        if (!config->bootnode_enodes.empty() && !config->prefer_direct_enode)
+        if (config->use_chain_peer_cache && !config->prefer_direct_enode)
         {
-            if (config->discovery_mode == DiscoveryMode::kDiscv5)
-            {
-                std::cout << "--discovery-mode discv5 is not wired in eth_watch yet; use discv4 for now.\n";
-                return 1;
-            }
-
-            // --chain mode: use discv4 to find a real full node, then connect via RLPx
-            auto keypair_result = rlpx::crypto::Ecdh::generate_ephemeral_keypair();
-            if (!keypair_result)
-            {
-                std::cout << "Failed to generate keypair for discv4.\n";
-                return 1;
-            }
-            const auto& keypair = keypair_result.value();
-
-            discv4::discv4Config dv4_cfg;
-            dv4_cfg.bind_port = 0; // OS-assigned ephemeral port
-            std::copy(keypair.private_key.begin(), keypair.private_key.end(),
-                      dv4_cfg.private_key.begin());
-            std::copy(keypair.public_key.begin(), keypair.public_key.end(),
-                      dv4_cfg.public_key.begin());
-
-            dv4 = std::make_shared<discv4::discv4_client>(io, dv4_cfg);
-
             // Capture config values needed in the callback
-            const std::string bootstrap_chain_name = config->canonical_chain_name;
+            const std::string chain_peer_chain_name = config->canonical_chain_name;
             const uint64_t   network_id   = config->network_id;
             const auto       genesis_hash = config->genesis_hash;
             const auto       fork_id      = config->fork_id;
@@ -960,101 +810,21 @@ int main(int argc, char** argv) {
                               std::move(on_done), std::move(on_connected), yc);
                 });
 
-            dv4->set_peer_discovered_callback(
-                [scheduler](const discv4::DiscoveredPeer& peer)
-                {
-                    discv4::ValidatedPeer vp;
-                    vp.peer = peer;
-                    std::copy(peer.node_id.begin(), peer.node_id.end(), vp.pubkey.begin());
-                    if (!rlpx::crypto::Ecdh::verify_public_key(vp.pubkey))
-                    {
-                        return;
-                    }
-                    scheduler->enqueue(std::move(vp));
-                });
-
-            dv4->set_error_callback([](const std::string& err) {
-                std::cout << "discv4 error: " << err << "\n";
-            });
-
             static auto log = rlp::base::createLogger("eth_watch");
-            std::optional<discv4::BootstrapCacheRefreshResult> refresh_result;
-            if (bootstrap_peers_json_path.empty() && bootstrap_peers_url_enabled)
-            {
-                refresh_result = discv4::refresh_bootstrap_cache_json(
-                    discv4::bootstrap_cache_json_path(argv[0]),
-                    bootstrap_peers_url);
-                if (refresh_result.has_value())
-                {
-                    SPDLOG_LOGGER_INFO(log, "Remote bootstrap refresh for chain '{}' from {} => {} ({})",
-                                       bootstrap_chain_name,
-                                       bootstrap_peers_url,
-                                       refresh_result->cache_updated ? "updated" :
-                                           (refresh_result->cache_available ? "unchanged" : "unavailable"),
-                                       refresh_result->cache_path.string());
-                }
-            }
+            SPDLOG_LOGGER_INFO(log, "Dialing {} cached chain peers for chain '{}'",
+                               config->chain_peers.size(), chain_peer_chain_name);
 
-            const auto bootstrap_peers_json_file = discv4::find_bootstrap_peers_json_path(argv[0], bootstrap_peers_json_path);
-            if (bootstrap_peers_json_file.has_value())
+            for (const auto& peer : config->chain_peers)
             {
-                const auto bootstrap_peers = discv4::load_bootstrap_peers_from_json(bootstrap_chain_name, *bootstrap_peers_json_file);
-                SPDLOG_LOGGER_INFO(log, "Loaded {} local bootstrap peers for chain '{}' from {}",
-                                   bootstrap_peers.size(), bootstrap_chain_name, bootstrap_peers_json_file->string());
-                for (auto peer : bootstrap_peers)
-                {
-                    scheduler->enqueue(std::move(peer));
-                }
+                scheduler->enqueue(peer);
             }
-            else if (refresh_result.has_value())
-            {
-                const auto bootstrap_peers_remote = discv4::load_bootstrap_peers_from_json(
-                    bootstrap_chain_name,
-                    refresh_result->cache_path);
-                SPDLOG_LOGGER_INFO(log, "Loaded {} remote bootstrap peers for chain '{}' from {}",
-                                   bootstrap_peers_remote.size(), bootstrap_chain_name, bootstrap_peers_url);
-                for (auto peer : bootstrap_peers_remote)
-                {
-                    scheduler->enqueue(std::move(peer));
-                }
-            }
-
-            // Ping all bootnodes to seed discovery — wrap in void coroutine
-            // because ping() returns Result<pong> which has a deleted default ctor
-            for (const auto& enode : config->bootnode_enodes)
-            {
-                const auto bn = parse_enode(enode);
-                if (!bn)
-                {
-                    continue;
-                }
-                discv4::NodeId bn_id{};
-                if (!parse_hex_array(bn->peer_pubkey_hex, bn_id))
-                {
-                    continue;
-                }
-                boost::asio::spawn(io,
-                    [dv4, host = bn->host, port = bn->port, bn_id](boost::asio::yield_context yc)
-                    {
-                        // find_node internally calls ensure_bond (ping→pong) then sends FIND_NODE
-                        auto result = dv4->find_node(host, port, bn_id, yc);
-                        (void)result;
-                    });
-            }
-
-            const auto start_result = dv4->start();
-            if (!start_result)
-            {
-                std::cout << "Failed to start discv4.\n";
-                return 1;
-            }
-            std::cout << "Running discv4 peer discovery...\n";
+            std::cout << "Dialing cached chain peers...\n";
         }
         else
         {
             // Explicit host/port/pubkey mode — connect directly
             rlpx::PublicKey peer_pubkey{};
-            if (!parse_hex_array(config->peer_pubkey_hex, peer_pubkey))
+            if (!rlp::base::parse::hex_array(config->peer_pubkey_hex, peer_pubkey))
             {
                 std::cout << "Invalid peer public key hex (expected 128 hex chars).\n";
                 return 1;
@@ -1086,4 +856,3 @@ int main(int argc, char** argv) {
         return 1;
     }
 }
-

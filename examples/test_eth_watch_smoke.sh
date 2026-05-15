@@ -17,8 +17,8 @@
 # Optional env overrides:
 #   CONNECT_TIMEOUT=20
 #   SMOKE_DURATION=12
-#   BOOTSTRAP_JSON=/path/to/chain_enodes.json
-#   BOOTSTRAP_URL=https://enodes.gnus.ai/chain_enodes.json.gz
+#   CHAIN_PEERS_JSON=/path/to/chain_enodes.json
+#   CHAIN_PEERS_URL=https://enodes.gnus.ai/chain_enodes.json.gz
 
 set -euo pipefail
 
@@ -120,8 +120,8 @@ trap cleanup EXIT INT TERM
 
 CONNECT_TIMEOUT=${CONNECT_TIMEOUT:-20}
 SMOKE_DURATION=${SMOKE_DURATION:-12}
-BOOTSTRAP_JSON=${BOOTSTRAP_JSON:-}
-BOOTSTRAP_URL=${BOOTSTRAP_URL:-}
+CHAIN_PEERS_JSON=${CHAIN_PEERS_JSON:-${BOOTSTRAP_JSON:-}}
+CHAIN_PEERS_URL=${CHAIN_PEERS_URL:-${BOOTSTRAP_URL:-}}
 
 ETH_WATCH_BIN=""
 for build_type in Debug Release RelWithDebInfo; do
@@ -194,21 +194,21 @@ if [ -z "$ETH_WATCH_BIN" ]; then
     info "Build: cd build/OSX/Debug && cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Debug && ninja eth_watch"
     preflight_ok=false
 fi
-if [ ! -f "$BOOTSTRAP_JSON" ]; then
-    if [ -n "$BOOTSTRAP_JSON" ]; then
-        info "Bootstrap peer file not found: ${BOOTSTRAP_JSON}"
+if [ ! -f "$CHAIN_PEERS_JSON" ]; then
+    if [ -n "$CHAIN_PEERS_JSON" ]; then
+        info "Chain peer cache file not found: ${CHAIN_PEERS_JSON}"
         preflight_ok=false
     else
-        info "Bootstrap peers: using eth_watch managed cache/remote refresh"
+        info "Chain peers: using eth_watch managed cache/remote refresh"
     fi
 fi
 if $preflight_ok; then
-    if [ -n "$BOOTSTRAP_JSON" ]; then
-        test_pass "binary=${ETH_WATCH_BUILD} connect_timeout=${CONNECT_TIMEOUT}s smoke_duration=${SMOKE_DURATION}s bootstrap_json=${BOOTSTRAP_JSON}"
-    elif [ -n "$BOOTSTRAP_URL" ]; then
-        test_pass "binary=${ETH_WATCH_BUILD} connect_timeout=${CONNECT_TIMEOUT}s smoke_duration=${SMOKE_DURATION}s bootstrap_url=${BOOTSTRAP_URL}"
+    if [ -n "$CHAIN_PEERS_JSON" ]; then
+        test_pass "binary=${ETH_WATCH_BUILD} connect_timeout=${CONNECT_TIMEOUT}s smoke_duration=${SMOKE_DURATION}s chain_peers_json=${CHAIN_PEERS_JSON}"
+    elif [ -n "$CHAIN_PEERS_URL" ]; then
+        test_pass "binary=${ETH_WATCH_BUILD} connect_timeout=${CONNECT_TIMEOUT}s smoke_duration=${SMOKE_DURATION}s chain_peers_url=${CHAIN_PEERS_URL}"
     else
-        test_pass "binary=${ETH_WATCH_BUILD} connect_timeout=${CONNECT_TIMEOUT}s smoke_duration=${SMOKE_DURATION}s bootstrap=managed-cache"
+        test_pass "binary=${ETH_WATCH_BUILD} connect_timeout=${CONNECT_TIMEOUT}s smoke_duration=${SMOKE_DURATION}s chain_peers=managed-cache"
     fi
 else
     exit 1
@@ -230,11 +230,11 @@ for chain in $SELECTED_CHAINS; do
     CURRENT_LOG="${LOG_DIR}/${chain}.log"
     cmd=("$ETH_WATCH_BIN" "--chain" "$chain" "--log-level" "info"
          "--watch-contract" "$contract" "--watch-event" "Transfer(address,address,uint256)")
-    if [ -f "$BOOTSTRAP_JSON" ]; then
-        cmd+=("--bootstrap-peers-json" "$BOOTSTRAP_JSON")
+    if [ -f "$CHAIN_PEERS_JSON" ]; then
+        cmd+=("--chain-peers-json" "$CHAIN_PEERS_JSON")
     fi
-    if [ -n "$BOOTSTRAP_URL" ]; then
-        cmd+=("--bootstrap-peers-url" "$BOOTSTRAP_URL")
+    if [ -n "$CHAIN_PEERS_URL" ]; then
+        cmd+=("--chain-peers-url" "$CHAIN_PEERS_URL")
     fi
 
     if command -v stdbuf >/dev/null 2>&1; then
@@ -307,4 +307,3 @@ done
 trap - EXIT
 cleanup
 exit $EXIT_CODE
-

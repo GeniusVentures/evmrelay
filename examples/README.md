@@ -41,9 +41,9 @@ eth_watch <host> <port> <peer_pubkey_hex> [eth_offset]
 | `--watch-contract <0x…>` | Contract address to filter events on |
 | `--watch-event <sig>` | ABI event signature to match, e.g. `Transfer(address,address,uint256)` |
 | `--log-level <level>` | Logging verbosity: `trace` `debug` `info` `warn` `error` (default `info`) |
-| `--bootstrap-peers-json <path>` | Preload peers from a local JSON file before discovery |
-| `--bootstrap-peers-url <url>` | Override the remote bootstrap URL used only when no local package JSON is found |
-| `--no-bootstrap-peers-url` | Disable remote fallback and use only package-local JSON + discovery |
+| `--chain-peers-json <path>` | Load peers from a local chain peer cache |
+| `--chain-peers-url <url>` | Override the remote chain peer cache URL used only when no local package JSON is found |
+| `--no-chain-peers-url` | Disable remote fallback and use only package-local JSON/cache files |
 
 `--watch-contract` and `--watch-event` must be paired and can be repeated for
 multiple contracts/events.
@@ -77,18 +77,17 @@ eth_watch <host> <port> <peer_pubkey_hex> [eth_offset]
 Bootnode lists: `include/rlp/PeerDiscovery/bootnodes.hpp` (mainnets) and
 `include/rlp/PeerDiscovery/bootnodes_test.hpp` (testnets).
 
-### Optional local bootstrap peer file
+### Optional local chain peer cache file
 
-`eth_watch` can preload peers from a local JSON cache (for faster startup) and
-still run normal discovery in the background:
+`eth_watch` can load peers from a local JSON cache and dial those peers directly:
 
 ```bash
 ./build/OSX/Debug/examples/eth_watch/eth_watch \
     --chain ethereum-sepolia \
-    --bootstrap-peers-json /path/to/chain_enodes.json
+    --chain-peers-json /path/to/chain_enodes.json
 ```
 
-The local bootstrap file may be either plain JSON (`chain_enodes.json`) or a
+The local chain peer cache file may be either plain JSON (`chain_enodes.json`) or a
 gzip-compressed JSON file (`chain_enodes.json.gz`).
 
 Expected file shape:
@@ -109,25 +108,24 @@ JSON-style keys accepted by `eth_watch` include:
 `bnb-smart-chain`, `bnb-smart-chain-testnet`,
 `base-mainnet`, `base-sepolia`.
 
-Without `--bootstrap-peers-json`, `eth_watch` refreshes its local `chain_enodes.json`
+Without `--chain-peers-json`, `eth_watch` refreshes its local `chain_enodes.json`
 cache from the default remote URL when possible, then loads the cached file next to
 the executable (and on macOS app bundles also under `Contents/Resources`). If the
-refresh fails, startup continues with the existing local cache or normal discovery
-bootnodes.
+refresh fails, startup continues with the existing local cache when present.
 
-### Remote bootstrap refresh (mobile + desktop)
+### Remote chain peer cache refresh (mobile + desktop)
 
 When no local package `chain_enodes.json` is present, `eth_watch` falls back to:
 
 `https://enodes.gnus.ai/chain_enodes.json.gz`
 
 If the URL check fails or returns malformed data, startup continues with the last
-cached file (if present) or normal discovery bootnodes.
+cached file if present.
 
 ```bash
 ./build/OSX/Debug/examples/eth_watch/eth_watch \
     --chain ethereum-sepolia \
-    --bootstrap-peers-url https://enodes.gnus.ai/chain_enodes.json.gz
+    --chain-peers-url https://enodes.gnus.ai/chain_enodes.json.gz
 ```
 
 Disable remote check:
@@ -135,7 +133,7 @@ Disable remote check:
 ```bash
 ./build/OSX/Debug/examples/eth_watch/eth_watch \
     --chain ethereum-sepolia \
-    --no-bootstrap-peers-url
+    --no-chain-peers-url
 ```
 
 ---
@@ -287,7 +285,7 @@ For a lighter-weight live connectivity check that does not send transactions,
 use `examples/test_eth_watch_smoke.sh`. It connects to each selected chain,
 waits for the periodic `Watch stats:` line from `eth_watch`, and verifies that
 live ETH traffic is being counted. By default the harness lets `eth_watch`
-refresh and use its own local bootstrap cache; `BOOTSTRAP_JSON` is only needed
+refresh and use its own local chain peer cache; `CHAIN_PEERS_JSON` is only needed
 when you want to force a specific local `.json` or `.json.gz` file.
 
 ```bash
@@ -302,8 +300,8 @@ Optional environment overrides:
 ```bash
 CONNECT_TIMEOUT=20
 SMOKE_DURATION=12
-BOOTSTRAP_JSON=./rlp_enodes/output/chain_enodes.json.gz
-BOOTSTRAP_URL=https://enodes.gnus.ai/chain_enodes.json.gz
+CHAIN_PEERS_JSON=./rlp_enodes/output/chain_enodes.json.gz
+CHAIN_PEERS_URL=https://enodes.gnus.ai/chain_enodes.json.gz
 ```
 
 ### Sending test transactions separately

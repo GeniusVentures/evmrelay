@@ -1,6 +1,7 @@
 # Define the static library target
 add_library(discv4 OBJECT
         ${CMAKE_CURRENT_LIST_DIR}/bootstrap_peers.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/chain_peers.cpp
         ${CMAKE_CURRENT_LIST_DIR}/packet_factory.cpp
         ${CMAKE_CURRENT_LIST_DIR}/discv4_packet.cpp
         ${CMAKE_CURRENT_LIST_DIR}/discv4_ping.cpp
@@ -33,5 +34,4 @@ install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../../include/discv4/
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/discv4
         FILES_MATCHING PATTERN "*.hpp"
 )
-
 

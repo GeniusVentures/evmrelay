@@ -1,6 +1,8 @@
 add_library(rlp_logger OBJECT
     ../../include/base/rlp-logger.hpp
+    ../../include/base/parse_utility.hpp
     rlp-logger.cpp
+    parse_utility.cpp
 )
 
 target_include_directories(rlp_logger

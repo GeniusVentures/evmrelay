@@ -73,6 +73,22 @@ target_link_libraries(eth_watch_service_test
     evmrelay
 )
 
+# Transport-neutral receipt source tests
+addtest(eth_receipt_source_test
+    eth_receipt_source_test.cpp
+)
+target_link_libraries(eth_receipt_source_test
+    evmrelay
+)
+
+# Normalized bridge event tests
+addtest(bridge_event_test
+    bridge_event_test.cpp
+)
+target_link_libraries(bridge_event_test
+    evmrelay
+)
+
 # EthWatchCli tests
 addtest(eth_watch_cli_test
     eth_watch_cli_test.cpp

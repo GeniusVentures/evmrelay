@@ -86,7 +86,8 @@ void EthReceiptSourceBridge::process_receipt_batch(const ReceiptBatch& batch)
         batch.receipts,
         batch.tx_hashes,
         batch.block_number,
-        batch.block_hash);
+        batch.block_hash,
+        batch.log_indices);
 }
 
 } // namespace eth

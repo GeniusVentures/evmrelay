@@ -105,6 +105,14 @@ target_link_libraries(json_rpc_test
     evmrelay
 )
 
+# RPC receipt source tests
+addtest(rpc_receipt_source_test
+    rpc_receipt_source_test.cpp
+)
+target_link_libraries(rpc_receipt_source_test
+    evmrelay
+)
+
 # EthWatchCli tests
 addtest(eth_watch_cli_test
     eth_watch_cli_test.cpp

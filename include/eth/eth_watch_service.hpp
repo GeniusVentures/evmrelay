@@ -140,7 +140,8 @@ public:
         const std::vector<codec::Receipt>& receipts,
         const std::vector<Hash256>&        tx_hashes,
         uint64_t                           block_number,
-        const Hash256&                     block_hash) noexcept;
+        const Hash256&                     block_hash,
+        const std::vector<std::vector<uint32_t>>& log_indices = {}) noexcept;
 
     /// @brief Directly process a NewBlock message.
     void process_new_block(const NewBlockMessage& msg,
@@ -184,4 +185,3 @@ private:
 };
 
 } // namespace eth
-

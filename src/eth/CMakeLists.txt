@@ -13,6 +13,7 @@ add_library(eth OBJECT
         ${CMAKE_CURRENT_LIST_DIR}/bridge_event.cpp
         ${CMAKE_CURRENT_LIST_DIR}/finality_policy.cpp
         ${CMAKE_CURRENT_LIST_DIR}/json_rpc.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/rpc_receipt_source.cpp
         ${CMAKE_CURRENT_LIST_DIR}/eth_watch_runner.cpp
 )
 

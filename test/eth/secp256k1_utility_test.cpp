@@ -1,0 +1,92 @@
+// Copyright 2026 Genius Ventures, Inc.
+// SPDX-License-Identifier: MIT
+
+#include <gtest/gtest.h>
+#include <eth/secp256k1_utility.hpp>
+
+namespace {
+
+eth::Secp256k1PrivateKey valid_private_key()
+{
+    eth::Secp256k1PrivateKey key{};
+    key[31] = 1;
+    return key;
+}
+
+eth::Hash256 message_hash(uint8_t seed)
+{
+    eth::Hash256 hash{};
+    for (size_t i = 0; i < hash.size(); ++i)
+    {
+        hash[i] = static_cast<uint8_t>(seed + i);
+    }
+    return hash;
+}
+
+} // namespace
+
+TEST(Secp256k1UtilityTest, SignsAndRecoversAddress)
+{
+    const auto key = valid_private_key();
+    const auto expected_address = eth::secp256k1_address_from_private_key(key);
+    const auto signature = eth::secp256k1_sign_recoverable(message_hash(0x10), key);
+
+    ASSERT_TRUE(expected_address.has_value());
+    ASSERT_TRUE(signature.has_value());
+    EXPECT_EQ(signature->size(), 65U);
+
+    const auto recovered = eth::secp256k1_recover_address(message_hash(0x10), *signature);
+    ASSERT_TRUE(recovered.has_value());
+    EXPECT_EQ(*recovered, *expected_address);
+}
+
+TEST(Secp256k1UtilityTest, RejectsInvalidPrivateKey)
+{
+    eth::Secp256k1PrivateKey key{};
+
+    EXPECT_FALSE(eth::secp256k1_address_from_private_key(key).has_value());
+    EXPECT_FALSE(eth::secp256k1_sign_recoverable(message_hash(0x10), key).has_value());
+}
+
+TEST(Secp256k1UtilityTest, RejectsShortSignature)
+{
+    eth::codec::ByteBuffer signature(64, 0);
+
+    EXPECT_FALSE(eth::secp256k1_recover_address(message_hash(0x10), signature).has_value());
+}
+
+TEST(Secp256k1UtilityTest, RejectsBadRecoveryId)
+{
+    const auto signature = eth::secp256k1_sign_recoverable(message_hash(0x10), valid_private_key());
+    ASSERT_TRUE(signature.has_value());
+
+    auto bad_signature = *signature;
+    ASSERT_EQ(bad_signature.size(), 65U);
+    bad_signature.back() = 4;
+
+    EXPECT_FALSE(eth::secp256k1_recover_address(message_hash(0x10), bad_signature).has_value());
+}
+
+TEST(Secp256k1UtilityTest, RejectsCorruptSignatureBytes)
+{
+    const auto signature = eth::secp256k1_sign_recoverable(message_hash(0x10), valid_private_key());
+    ASSERT_TRUE(signature.has_value());
+
+    auto bad_signature = *signature;
+    bad_signature.front() ^= 0x01;
+
+    const auto recovered = eth::secp256k1_recover_address(message_hash(0x10), bad_signature);
+    EXPECT_TRUE(!recovered.has_value()
+        || *recovered != *eth::secp256k1_address_from_private_key(valid_private_key()));
+}
+
+TEST(Secp256k1UtilityTest, DifferentMessageRecoversDifferentAddress)
+{
+    const auto expected_address = eth::secp256k1_address_from_private_key(valid_private_key());
+    const auto signature = eth::secp256k1_sign_recoverable(message_hash(0x10), valid_private_key());
+    ASSERT_TRUE(expected_address.has_value());
+    ASSERT_TRUE(signature.has_value());
+
+    const auto recovered = eth::secp256k1_recover_address(message_hash(0x20), *signature);
+    EXPECT_TRUE(!recovered.has_value() || *recovered != *expected_address);
+}

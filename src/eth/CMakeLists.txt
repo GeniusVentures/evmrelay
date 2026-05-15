@@ -11,6 +11,8 @@ add_library(eth OBJECT
         ${CMAKE_CURRENT_LIST_DIR}/eth_session_channel.cpp
         ${CMAKE_CURRENT_LIST_DIR}/eth_receipt_source.cpp
         ${CMAKE_CURRENT_LIST_DIR}/bridge_event.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/bridge_observation.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/secp256k1_utility.cpp
         ${CMAKE_CURRENT_LIST_DIR}/finality_policy.cpp
         ${CMAKE_CURRENT_LIST_DIR}/json_rpc.cpp
         ${CMAKE_CURRENT_LIST_DIR}/rpc_receipt_source.cpp
@@ -21,6 +23,10 @@ target_include_directories(eth PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../include>
         $<INSTALL_INTERFACE:include>
         $<BUILD_INTERFACE:${crypto3_INCLUDE_DIR}>
+)
+
+target_link_libraries(eth PUBLIC
+        libsecp256k1::secp256k1
 )
 
 # Install headers

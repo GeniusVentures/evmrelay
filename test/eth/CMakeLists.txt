@@ -89,6 +89,22 @@ target_link_libraries(bridge_event_test
     evmrelay
 )
 
+# Bridge event observation signing tests
+addtest(bridge_observation_test
+    bridge_observation_test.cpp
+)
+target_link_libraries(bridge_observation_test
+    evmrelay
+)
+
+# Secp256k1 utility tests
+addtest(secp256k1_utility_test
+    secp256k1_utility_test.cpp
+)
+target_link_libraries(secp256k1_utility_test
+    evmrelay
+)
+
 # Chain finality policy tests
 addtest(finality_policy_test
     finality_policy_test.cpp

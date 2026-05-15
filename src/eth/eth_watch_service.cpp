@@ -201,7 +201,8 @@ void EthWatchService::process_receipts(
     const std::vector<codec::Receipt>& receipts,
     const std::vector<Hash256>&        tx_hashes,
     uint64_t                           block_number,
-    const Hash256&                     block_hash) noexcept
+    const Hash256&                     block_hash,
+    const std::vector<std::vector<uint32_t>>& log_indices) noexcept
 {
     const size_t count = std::min(receipts.size(), tx_hashes.size());
     stats_.receipts_processed += static_cast<uint64_t>(count);
@@ -209,12 +210,17 @@ void EthWatchService::process_receipts(
     for (size_t i = 0; i < count; ++i)
     {
         const size_t log_count = receipts[i].logs.size();
+        uint32_t first_log_index = next_log_index;
+        if (i < log_indices.size() && !log_indices[i].empty())
+        {
+            first_log_index = log_indices[i].front();
+        }
         const size_t matched = watcher_.process_receipt(
             receipts[i],
             tx_hashes[i],
             block_number,
             block_hash,
-            next_log_index);
+            first_log_index);
         stats_.logs_seen += static_cast<uint64_t>(log_count);
         stats_.matched_logs += static_cast<uint64_t>(matched);
         stats_.discarded_logs += static_cast<uint64_t>(log_count - matched);
@@ -235,4 +241,3 @@ void EthWatchService::process_new_block(const NewBlockMessage& msg,
 }
 
 } // namespace eth
-

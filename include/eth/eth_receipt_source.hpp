@@ -24,10 +24,11 @@ struct ReceiptResult
 /// @brief Receipts from one block, normalized across RLPx, RPC, or certified sources.
 struct ReceiptBatch
 {
-    std::vector<codec::Receipt> receipts;
-    std::vector<Hash256>        tx_hashes;
-    uint64_t                    block_number = 0;
-    Hash256                     block_hash{};
+    std::vector<codec::Receipt>       receipts;
+    std::vector<Hash256>              tx_hashes;
+    std::vector<std::vector<uint32_t>> log_indices;
+    uint64_t                          block_number = 0;
+    Hash256                           block_hash{};
 };
 
 using ReceiptBatchHandler = std::function<void(const ReceiptBatch&)>;

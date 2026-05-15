@@ -9,6 +9,8 @@ add_library(eth OBJECT
         ${CMAKE_CURRENT_LIST_DIR}/eth_peer_session.cpp
         ${CMAKE_CURRENT_LIST_DIR}/eth_handshake_guard.cpp
         ${CMAKE_CURRENT_LIST_DIR}/eth_session_channel.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/eth_receipt_source.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/bridge_event.cpp
         ${CMAKE_CURRENT_LIST_DIR}/eth_watch_runner.cpp
 )
 

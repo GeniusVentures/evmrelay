@@ -3,103 +3,46 @@
 
 #pragma once
 
-#include <discv4/dial_scheduler.hpp>
-#include <filesystem>
-#include <optional>
-#include <string>
-#include <vector>
+#include <discv4/chain_peers.hpp>
 
 namespace discv4
 {
 
-/**
- * @brief Result of refreshing the local bootstrap peer cache from a remote URL.
- */
-struct BootstrapCacheRefreshResult
-{
-    std::filesystem::path cache_path;
-    bool                  cache_available = false;
-    bool                  cache_updated = false;
-};
+using BootstrapCacheRefreshResult = ChainPeerCacheRefreshResult;
+using BootstrapChainConfig = ChainPeerConfig;
+using BootstrapSignatureVerificationResult = ChainPeerCacheSignatureVerificationResult;
 
-/**
- * @brief Return the default local cache path for `chain_enodes.json` next to the executable.
- * @param argv0 Program path used to locate the executable directory.
- * @return Cache file path.
- */
 std::filesystem::path bootstrap_cache_json_path(const std::string& argv0);
-
-/**
- * @brief Locate a local bootstrap peer JSON file.
- * @param argv0 Program path used to locate the executable directory.
- * @param override_path Optional explicit file path.
- * @return Existing JSON or gzip-compressed JSON file path, or `std::nullopt` if none exists.
- */
 std::optional<std::filesystem::path> find_bootstrap_peers_json_path(
     const std::string& argv0,
     const std::string& override_path);
-
-/**
- * @brief Download the bootstrap peer JSON payload from a remote URL.
- *        Supports either raw JSON or gzip-compressed JSON bodies.
- * @param url Source URL.
- * @return Decoded JSON text, or `std::nullopt` on failure.
- */
 std::optional<std::string> download_bootstrap_json(const std::string& url);
-
-/**
- * @brief Write the bootstrap peer JSON cache only when the contents changed.
- * @param json_path Destination cache path.
- * @param json_text JSON text to store.
- * @return `true` when the cache contents changed and were rewritten.
- */
 bool write_bootstrap_cache_json_if_changed(
     const std::filesystem::path& json_path,
     const std::string&           json_text);
-
-/**
- * @brief Refresh a local bootstrap peer cache from a remote URL.
- * @param json_path Destination cache path.
- * @param url Source URL.
- * @return Refresh metadata when download succeeded, or `std::nullopt` on failure.
- */
 std::optional<BootstrapCacheRefreshResult> refresh_bootstrap_cache_json(
     const std::filesystem::path& json_path,
     const std::string&           url);
-
-/**
- * @brief Parse an `enode://` bootstrap peer URI into a validated peer entry.
- * @param enode Bootstrap peer URI.
- * @return Parsed validated peer, or `std::nullopt` when the URI is malformed.
- */
-std::optional<ValidatedPeer> make_validated_peer_from_enode(const std::string& enode);
-
-/**
- * @brief Parse an `enr:` bootstrap peer URI into a validated peer entry.
- * @param enr_uri Bootstrap ENR URI.
- * @return Parsed validated peer, or `std::nullopt` when the URI is malformed.
- */
-std::optional<ValidatedPeer> make_validated_peer_from_enr(const std::string& enr_uri);
-
-/**
- * @brief Load bootstrap peers for a specific chain from JSON text.
- * @param chain_name Canonical top-level JSON key.
- * @param json_text JSON document contents.
- * @return Parsed validated peers.
- */
 std::vector<ValidatedPeer> load_bootstrap_peers_from_json_text(
     const std::string& chain_name,
     const std::string& json_text);
-
-/**
- * @brief Load bootstrap peers for a specific chain from a JSON or gzip-compressed JSON file.
- * @param chain_name Canonical top-level JSON key.
- * @param json_path JSON file path.
- * @return Parsed validated peers.
- */
 std::vector<ValidatedPeer> load_bootstrap_peers_from_json(
-    const std::string&            chain_name,
-    const std::filesystem::path&  json_path);
+    const std::string&           chain_name,
+    const std::filesystem::path& json_path);
+std::optional<std::array<uint8_t, 4>> load_bootstrap_fork_id_hash_from_json_text(
+    const std::string& chain_name,
+    const std::string& json_text);
+std::optional<std::array<uint8_t, 4>> load_bootstrap_fork_id_hash_from_json(
+    const std::string&           chain_name,
+    const std::filesystem::path& json_path);
+std::optional<BootstrapChainConfig> load_bootstrap_chain_config_from_json_text(
+    const std::string& chain_name,
+    const std::string& json_text);
+std::optional<BootstrapChainConfig> load_bootstrap_chain_config_from_json(
+    const std::string&           chain_name,
+    const std::filesystem::path& json_path);
+BootstrapSignatureVerificationResult verify_bootstrap_json_signature(
+    const std::string& json_text,
+    const std::string& expected_signer_address);
 
 } // namespace discv4
-

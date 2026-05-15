@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <base/parse_utility.hpp>
 #include <eth/abi_decoder.hpp>
 #include <array>
 #include <optional>
@@ -20,41 +21,12 @@ struct WatchSpec
     std::string event_signature; ///< e.g. "Transfer(address,address,uint256)"
 };
 
-/// @brief Parse a hex nibble character.  Returns nullopt for invalid chars.
-[[nodiscard]] inline std::optional<uint8_t> hex_nibble(char c) noexcept
-{
-    if (c >= '0' && c <= '9') { return static_cast<uint8_t>(c - '0'); }
-    if (c >= 'a' && c <= 'f') { return static_cast<uint8_t>(10 + (c - 'a')); }
-    if (c >= 'A' && c <= 'F') { return static_cast<uint8_t>(10 + (c - 'A')); }
-    return std::nullopt;
-}
-
-/// @brief Parse a hex string into a fixed-size byte array.
-/// @param hex  Must be exactly N*2 hex characters (no 0x prefix).
-template <size_t N>
-[[nodiscard]] bool parse_hex_array(std::string_view hex, std::array<uint8_t, N>& out) noexcept
-{
-    if (hex.size() != N * 2) { return false; }
-    for (size_t i = 0; i < N; ++i)
-    {
-        auto hi = hex_nibble(hex[i * 2]);
-        auto lo = hex_nibble(hex[i * 2 + 1]);
-        if (!hi || !lo) { return false; }
-        out[i] = static_cast<uint8_t>((*hi << 4) | *lo);
-    }
-    return true;
-}
-
 /// @brief Parse a 0x-prefixed or bare 40-hex-char Ethereum address.
 /// @return Parsed address or nullopt if the format is invalid.
 [[nodiscard]] inline std::optional<codec::Address> parse_address(std::string_view hex) noexcept
 {
-    if (hex.size() >= 2 && hex[0] == '0' && (hex[1] == 'x' || hex[1] == 'X'))
-    {
-        hex = hex.substr(2);
-    }
     codec::Address addr{};
-    if (!parse_hex_array(hex, addr)) { return std::nullopt; }
+    if (!rlp::base::parse::hex_array(hex, addr)) { return std::nullopt; }
     return addr;
 }
 
@@ -183,4 +155,3 @@ inline EventRegistry& event_registry()
 }
 
 } // namespace eth::cli
-

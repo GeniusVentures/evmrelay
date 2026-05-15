@@ -3,15 +3,15 @@
 //
 // examples/discovery/test_discovery.cpp
 //
-// Functional test for discv4/bootstrap-peer seeding against live Ethereum peers.
-// Uses DialScheduler to seed and observe discovery/bootstrap inputs for each
+// Functional test for discv4/chain peer cache seeding against live Ethereum peers.
+// Uses DialScheduler to seed and observe discovery/chain peer cache inputs for each
 // configured chain.
 //
 // Checks (GTest-style output):
-//   1. At least one bootstrap peer is loaded from the current cache / refresh path
+//   1. At least one chain peer is loaded from the current cache / refresh path
 //   2. Dial / connect statistics are reported for diagnostics only
 //
-// Exit code 0 = bootstrap peer loading checks pass, 1 = any bootstrap loading check failed.
+// Exit code 0 = chain peer cache loading checks pass, 1 = any chain peer cache loading check failed.
 //
 // Usage:
 //   ./test_discovery [--log-level debug] [--timeout 30] [--connections 1]
@@ -33,7 +33,7 @@
 #include <boost/asio/spawn.hpp>
 #include <boost/asio/steady_timer.hpp>
 
-#include <discv4/bootstrap_peers.hpp>
+#include <discv4/chain_peers.hpp>
 #include <discv4/bootnodes.hpp>
 #include <discv4/bootnodes_test.hpp>
 #include <discv4/dial_scheduler.hpp>
@@ -56,13 +56,13 @@
 static constexpr uint64_t kMainnetNetworkId = 1;
 static constexpr uint8_t  kEthOffset        = 0x10;
 static constexpr const char* kForkHashChainKey = "mainnet";
-static constexpr const char* kBootstrapChainKey = "ethereum-mainnet";
-static constexpr const char* kBootstrapPeersUrlDefault = "https://enodes.gnus.ai/chain_enodes.json.gz";
+static constexpr const char* kChainPeerCacheChainKey = "ethereum-mainnet";
+static constexpr const char* kChainPeersUrlDefault = "https://enodes.gnus.ai/chain_enodes.json.gz";
 
 struct ChainTarget
 {
     const char* chain_key;
-    const char* bootstrap_chain_key;
+    const char* chain_peer_cache_key;
     uint64_t network_id = 0;
     const char* genesis_hex;
     const std::vector<std::string>* bootnodes = nullptr;
@@ -310,7 +310,7 @@ struct ChainRuntime
     std::shared_ptr<discv4::DialScheduler>     scheduler;
     std::shared_ptr<discv4::discv4_client>     dv4;
     std::shared_ptr<std::atomic<int>>          peers_count;
-    std::shared_ptr<std::atomic<int>>          bootstrap_peers_loaded;
+    std::shared_ptr<std::atomic<int>>          chain_peers_loaded;
     std::shared_ptr<std::function<void()>>     maybe_finish;
 };
 
@@ -330,18 +330,18 @@ static std::optional<eth::ForkId> load_chain_fork_id(
     return fork_id;
 }
 
-static void enqueue_bootstrap_peers(
+static void enqueue_chain_peers(
     const ChainTarget&                                target,
-    const std::optional<std::filesystem::path>&       bootstrap_peers_json_file,
-    const std::optional<discv4::BootstrapCacheRefreshResult>& refresh_result,
+    const std::optional<std::filesystem::path>&       chain_peers_json_file,
+    const std::optional<discv4::ChainPeerCacheRefreshResult>& refresh_result,
     const std::shared_ptr<discv4::DialScheduler>&     scheduler,
-    const std::shared_ptr<std::atomic<int>>&          bootstrap_peers_loaded)
+    const std::shared_ptr<std::atomic<int>>&          chain_peers_loaded)
 {
     auto enqueue_loaded_peers =
-        [&scheduler, &bootstrap_peers_loaded]
-        (std::vector<discv4::ValidatedPeer> bootstrap_peers)
+        [&scheduler, &chain_peers_loaded]
+        (std::vector<discv4::ValidatedPeer> chain_peers)
         {
-            for (auto& peer : bootstrap_peers)
+            for (auto& peer : chain_peers)
             {
                 if (peer.peer.tcp_port == 0)
                 {
@@ -351,33 +351,33 @@ static void enqueue_bootstrap_peers(
                 {
                     continue;
                 }
-                ++(*bootstrap_peers_loaded);
+                ++(*chain_peers_loaded);
                 scheduler->enqueue(std::move(peer));
             }
         };
 
-    if (bootstrap_peers_json_file.has_value())
+    if (chain_peers_json_file.has_value())
     {
-        enqueue_loaded_peers(discv4::load_bootstrap_peers_from_json(
-            target.bootstrap_chain_key,
-            *bootstrap_peers_json_file));
+        enqueue_loaded_peers(discv4::load_chain_peers_from_json(
+            target.chain_peer_cache_key,
+            *chain_peers_json_file));
 
         std::cout << "[  INFO    ] [" << target.chain_key << "] loaded "
-                  << bootstrap_peers_loaded->load() << " bootstrap peer(s) for '"
-                  << target.bootstrap_chain_key << "' from "
-                  << bootstrap_peers_json_file->string() << "\n";
+                  << chain_peers_loaded->load() << " chain peer(s) for '"
+                  << target.chain_peer_cache_key << "' from "
+                  << chain_peers_json_file->string() << "\n";
         return;
     }
 
     if (refresh_result.has_value())
     {
-        enqueue_loaded_peers(discv4::load_bootstrap_peers_from_json(
-            target.bootstrap_chain_key,
+        enqueue_loaded_peers(discv4::load_chain_peers_from_json(
+            target.chain_peer_cache_key,
             refresh_result->cache_path));
 
         std::cout << "[  INFO    ] [" << target.chain_key << "] loaded "
-                  << bootstrap_peers_loaded->load() << " bootstrap peer(s) for '"
-                  << target.bootstrap_chain_key << "' from "
+                  << chain_peers_loaded->load() << " chain peer(s) for '"
+                  << target.chain_peer_cache_key << "' from "
                   << refresh_result->cache_path.string() << "\n";
     }
 }
@@ -394,15 +394,15 @@ static void seed_bootnodes(
 
     for (const auto& enode : *target.bootnodes)
     {
-        const auto bootstrap_peer = discv4::make_validated_peer_from_enode(enode);
-        if (!bootstrap_peer)
+        const auto bootnode_peer = discv4::make_validated_peer_from_enode(enode);
+        if (!bootnode_peer)
         {
             continue;
         }
 
-        const std::string host_copy = bootstrap_peer->peer.ip;
-        const uint16_t port_copy = bootstrap_peer->peer.udp_port;
-        const discv4::NodeId bn_id = bootstrap_peer->peer.node_id;
+        const std::string host_copy = bootnode_peer->peer.ip;
+        const uint16_t port_copy = bootnode_peer->peer.udp_port;
+        const discv4::NodeId bn_id = bootnode_peer->peer.node_id;
         boost::asio::spawn(io,
             [dv4, host_copy, port_copy, bn_id](boost::asio::yield_context yc)
             {
@@ -416,8 +416,8 @@ static std::optional<ChainRuntime> create_chain_runtime(
     const ChainTarget&                                   target,
     int                                                  max_dials,
     int                                                  min_connections,
-    const std::optional<std::filesystem::path>&          bootstrap_peers_json_file,
-    const std::optional<discv4::BootstrapCacheRefreshResult>& refresh_result,
+    const std::optional<std::filesystem::path>&          chain_peers_json_file,
+    const std::optional<discv4::ChainPeerCacheRefreshResult>& refresh_result,
     const rlpx::crypto::Ecdh::KeyPair&                   keypair,
     boost::asio::steady_timer&                           deadline,
     const std::string&                                   argv0)
@@ -436,7 +436,7 @@ static std::optional<ChainRuntime> create_chain_runtime(
     runtime.stats = std::make_shared<DialStats>();
     runtime.pool = std::make_shared<discv4::WatcherPool>(50, max_dials * 2);
     runtime.peers_count = std::make_shared<std::atomic<int>>(0);
-    runtime.bootstrap_peers_loaded = std::make_shared<std::atomic<int>>(0);
+    runtime.chain_peers_loaded = std::make_shared<std::atomic<int>>(0);
     runtime.maybe_finish = std::make_shared<std::function<void()>>();
 
     discv4::discv4Config dv4_cfg;
@@ -474,7 +474,7 @@ static std::optional<ChainRuntime> create_chain_runtime(
         deadline.cancel();
     };
 
-    // Do not pre-filter discovery/bootstrap candidates by ENR fork id.
+    // Do not pre-filter discovery/chain peer candidates by ENR fork id.
     // Chain validation is performed after connect via ETH Status.
     runtime.scheduler->filter_fn = {};
 
@@ -494,12 +494,12 @@ static std::optional<ChainRuntime> create_chain_runtime(
 
     runtime.dv4->set_error_callback([](const std::string&) {});
 
-    enqueue_bootstrap_peers(
+    enqueue_chain_peers(
         runtime.target,
-        bootstrap_peers_json_file,
+        chain_peers_json_file,
         refresh_result,
         runtime.scheduler,
-        runtime.bootstrap_peers_loaded);
+        runtime.chain_peers_loaded);
 
     return runtime;
 }
@@ -554,9 +554,9 @@ int main(int argc, char** argv)
     int min_connections = 1;
     int max_dials       = 16;  // target dialed peers (go-ethereum: MaxPeers/dialRatio = 50/3 ≈ 16)
                                // active concurrent attempts = min(target*2, 50) per go-ethereum's freeDialSlots()
-    std::string bootstrap_peers_json_path;
-    std::string bootstrap_peers_url = kBootstrapPeersUrlDefault;
-    bool bootstrap_peers_url_enabled = true;
+    std::string chain_peers_json_path;
+    std::string chain_peers_url = kChainPeersUrlDefault;
+    bool chain_peers_url_enabled = true;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -572,9 +572,19 @@ int main(int argc, char** argv)
         else if (arg == "--timeout" && i + 1 < argc)   { timeout_secs    = std::atoi(argv[++i]); }
         else if (arg == "--connections" && i + 1 < argc){ min_connections = std::atoi(argv[++i]); }
         else if (arg == "--dials" && i + 1 < argc)      { max_dials       = std::atoi(argv[++i]); }
-        else if (arg == "--bootstrap-peers-json" && i + 1 < argc) { bootstrap_peers_json_path = argv[++i]; }
-        else if (arg == "--bootstrap-peers-url" && i + 1 < argc)  { bootstrap_peers_url = argv[++i]; }
-        else if (arg == "--no-bootstrap-peers-url")               { bootstrap_peers_url_enabled = false; }
+        else if ((arg == "--chain-peers-json" || arg == "--bootstrap-peers-json") && i + 1 < argc)
+        {
+            chain_peers_json_path = argv[++i];
+        }
+        else if ((arg == "--chain-peers-url" || arg == "--bootstrap-peers-url") && i + 1 < argc)
+        {
+            chain_peers_url = argv[++i];
+            chain_peers_url_enabled = true;
+        }
+        else if (arg == "--no-chain-peers-url" || arg == "--no-bootstrap-peers-url")
+        {
+            chain_peers_url_enabled = false;
+        }
     }
 
     // ── Fork hash — loaded from chains.json, fallback to compiled-in value ──────
@@ -610,32 +620,32 @@ int main(int argc, char** argv)
     // ── Overall test timeout ─────────────────────────────────────────────────
     boost::asio::steady_timer deadline(io, std::chrono::seconds(timeout_secs));
 
-    std::optional<discv4::BootstrapCacheRefreshResult> refresh_result;
-    if (bootstrap_peers_json_path.empty() && bootstrap_peers_url_enabled)
+    std::optional<discv4::ChainPeerCacheRefreshResult> refresh_result;
+    if (chain_peers_json_path.empty() && chain_peers_url_enabled)
     {
-        refresh_result = discv4::refresh_bootstrap_cache_json(
-            discv4::bootstrap_cache_json_path(argv[0]),
-            bootstrap_peers_url);
+        refresh_result = discv4::refresh_chain_peer_cache_json(
+            discv4::chain_peer_cache_json_path(argv[0]),
+            chain_peers_url);
         if (refresh_result.has_value())
         {
-            std::cout << "[  INFO    ] bootstrap refresh: "
+            std::cout << "[  INFO    ] chain peer cache refresh: "
                       << (refresh_result->cache_updated ? "updated" :
                           (refresh_result->cache_available ? "unchanged" : "unavailable"))
                       << " " << refresh_result->cache_path.string() << "\n";
         }
     }
 
-    const auto bootstrap_peers_json_file =
-        discv4::find_bootstrap_peers_json_path(argv[0], bootstrap_peers_json_path);
-    if (!bootstrap_peers_json_path.empty() && !bootstrap_peers_json_file.has_value())
+    const auto chain_peers_json_file =
+        discv4::find_chain_peer_cache_json_path(argv[0], chain_peers_json_path);
+    if (!chain_peers_json_path.empty() && !chain_peers_json_file.has_value())
     {
-        std::cout << "Bootstrap peer file not found: " << bootstrap_peers_json_path << "\n";
+        std::cout << "Chain peer cache file not found: " << chain_peers_json_path << "\n";
         return 1;
     }
-    if (bootstrap_peers_json_file.has_value())
+    if (chain_peers_json_file.has_value())
     {
-        std::cout << "[  INFO    ] bootstrap peer cache path: "
-                  << bootstrap_peers_json_file->string() << "\n";
+        std::cout << "[  INFO    ] chain peer cache path: "
+                  << chain_peers_json_file->string() << "\n";
     }
 
     for (const auto& target : chain_targets)
@@ -645,7 +655,7 @@ int main(int argc, char** argv)
             target,
             max_dials,
             min_connections,
-            bootstrap_peers_json_file,
+            chain_peers_json_file,
             refresh_result,
             keypair,
             deadline,
@@ -700,7 +710,7 @@ int main(int argc, char** argv)
     for (auto& runtime : chain_runtimes)
     {
         std::cout << "\n[  STATS   ] [" << runtime.target.chain_key << "] Dial breakdown:\n"
-                  << "              bootstrap peers loaded:       " << runtime.bootstrap_peers_loaded->load() << "\n"
+                  << "              chain peers loaded:       " << runtime.chain_peers_loaded->load() << "\n"
                   << "              discovered peers:             " << runtime.peers_count->load() << "\n"
                   << "              dialed:                       " << runtime.stats->dialed.load() << "\n"
                   << "              connect failed:               " << runtime.stats->connect_failed.load() << "\n"
@@ -713,14 +723,14 @@ int main(int argc, char** argv)
 
         const int connections = runtime.scheduler->total_validated;
 
-        suite.start(std::string("DiscoveryTest.") + runtime.target.chain_key + ".BootstrapPeersLoaded");
-        if (runtime.bootstrap_peers_loaded->load() > 0)
+        suite.start(std::string("DiscoveryTest.") + runtime.target.chain_key + ".ChainPeersLoaded");
+        if (runtime.chain_peers_loaded->load() > 0)
         {
-            suite.pass(std::to_string(runtime.bootstrap_peers_loaded->load()) + " bootstrap peer(s) loaded");
+            suite.pass(std::to_string(runtime.chain_peers_loaded->load()) + " chain peer(s) loaded");
         }
         else
         {
-            suite.fail("No bootstrap peers loaded from chain_enodes cache/refresh path");
+            suite.fail("No chain peers loaded from chain_enodes cache/refresh path");
         }
 
         std::cout << "[  INFO    ] [" << runtime.target.chain_key << "] active ETH Status connection(s): "

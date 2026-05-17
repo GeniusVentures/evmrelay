@@ -1,87 +1,146 @@
 # Checkpoint Log
 
-## eth_watch checkpoint — 2026-05-11
+## Bridge consensus adapter handoff - 2026-05-16
 
-### What changed in this chat
+### Current state
 
-- Fixed the compile break in `test/eth/eth_watch_runner_test.cpp` by restoring the missing `IEthSessionChannel` mock methods.
-- Fixed zero-offset ETH message normalization in both runtime paths:
-  - `src/eth/eth_handshake_guard.cpp`
-  - `src/rlpx/rlpx_session.cpp`
-- Added / updated regression coverage for zero-offset ETH message routing and status handling:
-  - `test/eth/eth_handshake_guard_test.cpp`
-  - `test/rlpx/message_routing_test.cpp`
-- Confirmed from local Geth logs that the direct local disconnect reason is fork ID rejection, not protocol version mismatch.
-- Removed duplicated hardcoded bootnode sources from `examples/eth_watch/eth_watch.cpp`.
-- Reduced the `eth_watch` chain table to canonical chain names only.
-- Kept only local chain metadata in `eth_watch` for now:
-  - `network_id`
-  - `genesis_hash`
-- Added bootstrap JSON fork-hash loading from the existing cached `chain_enodes.json.gz` path via `bootstrap_peers` helpers.
+- Repository: `evmrelay`
+- Branch: `develop`
+- HEAD: `1578296 Decode bridge event claim payloads`
+- Remote state: `develop` is ahead of `origin/develop` by one local commit unless pushed after this checkpoint.
+- Tracked working tree has this checkpoint update only, plus unrelated local artifacts listed below.
 
-### Current status at handoff
+### Relevant bridge work
 
-- `eth_watch` structure is partially cleaned up, but the work is **not finished**.
-- `examples/eth_watch/eth_watch.cpp` still has follow-up cleanup needed:
-  - `ChainEntry::canonical_name` now appears redundant.
-  - `kChains` is still a local hardcoded map for chain metadata.
-- The intended direction discussed with the user is:
-  - canonical chain names should come from the bootstrap JSON / bootstrap peer path
+- `1578296 Decode bridge event claim payloads`
+  - Adds `eth::decode_bridge_event_claim_payload(const codec::ByteBuffer&)`.
+  - Strictly rejects malformed domain bytes, truncated payloads, invalid length prefixes, and trailing bytes.
+  - Extends `bridge_observation_test` with payload round-trip and malformed payload rejection.
+- `3a61a55 Fix zero offset eth message routing`
+  - Pushed the staged zero-offset ETH message routing changes that were still local.
+- `a1d2811 Expose bridge event claim payload`
+  - Exposes `eth::bridge_event_claim_payload(const BridgeEventClaim&)`.
+  - This is the payload entry point SuperGenius consensus should use for bridge event subjects.
+- `92c33b3 Add bridge observation signing`
+  - Bridge observation signing support is already on the remote branch.
+- Earlier RPC receipt / codec / finality work is also on the remote branch.
+
+### Relevant SuperGenius consensus context
+
+The parent SuperGenius consensus refactor is complete enough for evmrelay bridge integration.
+
+Consensus subjects now use opaque payload identity:
+
+- `account_id`
+- `subject_type_hash`
+- `payload`
+- `payload_hash`
+
+Consensus subjects no longer carry:
+
+- `subject_id`
+- `subject_type`
+- built-in subject enums
+- protobuf `oneof payload`
+- `GenericSubject`
+
+Built-in consensus payloads are still protobuf messages, but they are serialized into opaque payload bytes. Dispatch is by `subject_type_hash`.
+
+For bridge claims, SuperGenius uses this subject type string:
+
+```text
+gnus.bridge_event.v1
+```
+
+The bridge subject construction path in SuperGenius is wrapped by `src/account/BridgeConsensusAdapter.hpp/.cpp` and still uses:
+
+```cpp
+ConsensusManager::CreateGenericSubject(
+    account_id,
+    "gnus.bridge_event.v1",
+    eth::bridge_event_claim_payload(claim));
+```
+
+Handlers are registered by subject type string / hash through the current SuperGenius consensus registration path.
+
+SuperGenius bridge adapter commit:
+
+- `fa80bcfd Add bridge consensus adapter`
+  - Defines `sgns::kBridgeEventSubjectType`.
+  - Adds `CreateBridgeEventConsensusSubject(...)`.
+  - Adds `DecodeBridgeEventConsensusSubject(...)`.
+  - Adds bridge handler wrapping/registration helpers.
+  - Adds tests for malformed bridge payload rejection, subject type hash mismatch, payload hash mismatch, and successful handler dispatch.
+
+### Verification already run
+
+- `evmrelay/build/OSX/Debug/test_bin/bridge_observation_test` passed with 12 tests.
+- `build/OSX/Debug/test_bin/bridge_consensus_adapter_test` passed in the parent SuperGenius tree with 5 tests.
+- `build/OSX/Debug/test_bin/consensus_subject_test` passed in the parent SuperGenius tree.
+- `ninja -C build/OSX/Debug` passed in the parent SuperGenius tree.
+
+### Current local untracked evmrelay artifacts
+
+These were present before this checkpoint and should not be removed unless explicitly requested:
+
+- `AgentDocs/Refactor_chat.txt`
+- `CRDT.Datastore.TEST.unit_2/`
+- `CRDT.Datastore.TEST/`
+- `examples/all.json`
+- `examples/logs/`
+- `examples/test_discovery.sh`
+- `go-ethereum/`
+- `rlp_enodes/`
+
+### Primary next steps
+
+The evmrelay payload work and parent SuperGenius bridge adapter are done. Next work is in the parent SuperGenius repo unless bridge payload schema changes are needed.
+
+1. Push evmrelay commit `1578296` if it has not already been pushed.
+2. Push parent SuperGenius commit `fa80bcfd` if it has not already been pushed.
+3. In SuperGenius, route finalized `gnus.bridge_event.v1` certificates into the existing bridge mint / claim completion path.
+4. Keep using `eth::decode_bridge_event_claim_payload(...)` through the bridge-owned SuperGenius adapter; do not move bridge parsing into core consensus.
+5. Add focused parent tests for:
+   - proposal/certificate handling path for `gnus.bridge_event.v1`
+   - finalized bridge claim routes into mint / claim completion
+   - malformed finalized bridge payload rejection/stall behavior according to the chosen handler contract
+
+### Secondary remaining eth_watch cleanup
+
+The older `eth_watch` cleanup remains secondary unless the user asks to return to it.
+
+- `examples/eth_watch/eth_watch.cpp` may still have redundant local chain structure:
+  - `ChainEntry::canonical_name`
+  - local `kChains`
+- Intended direction:
+  - canonical chain names should come from bootstrap JSON / bootstrap peer helpers
   - no duplicate alias names in `eth_watch`
   - no duplicated bootnode arrays in `eth_watch`
   - fork hash should come from cached `chain_enodes.json.gz`
-  - `network_id` and `genesis_hash` still need to exist unless bootstrap metadata is extended to carry them too
-- Runtime handshake is still **not yet re-proven end-to-end** after the recent `eth_watch` structural edits.
-
-### Most relevant files for the next chat
-
-- `AgentDocs/CLAUDE.md`
-- `examples/eth_watch/eth_watch.cpp`
-- `chain_enodes.json.gz`
-- `include/discv4/bootstrap_peers.hpp`
-- `src/discv4/bootstrap_peers.cpp`
-- `include/eth/eth_handshake_guard.hpp`
-- `src/eth/eth_handshake_guard.cpp`
-- `include/rlpx/rlpx_session.hpp`
-- `src/rlpx/rlpx_session.cpp`
-- `test/eth/eth_handshake_guard_test.cpp`
-- `test/eth/eth_watch_runner_test.cpp`
-- `test/rlpx/message_routing_test.cpp`
-
-### Exact handoff for the next chat
-
-1. Start from `examples/eth_watch/eth_watch.cpp`.
-2. Do not reintroduce hardcoded bootnode arrays or alias chain names.
-3. Inspect whether `bootstrap_peers.cpp` should expose canonical chain metadata so `eth_watch` does not keep redundant chain-name structure.
-4. Keep `network_id` and `genesis_hash` only if they are still required by ETH status and are not available from bootstrap metadata.
-5. Make the smallest structural cleanup only after reading the bootstrap peer helpers.
-6. After the structural cleanup, rebuild only the touched targets and stop on compile failure.
-7. Then resume the local-only Geth direct test flow using the approved parameters from `AgentDocs/CLAUDE.md`.
+  - `network_id` and `genesis_hash` remain unless bootstrap metadata is extended
+- Runtime handshake still has not been re-proven end-to-end after those structural edits.
 
 ### New chat handoff prompt
 
 ```text
-Continue from the 2026-05-11 eth_watch checkpoint in evmrelay/AgentDocs/CHECKPOINT.md.
+Continue in evmrelay from AgentDocs/CHECKPOINT.md.
 
-What was completed:
-- fixed the broken test mock in test/eth/eth_watch_runner_test.cpp
-- fixed zero-offset ETH normalization in eth_handshake_guard and rlpx_session
-- added regression coverage for zero-offset ETH routing / status handling
-- confirmed from local geth logs that the real disconnect reason was fork ID rejection
-- removed duplicated bootnode-array usage from examples/eth_watch/eth_watch.cpp
-- reduced eth_watch chain entries to canonical chain names only
-- added bootstrap JSON fork-hash loading from cached chain_enodes.json.gz through bootstrap_peers helpers
+Current evmrelay branch is develop at local HEAD 1578296. It is ahead of origin/develop by one commit unless pushed after this checkpoint.
+Do not touch the local untracked artifact dirs/files unless explicitly asked.
 
-What is still unfinished:
-- eth_watch.cpp still appears to have redundant local chain structure (`ChainEntry::canonical_name`, local kChains)
-- the intended design is to avoid duplicated chain naming and peer-source data
-- network_id and genesis_hash probably still need to remain unless bootstrap metadata already provides them
-- end-to-end local geth direct validation has not been re-proven after the structural edits
+SuperGenius consensus now uses opaque consensus subjects:
+- account_id
+- subject_type_hash
+- payload
+- payload_hash
 
-Focus only on the next minimal step:
-- read eth_watch.cpp and bootstrap_peers.{hpp,cpp}
-- decide the smallest safe cleanup for chain metadata ownership
-- do not refactor broadly
-- rebuild only touched targets and stop on compile errors
-- then continue the approved local-only geth validation flow
+It no longer uses subject_id, subject_type, built-in subject enums, protobuf oneof payload, or GenericSubject.
+
+Primary next step:
+The evmrelay bridge claim payload decoder and SuperGenius bridge consensus adapter are done.
+
+Next parent SuperGenius step:
+Route finalized `gnus.bridge_event.v1` certificates into the existing bridge mint/claim completion path using the bridge-owned adapter in `src/account/BridgeConsensusAdapter.hpp/.cpp`.
+
+Keep bridge parsing outside core consensus. Add tests for proposal/certificate handling and successful finalized bridge claim routing.
 ```

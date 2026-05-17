@@ -25,37 +25,59 @@ echo "Host: $HOST, Port: $PORT, Pubkey: $PUBKEY"
 
 ### Step 3: Connect
 ```bash
-cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/rlp/build/OSX/Debug
-./eth_watch "$HOST" "$PORT" "$PUBKEY"
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/build/OSX/Debug
+./examples/eth_watch/eth_watch "$HOST" "$PORT" "$PUBKEY"
 ```
 
 ## Useful Commands
 
 ### Clean build
 ```bash
-cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/rlp/build/OSX/Debug
-ninja clean && ninja eth_watch
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/build/OSX/Debug
+cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Debug
+ninja
 ```
 
 ### Run all tests
 ```bash
-cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/rlp/build/OSX/Debug
-ninja test
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/build/OSX/Debug
+ctest --output-on-failure
 ```
 
 ### Run specific test
 ```bash
-cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/rlp/build/OSX/Debug
-./rlp_decoder_tests
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/build/OSX/Debug
+./test_bin/rlp_decoder_tests
 ```
 
-### Using bootstrap nodes (for reference)
+### Watching cached chain peers
 ```bash
-# These won't send block data, but will connect
-cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/rlp/build/OSX/Debug
-./eth_watch --chain sepolia    # Uses bootstrap node (no messages)
-./eth_watch --chain mainnet    # Uses bootstrap node (no messages)
-./eth_watch --chain polygon    # Uses bootstrap node (no messages)
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/build/OSX/Debug
+
+# Single chain, canonical cache key
+./examples/eth_watch/eth_watch --chain ethereum-sepolia --watch-event 'Transfer(address,address,uint256)'
+
+# Four mainnet EVM chains at once
+./examples/eth_watch/eth_watch --all-chains --watch-event 'Transfer(address,address,uint256)' --display-events 2
+```
+
+### Local geth direct-mode repro
+```bash
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/go-ethereum
+./build/bin/geth --sepolia --datadir /tmp/evmrelay-geth-sepolia --port 30303 --http --http.addr 127.0.0.1 --http.port 8545 --http.api admin,eth,net,web3 --nat extip:127.0.0.1 --nodiscover --maxpeers 2 --netrestrict 127.0.0.0/8
+
+# In another shell, get the enode:
+./build/bin/geth --datadir /tmp/evmrelay-geth-attach attach --exec 'admin.nodeInfo.enode' http://127.0.0.1:8545
+
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/build/OSX/Debug
+./examples/eth_watch/eth_watch --chain ethereum-sepolia --chain-peers-json ../../../rlp_enodes/output/chain_enodes.json --direct-enode '<local-geth-enode>' --watch-event 'Transfer(address,address,uint256)' --display-events 1 --log-level info --no-chain-peers-url
+```
+
+### Pre-download chain peer cache for sandboxed tests
+```bash
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/build/OSX/Debug
+curl -L https://enodes.gnus.ai/chain_enodes.json.gz -o chain_enodes.json.gz
+ctest -R discv4_chain_peers_test --output-on-failure
 ```
 
 ## Common Issues
@@ -75,20 +97,20 @@ cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGen
 ## File Locations
 
 ```
-Project Root: /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/rlp/
+Project Root: /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/
 
 Key Files:
-- ./test_eth_watch.sh               (Automated test)
-- ./QUICK_TEST_GUIDE.md             (This file)
-- ./PUBLIC_NODES_FOR_TESTING.md     (RPC endpoints & peer getting)
-- ./WHY_NO_MESSAGES.md              (Bootstrap vs real peers explanation)
-- ./build/OSX/Debug/eth_watch       (Executable binary)
+- ./examples/test_eth_watch.sh      (Automated test, if present locally)
+- ./AgentDocs/QUICK_TEST_GUIDE.md   (Quick guide)
+- ./AgentDocs/PUBLIC_NODES_FOR_TESTING.md
+- ./AgentDocs/WHY_NO_MESSAGES.md
+- ./build/OSX/Debug/examples/eth_watch/eth_watch
 
 Source Code:
 - ./include/eth/messages.hpp        (ETH protocol messages)
 - ./include/eth/eth_types.hpp       (Message types)
 - ./include/rlpx/                   (RLPx protocol)
-- ./examples/eth_watch.cpp          (eth_watch source)
+- ./examples/eth_watch/eth_watch.cpp
 ```
 
 ## Resources
@@ -98,5 +120,3 @@ Source Code:
 - **RLPx**: https://github.com/ethereum/devp2p/blob/master/rlpx.md
 - **ETH Protocol**: https://github.com/ethereum/devp2p/blob/master/caps/eth.md
 - **discv4**: https://github.com/ethereum/devp2p/blob/master/discv4.md
-
-

@@ -12,7 +12,9 @@ namespace {
 
 constexpr std::string_view kBridgeEventDomain = "GNUS_BRIDGE_EVENT_V1";
 
-codec::ByteBuffer claim_signing_bytes(const BridgeEventClaim& claim)
+} // namespace
+
+codec::ByteBuffer bridge_event_claim_payload(const BridgeEventClaim& claim)
 {
     namespace bytes = rlp::base::byte_encoding;
 
@@ -44,8 +46,6 @@ codec::ByteBuffer claim_signing_bytes(const BridgeEventClaim& claim)
     return out;
 }
 
-} // namespace
-
 Hash256 bridge_event_domain_separator(
     uint64_t       src_chain_id,
     uint64_t       dest_chain_id,
@@ -63,7 +63,7 @@ Hash256 bridge_event_domain_separator(
 
 Hash256 bridge_event_claim_hash(const BridgeEventClaim& claim) noexcept
 {
-    const auto bytes = claim_signing_bytes(claim);
+    const auto bytes = bridge_event_claim_payload(claim);
     return abi::keccak256(bytes.data(), bytes.size());
 }
 

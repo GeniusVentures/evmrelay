@@ -10,6 +10,9 @@
 
 namespace eth {
 
+/// @brief Canonical bytes for bridge-event consensus payloads and watcher signatures.
+[[nodiscard]] codec::ByteBuffer bridge_event_claim_payload(const BridgeEventClaim& claim);
+
 [[nodiscard]] Hash256 bridge_event_domain_separator(
     uint64_t       src_chain_id,
     uint64_t       dest_chain_id,

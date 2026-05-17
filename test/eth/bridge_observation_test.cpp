@@ -86,6 +86,52 @@ TEST(BridgeObservationTest, ClaimPayloadIsCanonical)
     EXPECT_NE(first, different);
 }
 
+TEST(BridgeObservationTest, ClaimPayloadRoundTrips)
+{
+    const auto claim = make_claim();
+    const auto payload = eth::bridge_event_claim_payload(claim);
+    const auto decoded = eth::decode_bridge_event_claim_payload(payload);
+
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(eth::bridge_event_claim_payload(*decoded), payload);
+    EXPECT_EQ(decoded->src_chain_id, claim.src_chain_id);
+    EXPECT_EQ(decoded->dest_chain_id, claim.dest_chain_id);
+    EXPECT_EQ(decoded->block_number, claim.block_number);
+    EXPECT_EQ(decoded->block_hash, claim.block_hash);
+    EXPECT_EQ(decoded->tx_hash, claim.tx_hash);
+    EXPECT_EQ(decoded->log_index, claim.log_index);
+    EXPECT_EQ(decoded->bridge_contract, claim.bridge_contract);
+    EXPECT_EQ(decoded->event_topic0, claim.event_topic0);
+    EXPECT_EQ(decoded->topics, claim.topics);
+    EXPECT_EQ(decoded->data, claim.data);
+    EXPECT_EQ(decoded->sender, claim.sender);
+    EXPECT_EQ(decoded->token_id_or_nonce, claim.token_id_or_nonce);
+    EXPECT_EQ(decoded->amount, claim.amount);
+    EXPECT_EQ(decoded->recipient, claim.recipient);
+    EXPECT_EQ(decoded->observed_at, claim.observed_at);
+    EXPECT_EQ(decoded->finality_depth, claim.finality_depth);
+}
+
+TEST(BridgeObservationTest, RejectsMalformedClaimPayload)
+{
+    auto payload = eth::bridge_event_claim_payload(make_claim());
+    ASSERT_FALSE(payload.empty());
+
+    auto truncated = payload;
+    truncated.pop_back();
+    EXPECT_FALSE(eth::decode_bridge_event_claim_payload(truncated).has_value());
+
+    auto bad_domain = payload;
+    bad_domain.front() ^= 0x01;
+    EXPECT_FALSE(eth::decode_bridge_event_claim_payload(bad_domain).has_value());
+
+    auto trailing = payload;
+    trailing.push_back(0x00);
+    EXPECT_FALSE(eth::decode_bridge_event_claim_payload(trailing).has_value());
+
+    EXPECT_FALSE(eth::decode_bridge_event_claim_payload(eth::codec::ByteBuffer{0x01, 0x02, 0x03}).has_value());
+}
+
 TEST(BridgeObservationTest, SignsAndVerifiesObservation)
 {
     const auto claim = make_claim();

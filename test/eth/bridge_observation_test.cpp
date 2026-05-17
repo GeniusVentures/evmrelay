@@ -71,6 +71,21 @@ TEST(BridgeObservationTest, ClaimHashDependsOnClaimFields)
     EXPECT_NE(eth::bridge_event_claim_hash(claim), eth::bridge_event_claim_hash(changed));
 }
 
+TEST(BridgeObservationTest, ClaimPayloadIsCanonical)
+{
+    auto claim = make_claim();
+    auto changed = claim;
+    changed.amount = intx::uint256{1001};
+
+    const auto first = eth::bridge_event_claim_payload(claim);
+    const auto second = eth::bridge_event_claim_payload(claim);
+    const auto different = eth::bridge_event_claim_payload(changed);
+
+    EXPECT_FALSE(first.empty());
+    EXPECT_EQ(first, second);
+    EXPECT_NE(first, different);
+}
+
 TEST(BridgeObservationTest, SignsAndVerifiesObservation)
 {
     const auto claim = make_claim();

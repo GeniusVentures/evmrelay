@@ -4,6 +4,7 @@
 #include <eth/bridge_observation.hpp>
 #include <eth/abi_decoder.hpp>
 #include <base/byte_encoding.hpp>
+#include <algorithm>
 #include <string_view>
 
 namespace eth {
@@ -11,6 +12,136 @@ namespace eth {
 namespace {
 
 constexpr std::string_view kBridgeEventDomain = "GNUS_BRIDGE_EVENT_V1";
+
+class PayloadReader
+{
+public:
+    explicit PayloadReader(const codec::ByteBuffer& payload) noexcept
+        : data_(payload.data()), size_(payload.size())
+    {
+    }
+
+    [[nodiscard]] bool read_domain() noexcept
+    {
+        if (remaining() < kBridgeEventDomain.size())
+        {
+            return false;
+        }
+        const std::string_view actual(
+            reinterpret_cast<const char*>(data_ + offset_),
+            kBridgeEventDomain.size());
+        if (actual != kBridgeEventDomain)
+        {
+            return false;
+        }
+        offset_ += kBridgeEventDomain.size();
+        return true;
+    }
+
+    [[nodiscard]] bool read_u32(uint32_t& value) noexcept
+    {
+        if (remaining() < sizeof(uint32_t))
+        {
+            return false;
+        }
+        value = 0;
+        for (size_t i = 0; i < sizeof(uint32_t); ++i)
+        {
+            value = (value << 8) | data_[offset_++];
+        }
+        return true;
+    }
+
+    [[nodiscard]] bool read_u64(uint64_t& value) noexcept
+    {
+        if (remaining() < sizeof(uint64_t))
+        {
+            return false;
+        }
+        value = 0;
+        for (size_t i = 0; i < sizeof(uint64_t); ++i)
+        {
+            value = (value << 8) | data_[offset_++];
+        }
+        return true;
+    }
+
+    template <size_t N>
+    [[nodiscard]] bool read_array(std::array<uint8_t, N>& value) noexcept
+    {
+        if (remaining() < N)
+        {
+            return false;
+        }
+        std::copy(data_ + offset_, data_ + offset_ + N, value.begin());
+        offset_ += N;
+        return true;
+    }
+
+    [[nodiscard]] bool read_uint256(intx::uint256& value) noexcept
+    {
+        if (remaining() < 32)
+        {
+            return false;
+        }
+        value = 0;
+        for (size_t i = 0; i < 32; ++i)
+        {
+            value = (value << 8) | data_[offset_++];
+        }
+        return true;
+    }
+
+    template <size_t N>
+    [[nodiscard]] bool read_length_prefixed_arrays(
+        std::vector<std::array<uint8_t, N>>& values) noexcept
+    {
+        uint64_t count = 0;
+        if (!read_u64(count) || count > remaining() / N)
+        {
+            return false;
+        }
+        values.clear();
+        values.reserve(static_cast<size_t>(count));
+        for (uint64_t i = 0; i < count; ++i)
+        {
+            std::array<uint8_t, N> value{};
+            if (!read_array(value))
+            {
+                return false;
+            }
+            values.push_back(value);
+        }
+        return true;
+    }
+
+    [[nodiscard]] bool read_length_prefixed_bytes(codec::ByteBuffer& value) noexcept
+    {
+        uint64_t length = 0;
+        if (!read_u64(length) || length > remaining())
+        {
+            return false;
+        }
+        value.assign(data_ + offset_, data_ + offset_ + length);
+        offset_ += static_cast<size_t>(length);
+        return true;
+    }
+
+    [[nodiscard]] bool finished() const noexcept
+    {
+        return offset_ == size_;
+    }
+
+private:
+    [[nodiscard]] size_t remaining() const noexcept
+    {
+        return size_ - offset_;
+    }
+
+    const uint8_t* data_ = nullptr;
+    size_t         size_ = 0;
+    size_t         offset_ = 0;
+};
 
 } // namespace
 
@@ -44,6 +175,37 @@ codec::ByteBuffer bridge_event_claim_payload(const BridgeEventClaim& claim)
     bytes::append_u64_be(out, claim.finality_depth);
 
     return out;
+}
+
+std::optional<BridgeEventClaim> decode_bridge_event_claim_payload(
+    const codec::ByteBuffer& payload) noexcept
+{
+    PayloadReader reader(payload);
+    BridgeEventClaim claim;
+
+    if (!reader.read_domain() ||
+        !reader.read_u64(claim.src_chain_id) ||
+        !reader.read_u64(claim.dest_chain_id) ||
+        !reader.read_array(claim.bridge_contract) ||
+        !reader.read_u64(claim.block_number) ||
+        !reader.read_array(claim.block_hash) ||
+        !reader.read_array(claim.tx_hash) ||
+        !reader.read_u32(claim.log_index) ||
+        !reader.read_array(claim.event_topic0) ||
+        !reader.read_length_prefixed_arrays(claim.topics) ||
+        !reader.read_length_prefixed_bytes(claim.data) ||
+        !reader.read_array(claim.sender) ||
+        !reader.read_uint256(claim.token_id_or_nonce) ||
+        !reader.read_uint256(claim.amount) ||
+        !reader.read_array(claim.recipient) ||
+        !reader.read_u64(claim.observed_at) ||
+        !reader.read_u64(claim.finality_depth) ||
+        !reader.finished())
+    {
+        return std::nullopt;
+    }
+
+    return claim;
 }
 
 Hash256 bridge_event_domain_separator(

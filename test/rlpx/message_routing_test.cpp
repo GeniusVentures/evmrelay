@@ -203,7 +203,8 @@ TEST_F(MessageRoutingTest, WireIdBelowNegotiatedEthOffsetDoesNotNormalize) {
     EXPECT_FALSE(local_eth_id.has_value());
 }
 
-TEST_F(MessageRoutingTest, ZeroNegotiatedEthOffsetDoesNotNormalize) {
+TEST_F(MessageRoutingTest, ZeroNegotiatedEthOffsetNormalizesBaseWireId) {
     const auto local_eth_id = rlpx::RlpxSession::normalize_eth_message_id_for_test(0x10, 0x00);
-    EXPECT_FALSE(local_eth_id.has_value());
+    ASSERT_TRUE(local_eth_id.has_value());
+    EXPECT_EQ(*local_eth_id, 0x10);
 }

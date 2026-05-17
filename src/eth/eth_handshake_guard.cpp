@@ -10,7 +10,7 @@ std::optional<uint8_t> NormalizeEthWireMessageId(
     uint8_t wire_message_id,
     uint8_t negotiated_eth_offset) noexcept
 {
-    if (negotiated_eth_offset == 0U || wire_message_id < negotiated_eth_offset)
+    if (wire_message_id < negotiated_eth_offset)
     {
         return std::nullopt;
     }

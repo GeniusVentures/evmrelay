@@ -142,7 +142,17 @@ TEST(EthHandshakeGuardTest, NormalizeEthWireMessageIdReturnsEthLocalId)
     const auto normalized = eth::NormalizeEthWireMessageId(0x11, kNegotiatedEthOffset);
 
     ASSERT_TRUE(normalized.has_value());
-    EXPECT_EQ(*normalized, 1U);
+    EXPECT_EQ(normalized.value(), 1U);
+}
+
+TEST(EthHandshakeGuardTest, NormalizeEthWireMessageIdAcceptsBaseProtocolMessages)
+{
+    const auto normalized = eth::NormalizeEthWireMessageId(
+        eth::protocol::kStatusMessageId,
+        0U);
+
+    ASSERT_TRUE(normalized.has_value());
+    EXPECT_EQ(normalized.value(), eth::protocol::kStatusMessageId);
 }
 
 TEST(EthHandshakeGuardTest, HandleHandshakeAcceptsValidStatusFirst)
@@ -259,6 +269,62 @@ TEST(EthHandshakeGuardTest, ExtractLatestBlockNumberReturnsEth69LatestBlock)
 
     ASSERT_TRUE(decoded.has_value());
     EXPECT_EQ(eth::ExtractLatestBlockNumber(decoded.value()), 100U);
+}
+
+TEST(EthHandshakeGuardTest, DecodeValidatedStatusMessageAcceptsBaseProtocolStatusAtZeroOffset)
+{
+    eth::StatusMessage68 status;
+    status.protocol_version = eth::kEthProtocolVersion68;
+    status.network_id = kSepoliaNetworkID;
+    status.genesis_hash = make_sepolia_genesis();
+    status.fork_id = make_sepolia_fork_id();
+    status.td = 0;
+    status.blockhash = make_sepolia_genesis();
+
+    auto encoded = eth::protocol::encode_status(status);
+    ASSERT_TRUE(encoded.has_value());
+
+    rlpx::protocol::Message message{};
+    message.id = eth::protocol::kStatusMessageId;
+    message.payload = std::move(encoded.value());
+
+    const auto decoded = eth::DecodeValidatedStatusMessage(
+        message,
+        0U,
+        eth::kEthProtocolVersion68,
+        kSepoliaNetworkID,
+        make_sepolia_genesis());
+
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(eth::get_common_fields(decoded.value()).protocol_version, eth::kEthProtocolVersion68);
+}
+
+TEST(EthHandshakeGuardTest, DecodeValidatedStatusMessageAcceptsEth68AtNegotiatedOffset)
+{
+    eth::StatusMessage68 status;
+    status.protocol_version = eth::kEthProtocolVersion68;
+    status.network_id = kSepoliaNetworkID;
+    status.genesis_hash = make_sepolia_genesis();
+    status.fork_id = make_sepolia_fork_id();
+    status.td = 0;
+    status.blockhash = make_sepolia_genesis();
+
+    auto encoded = eth::protocol::encode_status(status);
+    ASSERT_TRUE(encoded.has_value());
+
+    rlpx::protocol::Message message{};
+    message.id = static_cast<uint8_t>(kNegotiatedEthOffset + eth::protocol::kStatusMessageId);
+    message.payload = std::move(encoded.value());
+
+    const auto decoded = eth::DecodeValidatedStatusMessage(
+        message,
+        kNegotiatedEthOffset,
+        eth::kEthProtocolVersion68,
+        kSepoliaNetworkID,
+        make_sepolia_genesis());
+
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(eth::get_common_fields(decoded.value()).protocol_version, eth::kEthProtocolVersion68);
 }
 
 } // namespace

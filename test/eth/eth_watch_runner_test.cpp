@@ -5,6 +5,7 @@
 #include <eth/eth_watch_runner.hpp>
 #include <eth/messages.hpp>
 #include <eth/eth_types.hpp>
+#include <boost/asio/spawn.hpp>
 
 namespace {
 
@@ -86,6 +87,19 @@ public:
         }
         sentMessages.push_back(std::move(message));
         return rlp::outcome::success();
+    }
+
+    [[nodiscard]] rlpx::Result<rlpx::framing::Message> receive_message(
+        boost::asio::yield_context /*yield*/) noexcept override
+    {
+        return rlpx::SessionError::kNotConnected;
+    }
+
+    [[nodiscard]] rlpx::Result<rlpx::framing::Message> receive_message_with_timeout(
+        std::chrono::steady_clock::duration /*timeout*/,
+        boost::asio::yield_context          /*yield*/) noexcept override
+    {
+        return rlpx::SessionError::kNotConnected;
     }
 
     void set_eth_message_handler(rlpx::EthMessageHandler handler) noexcept override

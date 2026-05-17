@@ -2,7 +2,7 @@
 
 ## The Issue
 
-When you run `./eth_watch --chain sepolia`, it connects and prints "Connected. Waiting for messages..." but **no messages arrive**. This is **expected behavior** because:
+When you connect `eth_watch` directly to a bootstrap node and it prints "Connected. Waiting for messages..." but **no messages arrive**, this is **expected behavior** because:
 
 ### Bootstrap Nodes are Discovery-Only
 
@@ -57,19 +57,19 @@ Real Ethereum nodes provide block data via the **RLPx + ETH protocol** (TCP). Th
                     (NewBlockHashes, NewBlock, etc.)
 ```
 
-## Current Limitations
+## Current Status
 
 ### What Works
-- ✅ Bootnode configurations for 8 EVM chains
+- ✅ Chain peer cache loading for supported EVM chains
+- ✅ `eth_watch --chain <canonical-chain>` dials cached peers
+- ✅ `eth_watch --all-chains` watches Ethereum, Polygon, BNB Smart Chain, and Base mainnets together
 - ✅ RLPx connection to any node
 - ✅ ETH protocol Status message exchange
-- ✅ Generic message parsing for ETH protocol
+- ✅ Event watcher registration, receipt processing, ABI decoding, and callback dispatch
 
 ### What's Missing
-- ❌ Full discv4 implementation (partially implemented, not complete)
-- ❌ K-Bucket routing for peer discovery
-- ❌ NEIGHBOURS message parsing
-- ❌ Automatic peer discovery from bootstrap nodes
+- ❌ Runtime reliability still depends on live peer availability and whether selected peers send useful ETH messages
+- ❌ Canonical/finality verification remains separate from basic event callback demonstration
 
 ## Solution: Connect to Real Peer Nodes
 
@@ -84,7 +84,16 @@ curl -s -X POST https://eth.llamarpc.com \
 
 Then connect directly:
 ```bash
-./eth_watch <peer_host> <peer_port> <peer_pubkey_hex>
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/build/OSX/Debug
+./examples/eth_watch/eth_watch <peer_host> <peer_port> <peer_pubkey_hex>
+```
+
+Or use cached chain peers:
+
+```bash
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/build/OSX/Debug
+./examples/eth_watch/eth_watch --chain ethereum-sepolia --watch-event 'Transfer(address,address,uint256)'
+./examples/eth_watch/eth_watch --all-chains --watch-event 'Transfer(address,address,uint256)' --display-events 2
 ```
 
 ### Option 2: Run Your Own Full Node
@@ -108,9 +117,9 @@ Use those binaries to exercise automatic peer discovery from bootstrap nodes ins
 
 ## Next Steps
 
-1. **Short-term**: Use real peer node enodes for testing
-2. **Medium-term**: Continue improving the existing `discv4_client` + scheduler discovery flow
-3. **Long-term**: Add peer caching, K-Bucket routing, persistence
+1. **Short-term**: Use cached chain peers or direct real peer enodes for testing.
+2. **Medium-term**: Continue improving peer quality and connection recycling in the existing scheduler flow.
+3. **Long-term**: Add stronger canonical/finality verification around event observations.
 
 ## References
 
@@ -118,5 +127,4 @@ Use those binaries to exercise automatic peer discovery from bootstrap nodes ins
 - [discv4 Protocol](https://github.com/ethereum/devp2p/blob/master/discv4.md)
 - [RLPx Transport Protocol](https://github.com/ethereum/devp2p/blob/master/rlpx.md)
 - [eth Protocol Specification](https://github.com/ethereum/devp2p/blob/master/caps/eth.md)
-
 

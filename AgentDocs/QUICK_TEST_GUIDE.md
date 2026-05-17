@@ -9,21 +9,22 @@ I've created two new resources to help you test with real Ethereum peers:
 - Shows how to query for live peer information
 - Provides examples and scripts
 
-### 2. **test_eth_watch.sh** (Automated!)
-Located in: `/Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/rlp/`
+### 2. **eth_watch** chain-peer cache mode
+Located in: `/Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/build/OSX/Debug/examples/eth_watch/eth_watch`
 
 Usage:
 ```bash
-cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/rlp
-./test_eth_watch.sh sepolia    # Test Sepolia testnet
-./test_eth_watch.sh mainnet    # Test Ethereum mainnet
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/build/OSX/Debug
+./examples/eth_watch/eth_watch --chain ethereum-sepolia --watch-event 'Transfer(address,address,uint256)'
+./examples/eth_watch/eth_watch --all-chains --watch-event 'Transfer(address,address,uint256)' --display-events 2
 ```
 
-The script will:
-1. ✅ Query a public RPC for active peers
-2. ✅ Parse the enode string
-3. ✅ Connect to the peer with eth_watch
-4. ✅ Show connection results
+`--all-chains` watches cached peers for:
+
+- `ethereum-mainnet`
+- `polygon-mainnet`
+- `bnb-smart-chain`
+- `base-mainnet`
 
 ## Quick Manual Test
 
@@ -42,9 +43,24 @@ HOST=$(echo "$PEER" | sed 's/.*@\([^:]*\):.*/\1/')
 PORT=$(echo "$PEER" | sed 's/.*:\([0-9]*\)$/\1/')
 
 # 3. Connect
-cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/rlp/build/OSX/Debug
-./eth_watch "$HOST" "$PORT" "$PUBKEY"
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/build/OSX/Debug
+./examples/eth_watch/eth_watch "$HOST" "$PORT" "$PUBKEY"
 ```
+
+## Chain Peer Cache for Sandboxed Tests
+
+`discv4_chain_peers_test` can use a pre-downloaded cache instead of live DNS/network.
+Do not assume a source-tree `rlp_enodes/` directory exists.
+
+```bash
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/build/OSX/Debug
+curl -L https://enodes.gnus.ai/chain_enodes.json.gz -o chain_enodes.json.gz
+ctest -R discv4_chain_peers_test --output-on-failure
+```
+
+CTest sets `EVMRELAY_CHAIN_ENODES_JSON=${CMAKE_BINARY_DIR}/chain_enodes.json.gz` for
+`discv4_chain_peers_test`. If that file is absent, the test falls back to the live URL
+and requires network access.
 
 ## Public RPC Endpoints (No Auth Required)
 
@@ -76,12 +92,12 @@ NewBlockHashes: 1 hash
 ## Files Created/Updated
 
 ```
- /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/rlp/
-├── PUBLIC_NODES_FOR_TESTING.md        (NEW - Complete reference guide)
-├── test_eth_watch.sh                  (NEW - Automated test script)
-├── WHY_NO_MESSAGES.md                 (Created earlier - explains bootstrap vs peers)
-├── BOOTNODES_CONFIGURATION.md         (Updated - added peer discovery info)
-└── build/OSX/Debug/eth_watch          (Binary ready to use)
+ /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/
+├── AgentDocs/PUBLIC_NODES_FOR_TESTING.md
+├── AgentDocs/WHY_NO_MESSAGES.md
+├── AgentDocs/BOOTNODES_CONFIGURATION.md
+├── examples/eth_watch/eth_watch.cpp
+└── build/OSX/Debug/examples/eth_watch/eth_watch
 ```
 
 ## What Each File Does
@@ -93,11 +109,6 @@ NewBlockHashes: 1 hash
 
 ## Next Steps
 
-1. **For Quick Testing**: Run `./test_eth_watch.sh sepolia`
+1. **For Quick Testing**: Run `./examples/eth_watch/eth_watch --chain ethereum-sepolia --watch-event 'Transfer(address,address,uint256)'`
 2. **For Discovery Debugging**: Use the maintained C++ discovery harnesses under `examples/discovery/` (for example `test_discovery.cpp` and `test_enr_survey.cpp`)
 3. **For Development**: Use a local Geth node with `--http --http.api admin,web3,eth,net`
-
----
-
-All the infrastructure is now in place to connect to real peers and receive block data! 🚀
-

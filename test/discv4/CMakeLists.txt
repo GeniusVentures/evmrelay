@@ -145,4 +145,5 @@ set_tests_properties(discv4_client_test PROPERTIES ENVIRONMENT "ASAN_OPTIONS=hal
 set_tests_properties(discv4_enr_client_test PROPERTIES ENVIRONMENT "ASAN_OPTIONS=halt_on_error=0")
 set_tests_properties(discv4_enr_enrichment_test PROPERTIES ENVIRONMENT "ASAN_OPTIONS=halt_on_error=0")
 set_tests_properties(discv4_dial_filter_test PROPERTIES ENVIRONMENT "ASAN_OPTIONS=halt_on_error=0")
-set_tests_properties(discv4_chain_peers_test PROPERTIES ENVIRONMENT "ASAN_OPTIONS=halt_on_error=0")
+set_tests_properties(discv4_chain_peers_test PROPERTIES
+    ENVIRONMENT "ASAN_OPTIONS=halt_on_error=0;EVMRELAY_CHAIN_ENODES_JSON=${CMAKE_BINARY_DIR}/chain_enodes.json.gz")

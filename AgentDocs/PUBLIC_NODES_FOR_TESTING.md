@@ -127,7 +127,7 @@ echo "Port: $PORT"
 
 ### Step 3: Connect with eth_watch
 ```bash
-./eth_watch "$HOST" "$PORT" "$PUBKEY"
+./examples/eth_watch/eth_watch "$HOST" "$PORT" "$PUBKEY"
 ```
 
 ## Automated Test Script
@@ -178,7 +178,7 @@ echo "   Host: $HOST"
 echo "   Port: $PORT"
 echo "   Pubkey: ${PUBKEY:0:20}..."
 
-timeout $TIMEOUT ./eth_watch "$HOST" "$PORT" "$PUBKEY" || true
+timeout $TIMEOUT ./examples/eth_watch/eth_watch "$HOST" "$PORT" "$PUBKEY" || true
 
 echo ""
 echo "Test complete!"

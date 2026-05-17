@@ -16,6 +16,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include <csignal>
@@ -39,6 +40,14 @@ namespace {
 
 inline constexpr const char* kDefaultChainPeersUrl = "https://enodes.gnus.ai/chain_enodes.json.gz";
 inline constexpr auto kWatchStatsInterval = std::chrono::seconds(4);
+inline constexpr uint64_t kDefaultDetailedEventLimit = 2;
+
+const std::array<std::string_view, 4> kDefaultMainnetChains{
+    "ethereum-mainnet",
+    "polygon-mainnet",
+    "bnb-smart-chain",
+    "base-mainnet",
+};
 
 
 struct Config {
@@ -55,6 +64,13 @@ struct Config {
     eth::Hash256 genesis_hash{};
     eth::ForkId  fork_id{};   ///< EIP-2124 fork identifier; set per chain
     std::vector<discv4::ValidatedPeer> chain_peers;
+};
+
+struct WatchOutputState
+{
+    uint64_t total_events = 0;
+    uint64_t detailed_event_limit = kDefaultDetailedEventLimit;
+    std::unordered_map<std::string, uint64_t> events_by_chain;
 };
 
 std::optional<eth::Hash256> parse_hash256(std::string_view value)
@@ -153,6 +169,7 @@ void print_usage(const char* exe)
     std::cout << "Usage:\n"
               << "  " << exe << " <host> <port> <peer_pubkey_hex>\n"
               << "  " << exe << " --chain <chain_name>\n"
+              << "  " << exe << " --all-chains\n"
               << "  " << exe << " --chain <chain_name> --chain-peers-json <path>\n"
               << "  " << exe << " --chain <chain_name> --chain-peers-url <url>\n"
               << "  " << exe << " --chain <chain_name> --direct-enode <enode://...>\n"
@@ -165,11 +182,13 @@ void print_usage(const char* exe)
               << "  --watch-contract <0x20byteHex>   Contract address to filter (omit for any)\n"
               << "  --watch-event    <signature>      Event signature, e.g. Transfer(address,address,uint256)\n"
               << "  Each --watch-event pairs with the preceding --watch-contract (or any contract if none).\n"
+              << "  --display-events <count>          Print full decoded details for only the first count matches (default 2).\n"
               << "\nExamples:\n"
-              << "  " << exe << " --chain sepolia --watch-event Transfer(address,address,uint256)\n"
-              << "  " << exe << " --chain sepolia --direct-enode enode://<pubkey>@<host>:<port> --watch-event Transfer(address,address,uint256)\n"
+              << "  " << exe << " --chain ethereum-sepolia --watch-event Transfer(address,address,uint256)\n"
+              << "  " << exe << " --all-chains --watch-event Transfer(address,address,uint256)\n"
+              << "  " << exe << " --chain ethereum-sepolia --direct-enode enode://<pubkey>@<host>:<port> --watch-event Transfer(address,address,uint256)\n"
               << "  " << exe << " 127.0.0.1 30303 <pubkey> --network-id 1337 --genesis-hash 0xfa742c20043b1d8a13ea6421d85e9678429f9f50c2e25b2814c61f7444504fec --log-level debug\n"
-              << "  " << exe << " --chain mainnet --watch-contract 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 --watch-event Transfer(address,address,uint256)\n"
+              << "  " << exe << " --chain ethereum-mainnet --watch-contract 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 --watch-event Transfer(address,address,uint256)\n"
               << "\nAvailable chains:\n"
               << "  ethereum-mainnet, ethereum-sepolia, ethereum-holesky\n"
               << "  polygon-mainnet, polygon-amoy\n"
@@ -184,19 +203,20 @@ void print_usage(const char* exe)
 void run_watch(std::string host,
                uint16_t port,
                rlpx::PublicKey peer_pubkey,
+               std::string chain_name,
                uint64_t network_id,
                eth::Hash256 genesis_hash,
                eth::ForkId fork_id,
                const std::vector<eth::cli::WatchSpec>& watch_specs,
+               std::shared_ptr<WatchOutputState> output_state,
                const std::function<void()>& on_done,
                const std::function<void(std::shared_ptr<rlpx::RlpxSession>)>& on_connected,
                boost::asio::yield_context yield)
 {
-    (void)on_connected;
-
     static auto log = rlp::base::createLogger("eth_watch");
 
-    SPDLOG_LOGGER_DEBUG(log, "run_watch: begin host={} port={} network_id={}", host, port, network_id);
+    SPDLOG_LOGGER_DEBUG(log, "run_watch: begin chain={} host={} port={} network_id={}",
+                        chain_name, host, port, network_id);
 
     auto keypair_result = rlpx::crypto::Ecdh::generate_ephemeral_keypair();
     if (!keypair_result)
@@ -234,7 +254,7 @@ void run_watch(std::string host,
     auto session = std::move(session_result.value());
     auto watch_runner = std::make_shared<eth::EthWatchRunner>(
         session,
-        std::to_string(network_id),
+        chain_name,
         network_id,
         genesis_hash,
         fork_id);
@@ -290,6 +310,7 @@ void run_watch(std::string host,
     const uint64_t latest_block = eth::ExtractLatestBlockNumber(handshake_result.value().remote_status);
     status_received->store(true);
     status_timeout->cancel();
+    on_connected(session);
     SPDLOG_LOGGER_INFO(log, "ETH Status: network_id={} protocol={} latest_block={}",
                        common.network_id,
                        static_cast<int>(common.protocol_version),
@@ -297,7 +318,7 @@ void run_watch(std::string host,
     SPDLOG_LOGGER_INFO(log, "Connected. Watching for events...");
     SPDLOG_LOGGER_DEBUG(log, "run_watch: local ETH Status queued");
 
-    watch_runner->set_event_callback([](const eth::WatchEventNotification& notification)
+    watch_runner->set_event_callback([output_state](const eth::WatchEventNotification& notification)
     {
         static auto ev_log = rlp::base::createLogger("eth_watch");
         auto bytes_to_hex = [](const auto& arr)
@@ -313,7 +334,12 @@ void run_watch(std::string host,
             return s;
         };
 
-        std::string header = notification.event_signature + " at block " +
+        ++output_state->total_events;
+        const auto chain_count = ++output_state->events_by_chain[notification.context.chain_name];
+
+        std::string header = "event_count=" + std::to_string(output_state->total_events) +
+                             " chain_count=" + std::to_string(chain_count) +
+                             " " + notification.event_signature + " at block " +
                              std::to_string(notification.event.block_number) +
                              " chain=" + notification.context.chain_name;
         if (notification.event.tx_hash != eth::codec::Hash256{})
@@ -321,6 +347,11 @@ void run_watch(std::string host,
             header += "  tx: 0x" + bytes_to_hex(notification.event.tx_hash);
         }
         SPDLOG_LOGGER_INFO(ev_log, "{}", header);
+
+        if (output_state->total_events > output_state->detailed_event_limit)
+        {
+            return;
+        }
 
         for (size_t i = 0; i < notification.values.size(); ++i)
         {
@@ -437,7 +468,7 @@ void run_watch(std::string host,
         static auto gh_log = rlp::base::createLogger("eth_watch");
         const uint8_t negotiated_eth_offset = session->negotiated_eth_offset();
         const auto eth_id = eth::NormalizeEthWireMessageId(msg.id, negotiated_eth_offset);
-        if (eth_id.has_value())
+        if (!eth_id.has_value())
         {
             return;
         }
@@ -507,9 +538,10 @@ void run_watch(std::string host,
 
         const auto stats = watch_runner->service().stats();
         SPDLOG_LOGGER_INFO(log,
-                           "Watch stats: eth_messages={} new_block_hashes={} new_blocks={} receipts_messages={} "
+                           "Watch stats [{}]: eth_messages={} new_block_hashes={} new_blocks={} receipts_messages={} "
                            "decode_failures={} receipts_requested={} receipts_processed={} logs_seen={} "
                            "matched_logs={} discarded_logs={} subscriptions={}",
+                           chain_name,
                            stats.eth_messages_seen,
                            stats.new_block_hashes_messages,
                            stats.new_block_messages,
@@ -573,11 +605,13 @@ int main(int argc, char** argv) {
         }
 
         std::optional<Config> config;
+        std::vector<Config> multi_chain_configs;
         int next_arg = 1;
         std::string chain_name;
         std::string chain_peers_json_path;
         std::string chain_peers_url = kDefaultChainPeersUrl;
         bool chain_peers_url_enabled = true;
+        auto output_state = std::make_shared<WatchOutputState>();
 
         for (int i = 1; i < argc; ++i)
         {
@@ -622,6 +656,34 @@ int main(int argc, char** argv) {
             apply_chain_peer_config(cfg, *chain_peer_config);
             config = std::move(cfg);
             chain_name = config->canonical_chain_name;
+        } else if (std::string_view(argv[next_arg]) == "--all-chains") {
+            ++next_arg;
+            for (const auto selected_chain_name : kDefaultMainnetChains)
+            {
+                const auto chain_peer_config = load_chain_peer_config(
+                    std::string(selected_chain_name),
+                    argv[0],
+                    chain_peers_json_path,
+                    chain_peers_url,
+                    chain_peers_url_enabled);
+                if (!chain_peer_config.has_value())
+                {
+                    std::cout << "Unknown or unconfigured chain: " << selected_chain_name << "\n"
+                              << "Expected chain metadata in chain peer cache/file.\n";
+                    return 1;
+                }
+
+                Config cfg{};
+                apply_chain_peer_config(cfg, *chain_peer_config);
+                multi_chain_configs.push_back(std::move(cfg));
+            }
+            if (multi_chain_configs.empty())
+            {
+                std::cout << "--all-chains did not load any chain configs.\n";
+                return 1;
+            }
+            config = multi_chain_configs.front();
+            chain_name = "all-chains";
         } else if (argc >= 4) {
             const auto port_value = rlp::base::parse::uint16_decimal(argv[next_arg + 1]);
             if (!port_value) {
@@ -696,6 +758,18 @@ int main(int argc, char** argv) {
                 config->port = direct_config->port;
                 config->peer_pubkey_hex = direct_config->peer_pubkey_hex;
                 config->prefer_direct_enode = true;
+                next_arg += 2;
+            } else if (arg == "--display-events") {
+                if (next_arg + 1 >= argc) {
+                    std::cout << "--display-events requires an integer argument.\n";
+                    return 1;
+                }
+                const auto display_events = rlp::base::parse::uint64_decimal(argv[next_arg + 1]);
+                if (!display_events) {
+                    std::cout << "Invalid --display-events value.\n";
+                    return 1;
+                }
+                output_state->detailed_event_limit = *display_events;
                 next_arg += 2;
             } else if (arg == "--network-id") {
                 if (next_arg + 1 >= argc) {
@@ -772,9 +846,24 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (config->prefer_direct_enode && !config->fork_id_overridden)
+        if (config->prefer_direct_enode &&
+            !config->fork_id_overridden &&
+            config->canonical_chain_name.empty())
         {
             config->fork_id = eth::ForkId{};
+        }
+
+        if (!multi_chain_configs.empty())
+        {
+            if (config->prefer_direct_enode)
+            {
+                std::cout << "--direct-enode cannot be combined with --all-chains.\n";
+                return 1;
+            }
+            for (auto& chain_config : multi_chain_configs)
+            {
+                chain_config.watch_specs = config->watch_specs;
+            }
         }
 
         boost::asio::io_context io;
@@ -784,7 +873,47 @@ int main(int argc, char** argv) {
             io.stop();
         });
 
-        if (config->use_chain_peer_cache && !config->prefer_direct_enode)
+        if (!multi_chain_configs.empty())
+        {
+            auto pool = std::make_shared<discv4::WatcherPool>(200, 10);
+            std::vector<std::shared_ptr<discv4::DialScheduler>> schedulers;
+            schedulers.reserve(multi_chain_configs.size());
+
+            static auto log = rlp::base::createLogger("eth_watch");
+            for (const auto& chain_config : multi_chain_configs)
+            {
+                const std::string chain_peer_chain_name = chain_config.canonical_chain_name;
+                const uint64_t   network_id   = chain_config.network_id;
+                const auto       genesis_hash = chain_config.genesis_hash;
+                const auto       fork_id      = chain_config.fork_id;
+                const auto       watch_specs  = chain_config.watch_specs;
+
+                auto scheduler = std::make_shared<discv4::DialScheduler>(
+                    io, pool,
+                    [chain_peer_chain_name, network_id, genesis_hash, fork_id, watch_specs, output_state]
+                    (discv4::ValidatedPeer                                            vp,
+                     std::function<void()>                                            on_done,
+                     std::function<void(std::shared_ptr<rlpx::RlpxSession>)>         on_connected,
+                     boost::asio::yield_context                                       yc)
+                    {
+                        run_watch(vp.peer.ip, vp.peer.tcp_port, vp.pubkey,
+                                  chain_peer_chain_name,
+                                  network_id, genesis_hash, fork_id, watch_specs,
+                                  output_state,
+                                  std::move(on_done), std::move(on_connected), yc);
+                    });
+
+                SPDLOG_LOGGER_INFO(log, "Dialing {} cached chain peers for chain '{}'",
+                                   chain_config.chain_peers.size(), chain_peer_chain_name);
+                for (const auto& peer : chain_config.chain_peers)
+                {
+                    scheduler->enqueue(peer);
+                }
+                schedulers.push_back(std::move(scheduler));
+            }
+            std::cout << "Dialing cached peers for Ethereum, Polygon, BNB Smart Chain, and Base...\n";
+        }
+        else if (config->use_chain_peer_cache && !config->prefer_direct_enode)
         {
             // Capture config values needed in the callback
             const std::string chain_peer_chain_name = config->canonical_chain_name;
@@ -799,14 +928,16 @@ int main(int argc, char** argv) {
             auto pool = std::make_shared<discv4::WatcherPool>(200, 10);
             auto scheduler = std::make_shared<discv4::DialScheduler>(
                 io, pool,
-                [network_id, genesis_hash, fork_id, watch_specs]
+                [chain_peer_chain_name, network_id, genesis_hash, fork_id, watch_specs, output_state]
                 (discv4::ValidatedPeer                                            vp,
                  std::function<void()>                                            on_done,
                  std::function<void(std::shared_ptr<rlpx::RlpxSession>)>         on_connected,
                  boost::asio::yield_context                                       yc)
                 {
                     run_watch(vp.peer.ip, vp.peer.tcp_port, vp.pubkey,
+                              chain_peer_chain_name,
                               network_id, genesis_hash, fork_id, watch_specs,
+                              output_state,
                               std::move(on_done), std::move(on_connected), yc);
                 });
 
@@ -832,14 +963,20 @@ int main(int argc, char** argv) {
 
             boost::asio::spawn(io,
                 [host = config->host, port = config->port, peer_pubkey,
+                 chain_name = config->canonical_chain_name.empty()
+                    ? std::to_string(config->network_id)
+                    : config->canonical_chain_name,
                  network_id = config->network_id,
                  genesis_hash = config->genesis_hash,
                  fork_id = config->fork_id,
-                 watch_specs = std::move(config->watch_specs)](boost::asio::yield_context yc)
+                 watch_specs = std::move(config->watch_specs),
+                 output_state](boost::asio::yield_context yc)
                 {
                     run_watch(host, port, peer_pubkey,
+                              chain_name,
                               network_id, genesis_hash, fork_id,
                               watch_specs,
+                              output_state,
                               []() {},
                               [](std::shared_ptr<rlpx::RlpxSession>) {},
                               yc);

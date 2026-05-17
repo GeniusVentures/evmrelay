@@ -105,20 +105,65 @@ The evmrelay payload work and parent SuperGenius bridge adapter are done. Next w
    - finalized bridge claim routes into mint / claim completion
    - malformed finalized bridge payload rejection/stall behavior according to the chosen handler contract
 
-### Secondary remaining eth_watch cleanup
+### eth_watch / chain peer cache update - 2026-05-17
 
-The older `eth_watch` cleanup remains secondary unless the user asks to return to it.
+Current local `eth_watch` work is in progress and not yet committed:
 
-- `examples/eth_watch/eth_watch.cpp` may still have redundant local chain structure:
-  - `ChainEntry::canonical_name`
-  - local `kChains`
-- Intended direction:
-  - canonical chain names should come from bootstrap JSON / bootstrap peer helpers
-  - no duplicate alias names in `eth_watch`
-  - no duplicated bootnode arrays in `eth_watch`
-  - fork hash should come from cached `chain_enodes.json.gz`
-  - `network_id` and `genesis_hash` remain unless bootstrap metadata is extended
-- Runtime handshake still has not been re-proven end-to-end after those structural edits.
+- `examples/eth_watch/eth_watch.cpp`
+  - Adds `--all-chains` for the four mainnet EVM chains:
+    - `ethereum-mainnet`
+    - `polygon-mainnet`
+    - `bnb-smart-chain`
+    - `base-mainnet`
+  - Uses chain metadata from the chain peer cache instead of local alias tables.
+  - Registers the same watcher event specs across all active chain schedulers.
+  - Passes canonical chain names into `EthWatchRunner` so event callbacks and stats identify the chain.
+  - Counts callback events globally and per chain.
+  - Adds `--display-events <count>`; default is `2`, so only the first detailed decoded events are printed.
+  - Fixes the generic ETH message guard so normalized ETH messages are not immediately ignored.
+  - Calls the scheduler `on_connected(session)` callback after ETH Status succeeds.
+  - Preserves chain-cache fork ID metadata when `--chain ... --direct-enode ...` is used. Direct local geth testing was resetting the loaded fork ID to zero unless explicit fork overrides were passed.
+- `src/rlpx/rlpx_session.cpp`
+  - Fixes `receive_message_with_timeout(...)` so queued messages are polled until the deadline instead of checking once and sleeping for the full timeout. Local geth sent Status immediately, but the ETH handshake did not consume it until after timeout.
+- `test/discv4/chain_peers_test.cpp`
+  - The live chain peer cache test first uses `EVMRELAY_CHAIN_ENODES_JSON`, then local `chain_enodes.json.gz` / `.json`, then falls back to the live URL.
+  - This keeps the test active while allowing sandboxed CTest runs with a pre-downloaded cache.
+- `test/discv4/CMakeLists.txt`
+  - Sets `EVMRELAY_CHAIN_ENODES_JSON=${CMAKE_BINARY_DIR}/chain_enodes.json.gz` for `discv4_chain_peers_test`.
+- Pre-downloaded test cache location used in the current Debug build:
+  - `build/OSX/Debug/chain_enodes.json.gz`
+
+Verification run:
+
+```bash
+cd evmrelay/build/OSX/Debug
+cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Debug
+ninja
+ctest -R "eth_watch|eth_receipt_source|event_filter|abi_decoder|discv4_chain_peers|rlpx_session" --output-on-failure
+```
+
+Result: `10/10` focused tests passed in the normal sandbox after the cache file was pre-downloaded.
+
+Local geth direct-mode verification:
+
+```bash
+cd evmrelay/go-ethereum
+./build/bin/geth --sepolia --datadir /tmp/evmrelay-geth-sepolia --port 30303 --http --http.addr 127.0.0.1 --http.port 8545 --http.api admin,eth,net,web3 --nat extip:127.0.0.1 --nodiscover --maxpeers 2 --netrestrict 127.0.0.0/8
+```
+
+Then, from `evmrelay/build/OSX/Debug`, connect using the local node enode from geth output or `admin.nodeInfo.enode`:
+
+```bash
+./examples/eth_watch/eth_watch --chain ethereum-sepolia --chain-peers-json ../../../rlp_enodes/output/chain_enodes.json --direct-enode '<local-geth-enode>' --watch-event 'Transfer(address,address,uint256)' --display-events 1 --log-level info --no-chain-peers-url
+```
+
+Observed result after the fixes: ETH Status succeeds with `network_id=11155111 protocol=69 latest_block=0`, and periodic watch stats are emitted.
+
+Notes:
+
+- Do not assume a source-tree `rlp_enodes/` directory exists.
+- If `build/OSX/Debug/chain_enodes.json.gz` is missing, either pre-download it there or set `EVMRELAY_CHAIN_ENODES_JSON` to another existing `chain_enodes.json(.gz)` file before running CTest in a network-restricted environment.
+- Running without a cache still exercises the live URL fallback and requires network/DNS access.
 
 ### New chat handoff prompt
 

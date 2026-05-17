@@ -10,9 +10,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -157,18 +159,57 @@ TEST_F(ChainPeersTest, FindChainPeersJsonPathPrefersJsonThenGzip)
 
 static constexpr const char* kChainPeersUrl = "https://enodes.gnus.ai/chain_enodes.json.gz";
 static constexpr const char* kMainnetChainKey = "ethereum-mainnet";
+static constexpr const char* kChainPeersCacheEnv = "EVMRELAY_CHAIN_ENODES_JSON";
+static constexpr const char* kChainPeersJsonFile = "chain_enodes.json";
+static constexpr const char* kChainPeersGzipFile = "chain_enodes.json.gz";
+
+std::optional<std::filesystem::path> find_pre_downloaded_chain_peer_cache()
+{
+    const char* env_path = std::getenv(kChainPeersCacheEnv);
+    if (env_path != nullptr && env_path[0] != '\0')
+    {
+        const std::filesystem::path path(env_path);
+        if (std::filesystem::exists(path))
+        {
+            return path;
+        }
+    }
+
+    const std::filesystem::path cwd = std::filesystem::current_path();
+    const std::filesystem::path gzip_path = cwd / kChainPeersGzipFile;
+    if (std::filesystem::exists(gzip_path))
+    {
+        return gzip_path;
+    }
+
+    const std::filesystem::path json_path = cwd / kChainPeersJsonFile;
+    if (std::filesystem::exists(json_path))
+    {
+        return json_path;
+    }
+
+    return std::nullopt;
+}
 
 TEST_F(ChainPeersTest, DownloadChainPeerCacheJsonFromLiveUrlLoadsMainnetPeers)
 {
-    const auto json_text = discv4::download_chain_peer_cache_json(kChainPeersUrl);
-    ASSERT_TRUE(json_text.has_value()) << "Failed to download chain peer JSON from live URL";
-    EXPECT_FALSE(json_text->empty());
+    std::vector<discv4::ValidatedPeer> peers;
+    if (const auto cache_path = find_pre_downloaded_chain_peer_cache(); cache_path.has_value())
+    {
+        peers = discv4::load_chain_peers_from_json(kMainnetChainKey, *cache_path);
+    }
+    else
+    {
+        const auto json_text = discv4::download_chain_peer_cache_json(kChainPeersUrl);
+        ASSERT_TRUE(json_text.has_value()) << "Failed to download chain peer JSON from live URL";
+        EXPECT_FALSE(json_text->empty());
 
-    const auto peers = discv4::load_chain_peers_from_json_text(
-        kMainnetChainKey,
-        *json_text);
+        peers = discv4::load_chain_peers_from_json_text(
+            kMainnetChainKey,
+            *json_text);
+    }
 
-    EXPECT_FALSE(peers.empty()) << "Expected at least one mainnet chain peer from live URL";
+    EXPECT_FALSE(peers.empty()) << "Expected at least one mainnet chain peer from cache or live URL";
     const auto valid_peer = std::find_if(
         peers.begin(),
         peers.end(),

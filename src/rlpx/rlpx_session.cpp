@@ -15,6 +15,7 @@
 #include <boost/asio/write.hpp>
 #include <boost/asio/read.hpp>
 #include <boost/system/error_code.hpp>
+#include <algorithm>
 #include <queue>
 #include <mutex>
 #include <chrono>
@@ -498,16 +499,27 @@ RlpxSession::receive_message_with_timeout(
     }
 
     asio::steady_timer timer(yield.get_executor());
-    timer.expires_after(timeout);
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
 
     for (;;)
     {
         auto msg = recv_channel_->try_pop();
         if (msg)
         {
-            timer.cancel();
             return std::move(*msg);
         }
+
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline)
+        {
+            return SessionError::kHandshakeFailed;
+        }
+
+        const auto remaining = deadline - now;
+        const auto poll_interval = std::min<std::chrono::steady_clock::duration>(
+            remaining,
+            std::chrono::milliseconds(10));
+        timer.expires_after(poll_interval);
 
         boost::system::error_code ec;
         timer.async_wait(asio::redirect_error(yield, ec));
@@ -519,7 +531,6 @@ RlpxSession::receive_message_with_timeout(
         {
             return SessionError::kConnectionFailed;
         }
-        return SessionError::kHandshakeFailed;
     }
 }
 

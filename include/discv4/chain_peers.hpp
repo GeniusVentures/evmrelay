@@ -33,6 +33,7 @@ struct ChainPeerConfig
     uint64_t                   network_id = 0;
     eth::Hash256               genesis_hash{};
     std::vector<ValidatedPeer> nodes;
+    std::vector<ValidatedPeer> bootnodes;
     std::optional<eth::ForkId> fork_id;
     std::string                signature;
     std::string                signer_address;

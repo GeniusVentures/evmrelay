@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <discv4/bootstrap_peers.hpp>
 #include <discv4/chain_peers.hpp>
 
 #include <algorithm>
@@ -139,6 +140,69 @@ TEST_F(ChainPeersTest, LoadChainPeersFromJsonReadsPlainJsonFile)
     EXPECT_EQ(peers[0].peer.tcp_port, 30303U);
 }
 
+TEST_F(ChainPeersTest, ChainPeersUseNodesArrayAndIgnoreBootnodes)
+{
+    const std::string json_text = std::string("{")
+        + "\"ethereum-mainnet\":{"
+        + "\"networkId\":1,"
+        + "\"genesisHex\":\"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3\","
+        + "\"nodes\":["
+        + "{\"enode\":\"" + make_enode("127.0.0.1", 30303U, '1') + "\"}"
+        + "],"
+        + "\"bootnodes\":["
+        + "{\"enode\":\"" + make_enode("10.0.0.2", 30304U, '2') + "\"}"
+        + "]}}";
+
+    const auto peers = discv4::load_chain_peers_from_json_text(
+        "ethereum-mainnet",
+        json_text);
+
+    ASSERT_EQ(peers.size(), 1U);
+    EXPECT_EQ(peers[0].peer.ip, "127.0.0.1");
+    EXPECT_EQ(peers[0].peer.tcp_port, 30303U);
+}
+
+TEST_F(ChainPeersTest, BootstrapPeersUseBootnodesArrayAndIgnoreNodes)
+{
+    const std::string json_text = std::string("{")
+        + "\"ethereum-mainnet\":{"
+        + "\"networkId\":1,"
+        + "\"genesisHex\":\"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3\","
+        + "\"forkId\":\"07c9462e\","
+        + "\"forkNext\":\"0\","
+        + "\"nodes\":["
+        + "{\"enode\":\"" + make_enode("127.0.0.1", 30303U, '3') + "\"}"
+        + "],"
+        + "\"bootnodes\":["
+        + "{\"enode\":\"" + make_enode("10.0.0.2", 30304U, '4') + "\"}"
+        + "]}}";
+
+    const auto peers = discv4::load_bootstrap_peers_from_json_text(
+        "ethereum-mainnet",
+        json_text);
+
+    ASSERT_EQ(peers.size(), 1U);
+    EXPECT_EQ(peers[0].peer.ip, "10.0.0.2");
+    EXPECT_EQ(peers[0].peer.tcp_port, 30304U);
+}
+
+TEST_F(ChainPeersTest, LoadChainPeerConfigRequiresBootnodesArray)
+{
+    const std::string json_text = std::string("{")
+        + "\"ethereum-mainnet\":{"
+        + "\"networkId\":1,"
+        + "\"genesisHex\":\"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3\","
+        + "\"nodes\":["
+        + "{\"enode\":\"" + make_enode("127.0.0.1", 30303U, '5') + "\"}"
+        + "]}}";
+
+    const auto config = discv4::load_chain_peer_config_from_json_text(
+        "ethereum-mainnet",
+        json_text);
+
+    EXPECT_FALSE(config.has_value());
+}
+
 TEST_F(ChainPeersTest, FindChainPeersJsonPathPrefersJsonThenGzip)
 {
     const std::filesystem::path bin_dir = temp_dir_ / "bin";
@@ -230,6 +294,9 @@ TEST_F(ChainPeersTest, LoadChainPeerConfigFromJsonTextParsesSharedMetadataAndNod
         + "\"forkNext\":1735371,"
         + "\"nodes\":["
         + "{\"enode\":\"" + make_enode("127.0.0.1", 30303U, '6') + "\"}"
+        + "],"
+        + "\"bootnodes\":["
+        + "{\"enode\":\"" + make_enode("10.0.0.2", 30304U, '7') + "\"}"
         + "]}}";
 
     const auto config = discv4::load_chain_peer_config_from_json_text(
@@ -241,6 +308,8 @@ TEST_F(ChainPeersTest, LoadChainPeerConfigFromJsonTextParsesSharedMetadataAndNod
     EXPECT_EQ(config->network_id, 11155111U);
     ASSERT_EQ(config->nodes.size(), 1U);
     EXPECT_EQ(config->nodes[0].peer.ip, "127.0.0.1");
+    ASSERT_EQ(config->bootnodes.size(), 1U);
+    EXPECT_EQ(config->bootnodes[0].peer.ip, "10.0.0.2");
     ASSERT_TRUE(config->fork_id.has_value());
     EXPECT_EQ(config->fork_id->fork_hash[0], 0xed);
     EXPECT_EQ(config->fork_id->fork_hash[1], 0x88);
@@ -259,6 +328,9 @@ TEST_F(ChainPeersTest, LoadChainPeerConfigParsesReadmeSchemaHexForkNext)
         + "\"forkNext\":\"695db057\","
         + "\"nodes\":["
         + "{\"enode\":\"" + make_enode("127.0.0.1", 30303U, '6') + "\"}"
+        + "],"
+        + "\"bootnodes\":["
+        + "{\"enode\":\"" + make_enode("10.0.0.2", 30304U, '7') + "\"}"
         + "]}}";
 
     const auto config = discv4::load_chain_peer_config_from_json_text(
@@ -290,7 +362,9 @@ TEST_F(ChainPeersTest, LoadChainPeersPrefersEnrWhenGeneratedNodeContainsEnrAndEn
         + "\"lastResponse\":\"0001-01-01T00:00:00Z\","
         + "\"ip\":\"172.255.253.244\","
         + "\"port\":11006"
-        + "}]}}";
+        + "}],"
+        + "\"bootnodes\":[]"
+        + "}}";
 
     const auto peers = discv4::load_chain_peers_from_json_text(
         "base-mainnet",
@@ -310,6 +384,9 @@ TEST_F(ChainPeersTest, LoadChainPeerConfigFallsBackToNodeForkIdWhenTopLevelForkI
         + "\"genesisHex\":\"25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9\","
         + "\"nodes\":["
         + "{\"enode\":\"" + make_enode("127.0.0.1", 30303U, '7') + "\",\"forkId\":\"ed88b5fd\"}"
+        + "],"
+        + "\"bootnodes\":["
+        + "{\"enode\":\"" + make_enode("10.0.0.2", 30304U, '8') + "\"}"
         + "]}}";
 
     const auto config = discv4::load_chain_peer_config_from_json_text(
@@ -335,6 +412,9 @@ TEST_F(ChainPeersTest, LoadChainPeerConfigUsesTopLevelForkFieldsWhenPresent)
         + "\"forkNext\":1735371,"
         + "\"nodes\":["
         + "{\"enode\":\"" + make_enode("127.0.0.1", 30303U, '8') + "\",\"forkId\":\"aaaaaaaa\",\"forkNext\":999}"
+        + "],"
+        + "\"bootnodes\":["
+        + "{\"enode\":\"" + make_enode("10.0.0.2", 30304U, '9') + "\"}"
         + "]}}";
 
     const auto config = discv4::load_chain_peer_config_from_json_text(
@@ -373,7 +453,8 @@ TEST_F(ChainPeersTest, LoadChainPeerConfigFromJsonTextRejectsInvalidSignedDocume
         + "\"ethereum-sepolia\":{"
         + "\"networkId\":11155111,"
         + "\"genesisHex\":\"25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9\","
-        + "\"nodes\":[{\"enode\":\"" + make_enode("127.0.0.1", 30303U, 'a') + "\"}]},"
+        + "\"nodes\":[{\"enode\":\"" + make_enode("127.0.0.1", 30303U, 'a') + "\"}],"
+        + "\"bootnodes\":[{\"enode\":\"" + make_enode("10.0.0.2", 30304U, 'b') + "\"}]},"
         + "\"signature\":\"0xbe70d727841ca92d21297e8b062f8f0abab0e00f236f7e12acaccd749d38c9f0e266fc54c86fd7abddf5185597efed8b40473dd0acceb7374c23d13d87e02cb9\","
         + "\"signerAddress\":\"0x7c91841f3594cb02dba5aae5909ceaaf2211d454\""
         + "}";
@@ -391,7 +472,8 @@ TEST_F(ChainPeersTest, LoadChainPeerConfigAcceptsValidTopLevelSignedDocument)
         + "\"ethereum-sepolia\":{"
         + "\"networkId\":11155111,"
         + "\"genesisHex\":\"25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9\","
-        + "\"nodes\":[{\"enode\":\"" + make_enode("127.0.0.1", 30303U, 'b') + "\"}]},"
+        + "\"nodes\":[{\"enode\":\"" + make_enode("127.0.0.1", 30303U, 'b') + "\"}],"
+        + "\"bootnodes\":[{\"enode\":\"" + make_enode("10.0.0.2", 30304U, 'c') + "\"}]},"
         + "\"signature\":\"0xbe70d727841ca92d21297e8b062f8f0abab0e00f236f7e12acaccd749d38c9f0e266fc54c86fd7abddf5185597efed8b40473dd0acceb7374c23d13d87e02cb901\","
         + "\"signerAddress\":\"0x7c91841f3594cb02dba5aae5909ceaaf2211d454\""
         + "}";

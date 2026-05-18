@@ -59,6 +59,9 @@ cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGen
 
 # Four mainnet EVM chains at once
 ./examples/eth_watch/eth_watch --all-chains --watch-event 'Transfer(address,address,uint256)' --display-events 2
+
+# Override the default connection pool limits
+./examples/eth_watch/eth_watch --chain ethereum-sepolia --max-peers-per-chain 3 --max-peers-total 24 --watch-event 'Transfer(address,address,uint256)'
 ```
 
 ### Local geth direct-mode repro

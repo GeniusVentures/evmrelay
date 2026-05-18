@@ -19,6 +19,11 @@ cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGen
 ./examples/eth_watch/eth_watch --all-chains --watch-event 'Transfer(address,address,uint256)' --display-events 2
 ```
 
+Connection pool defaults come from `eth::EthWatchConnectionConfig`:
+
+- `--max-peers-per-chain 3`
+- `--max-peers-total 24`
+
 `--all-chains` watches cached peers for:
 
 - `ethereum-mainnet`

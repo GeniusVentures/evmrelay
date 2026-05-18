@@ -120,6 +120,8 @@ Current local `eth_watch` work is in progress and not yet committed:
   - Passes canonical chain names into `EthWatchRunner` so event callbacks and stats identify the chain.
   - Counts callback events globally and per chain.
   - Adds `--display-events <count>`; default is `2`, so only the first detailed decoded events are printed.
+  - Uses `eth::EthWatchConnectionConfig` for reusable connection limits instead of hardcoded example-only values.
+  - Adds `--max-peers-per-chain <count>` and `--max-peers-total <count>`; defaults are `3` per chain and `24` total.
   - Fixes the generic ETH message guard so normalized ETH messages are not immediately ignored.
   - Calls the scheduler `on_connected(session)` callback after ETH Status succeeds.
   - Preserves chain-cache fork ID metadata when `--chain ... --direct-enode ...` is used. Direct local geth testing was resetting the loaded fork ID to zero unless explicit fork overrides were passed.
@@ -140,9 +142,10 @@ cd evmrelay/build/OSX/Debug
 cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Debug
 ninja
 ctest -R "eth_watch|eth_receipt_source|event_filter|abi_decoder|discv4_chain_peers|rlpx_session" --output-on-failure
+ctest -R "discv4_dial_scheduler|discv4_dial_filter|eth_watch|discv4_chain_peers" --output-on-failure
 ```
 
-Result: `10/10` focused tests passed in the normal sandbox after the cache file was pre-downloaded.
+Result: focused watcher, RLPx, discv4 scheduler/filter, and cached chain peer tests passed in the normal sandbox after the cache file was pre-downloaded.
 
 Local geth direct-mode verification:
 

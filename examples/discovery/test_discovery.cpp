@@ -33,9 +33,10 @@
 #include <boost/asio/spawn.hpp>
 #include <boost/asio/steady_timer.hpp>
 
-#include <discv4/chain_peers.hpp>
 #include <discv4/bootnodes.hpp>
 #include <discv4/bootnodes_test.hpp>
+#include <discv4/bootstrap_peers.hpp>
+#include <discv4/chain_peers.hpp>
 #include <discv4/dial_scheduler.hpp>
 #include <discv4/discv4_client.hpp>
 #include <eth/eth_types.hpp>
@@ -311,6 +312,7 @@ struct ChainRuntime
     std::shared_ptr<discv4::discv4_client>     dv4;
     std::shared_ptr<std::atomic<int>>          peers_count;
     std::shared_ptr<std::atomic<int>>          chain_peers_loaded;
+    std::vector<discv4::ValidatedPeer>         bootstrap_peers;
     std::shared_ptr<std::function<void()>>     maybe_finish;
 };
 
@@ -385,8 +387,25 @@ static void enqueue_chain_peers(
 static void seed_bootnodes(
     boost::asio::io_context&                         io,
     const std::shared_ptr<discv4::discv4_client>&   dv4,
-    const ChainTarget&                               target)
+    const ChainTarget&                               target,
+    const std::vector<discv4::ValidatedPeer>&        bootstrap_peers)
 {
+    if (!bootstrap_peers.empty())
+    {
+        for (const auto& bootnode_peer : bootstrap_peers)
+        {
+            const std::string host_copy = bootnode_peer.peer.ip;
+            const uint16_t port_copy = bootnode_peer.peer.udp_port;
+            const discv4::NodeId bn_id = bootnode_peer.peer.node_id;
+            boost::asio::spawn(io,
+                [dv4, host_copy, port_copy, bn_id](boost::asio::yield_context yc)
+                {
+                    (void)dv4->find_node(host_copy, port_copy, bn_id, yc);
+                });
+        }
+        return;
+    }
+
     if (target.bootnodes == nullptr)
     {
         return;
@@ -409,6 +428,28 @@ static void seed_bootnodes(
                 (void)dv4->find_node(host_copy, port_copy, bn_id, yc);
             });
     }
+}
+
+static std::vector<discv4::ValidatedPeer> load_bootstrap_peers(
+    const ChainTarget&                                target,
+    const std::optional<std::filesystem::path>&       chain_peers_json_file,
+    const std::optional<discv4::ChainPeerCacheRefreshResult>& refresh_result)
+{
+    if (chain_peers_json_file.has_value())
+    {
+        return discv4::load_bootstrap_peers_from_json(
+            target.chain_peer_cache_key,
+            *chain_peers_json_file);
+    }
+
+    if (refresh_result.has_value())
+    {
+        return discv4::load_bootstrap_peers_from_json(
+            target.chain_peer_cache_key,
+            refresh_result->cache_path);
+    }
+
+    return {};
 }
 
 static std::optional<ChainRuntime> create_chain_runtime(
@@ -438,6 +479,7 @@ static std::optional<ChainRuntime> create_chain_runtime(
     runtime.peers_count = std::make_shared<std::atomic<int>>(0);
     runtime.chain_peers_loaded = std::make_shared<std::atomic<int>>(0);
     runtime.maybe_finish = std::make_shared<std::function<void()>>();
+    runtime.bootstrap_peers = load_bootstrap_peers(target, chain_peers_json_file, refresh_result);
 
     discv4::discv4Config dv4_cfg;
     dv4_cfg.bind_port = 0;
@@ -702,7 +744,7 @@ int main(int argc, char** argv)
             return 1;
         }
 
-        seed_bootnodes(io, runtime.dv4, runtime.target);
+        seed_bootnodes(io, runtime.dv4, runtime.target, runtime.bootstrap_peers);
     }
 
     io.run();

@@ -25,15 +25,24 @@ struct ValidatedPeer
     rlpx::PublicKey  pubkey;
 };
 
+/// @brief Configurable connection limits for a WatcherPool.
+///        Defaults keep three active dial/watch slots per chain.
+struct WatcherPoolConfig
+{
+    int max_total;
+    int max_per_chain;
+};
+
 /// @brief Global resource pool shared across all chain DialSchedulers.
 ///        Enforces a two-level fd cap: total across all chains, and per chain.
-///        @p max_total     — global fd cap  (mobile default 12, desktop 200)
-///        @p max_per_chain — per-chain cap  (mobile default 3,  desktop 50)
 struct WatcherPool
 {
     int               max_total;
     int               max_per_chain;
     std::atomic<int>  active_total{0};
+
+    explicit WatcherPool(const WatcherPoolConfig& config)
+        : max_total(config.max_total), max_per_chain(config.max_per_chain) {}
 
     WatcherPool(int max_total_, int max_per_chain_)
         : max_total(max_total_), max_per_chain(max_per_chain_) {}
@@ -216,4 +225,3 @@ private:
 }
 
 } // namespace discv4
-

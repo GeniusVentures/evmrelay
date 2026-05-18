@@ -2,9 +2,47 @@
 // SPDX-License-Identifier: MIT
 
 #include <eth/eth_watch_service.hpp>
+#include <eth/eth_watch_dialer.hpp>
 #include <eth/messages.hpp>
 
 namespace eth {
+
+// ---------------------------------------------------------------------------
+// make_eth_watcher_pool
+// ---------------------------------------------------------------------------
+
+std::shared_ptr<discv4::WatcherPool> make_eth_watcher_pool(
+    const EthWatchConnectionConfig& config)
+{
+    return std::make_shared<discv4::WatcherPool>(
+        discv4::WatcherPoolConfig{
+            config.max_total_connections,
+            config.max_connections_per_chain
+        });
+}
+
+// ---------------------------------------------------------------------------
+// start_eth_watch_chain_peer_dialing
+// ---------------------------------------------------------------------------
+
+std::shared_ptr<discv4::DialScheduler> start_eth_watch_chain_peer_dialing(
+    boost::asio::io_context&                  io,
+    std::shared_ptr<discv4::WatcherPool>      pool,
+    discv4::DialFn                            dial_fn,
+    const std::vector<discv4::ValidatedPeer>& peers)
+{
+    auto scheduler = std::make_shared<discv4::DialScheduler>(
+        io,
+        std::move(pool),
+        std::move(dial_fn));
+
+    for (const auto& peer : peers)
+    {
+        scheduler->enqueue(peer);
+    }
+
+    return scheduler;
+}
 
 // ---------------------------------------------------------------------------
 // set_send_callback

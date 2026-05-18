@@ -12,6 +12,7 @@
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -23,6 +24,7 @@
 
 #include <eth/messages.hpp>
 #include <eth/eth_peer_session.hpp>
+#include <eth/eth_watch_dialer.hpp>
 #include <eth/eth_watch_runner.hpp>
 #include <eth/eth_watch_service.hpp>
 #include <eth/eth_watch_cli.hpp>
@@ -48,7 +50,6 @@ const std::array<std::string_view, 4> kDefaultMainnetChains{
     "bnb-smart-chain",
     "base-mainnet",
 };
-
 
 struct Config {
     std::string host;
@@ -183,6 +184,8 @@ void print_usage(const char* exe)
               << "  --watch-event    <signature>      Event signature, e.g. Transfer(address,address,uint256)\n"
               << "  Each --watch-event pairs with the preceding --watch-contract (or any contract if none).\n"
               << "  --display-events <count>          Print full decoded details for only the first count matches (default 2).\n"
+              << "  --max-peers-per-chain <count>     Active dial/watch slots per chain (default 3).\n"
+              << "  --max-peers-total <count>         Active dial/watch slots across all chains (default 24).\n"
               << "\nExamples:\n"
               << "  " << exe << " --chain ethereum-sepolia --watch-event Transfer(address,address,uint256)\n"
               << "  " << exe << " --all-chains --watch-event Transfer(address,address,uint256)\n"
@@ -612,6 +615,7 @@ int main(int argc, char** argv) {
         std::string chain_peers_url = kDefaultChainPeersUrl;
         bool chain_peers_url_enabled = true;
         auto output_state = std::make_shared<WatchOutputState>();
+        eth::EthWatchConnectionConfig watch_connection_config{};
 
         for (int i = 1; i < argc; ++i)
         {
@@ -771,6 +775,34 @@ int main(int argc, char** argv) {
                 }
                 output_state->detailed_event_limit = *display_events;
                 next_arg += 2;
+            } else if (arg == "--max-peers-per-chain") {
+                if (next_arg + 1 >= argc) {
+                    std::cout << "--max-peers-per-chain requires an integer argument.\n";
+                    return 1;
+                }
+                const auto max_peers_per_chain = rlp::base::parse::uint64_decimal(argv[next_arg + 1]);
+                if (!max_peers_per_chain ||
+                    *max_peers_per_chain == 0 ||
+                    *max_peers_per_chain > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+                    std::cout << "Invalid --max-peers-per-chain value.\n";
+                    return 1;
+                }
+                watch_connection_config.max_connections_per_chain = static_cast<int>(*max_peers_per_chain);
+                next_arg += 2;
+            } else if (arg == "--max-peers-total") {
+                if (next_arg + 1 >= argc) {
+                    std::cout << "--max-peers-total requires an integer argument.\n";
+                    return 1;
+                }
+                const auto max_peers_total = rlp::base::parse::uint64_decimal(argv[next_arg + 1]);
+                if (!max_peers_total ||
+                    *max_peers_total == 0 ||
+                    *max_peers_total > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+                    std::cout << "Invalid --max-peers-total value.\n";
+                    return 1;
+                }
+                watch_connection_config.max_total_connections = static_cast<int>(*max_peers_total);
+                next_arg += 2;
             } else if (arg == "--network-id") {
                 if (next_arg + 1 >= argc) {
                     std::cout << "--network-id requires an integer argument.\n";
@@ -875,7 +907,7 @@ int main(int argc, char** argv) {
 
         if (!multi_chain_configs.empty())
         {
-            auto pool = std::make_shared<discv4::WatcherPool>(200, 10);
+            auto pool = eth::make_eth_watcher_pool(watch_connection_config);
             std::vector<std::shared_ptr<discv4::DialScheduler>> schedulers;
             schedulers.reserve(multi_chain_configs.size());
 
@@ -888,8 +920,9 @@ int main(int argc, char** argv) {
                 const auto       fork_id      = chain_config.fork_id;
                 const auto       watch_specs  = chain_config.watch_specs;
 
-                auto scheduler = std::make_shared<discv4::DialScheduler>(
-                    io, pool,
+                auto scheduler = eth::start_eth_watch_chain_peer_dialing(
+                    io,
+                    pool,
                     [chain_peer_chain_name, network_id, genesis_hash, fork_id, watch_specs, output_state]
                     (discv4::ValidatedPeer                                            vp,
                      std::function<void()>                                            on_done,
@@ -901,14 +934,11 @@ int main(int argc, char** argv) {
                                   network_id, genesis_hash, fork_id, watch_specs,
                                   output_state,
                                   std::move(on_done), std::move(on_connected), yc);
-                    });
+                    },
+                    chain_config.chain_peers);
 
                 SPDLOG_LOGGER_INFO(log, "Dialing {} cached chain peers for chain '{}'",
                                    chain_config.chain_peers.size(), chain_peer_chain_name);
-                for (const auto& peer : chain_config.chain_peers)
-                {
-                    scheduler->enqueue(peer);
-                }
                 schedulers.push_back(std::move(scheduler));
             }
             std::cout << "Dialing cached peers for Ethereum, Polygon, BNB Smart Chain, and Base...\n";
@@ -922,12 +952,12 @@ int main(int argc, char** argv) {
             const auto       fork_id      = config->fork_id;
             const auto       watch_specs  = config->watch_specs;
 
-            // Two-level resource caps — desktop defaults (10 per chain, 200 total).
-            // Embedding apps pass platform-appropriate values:
-            //   mobile: WatcherPool(12, 3)   desktop: WatcherPool(200, 10)
-            auto pool = std::make_shared<discv4::WatcherPool>(200, 10);
-            auto scheduler = std::make_shared<discv4::DialScheduler>(
-                io, pool,
+            // Two-level resource caps.
+            // Embedding apps pass platform-appropriate eth::EthWatchConnectionConfig values.
+            auto pool = eth::make_eth_watcher_pool(watch_connection_config);
+            auto scheduler = eth::start_eth_watch_chain_peer_dialing(
+                io,
+                pool,
                 [chain_peer_chain_name, network_id, genesis_hash, fork_id, watch_specs, output_state]
                 (discv4::ValidatedPeer                                            vp,
                  std::function<void()>                                            on_done,
@@ -939,16 +969,14 @@ int main(int argc, char** argv) {
                               network_id, genesis_hash, fork_id, watch_specs,
                               output_state,
                               std::move(on_done), std::move(on_connected), yc);
-                });
+                },
+                config->chain_peers);
 
             static auto log = rlp::base::createLogger("eth_watch");
             SPDLOG_LOGGER_INFO(log, "Dialing {} cached chain peers for chain '{}'",
                                config->chain_peers.size(), chain_peer_chain_name);
+            (void)scheduler;
 
-            for (const auto& peer : config->chain_peers)
-            {
-                scheduler->enqueue(peer);
-            }
             std::cout << "Dialing cached chain peers...\n";
         }
         else

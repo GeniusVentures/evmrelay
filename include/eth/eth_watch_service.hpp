@@ -9,6 +9,7 @@
 #include <eth/messages.hpp>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -17,6 +18,14 @@ namespace eth {
 
 /// @brief Subscription handle returned by EthWatchService::watch_event().
 using EventWatchId = WatchId;
+
+/// @brief Connection pool limits for eth watch peer sessions.
+///        Defaults keep three active dial/watch slots per chain.
+struct EthWatchConnectionConfig
+{
+    int max_total_connections = 24;
+    int max_connections_per_chain = 3;
+};
 
 /// @brief Typed callback for a decoded event log.
 using DecodedEventCallback = std::function<void(

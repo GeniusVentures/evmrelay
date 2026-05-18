@@ -56,6 +56,8 @@ inline constexpr std::string_view kDefaultHttpPort = "80";
 inline constexpr std::string_view kEnodePrefix = "enode://";
 inline constexpr std::string_view kChainPeerCacheJsonFilename = "chain_enodes.json";
 inline constexpr std::string_view kChainPeerCacheJsonGzipFilename = "chain_enodes.json.gz";
+inline constexpr std::string_view kChainPeerNodesFieldName = "nodes";
+inline constexpr std::string_view kChainPeerBootnodesFieldName = "bootnodes";
 inline constexpr std::string_view kSignatureFieldName = "signature";
 inline constexpr std::string_view kSignerAddressFieldName = "signerAddress";
 inline constexpr std::string_view kTrustedChainPeerCacheSignerAddress = "0x7c91841f3594cb02dba5aae5909ceaaf2211d454";
@@ -362,9 +364,10 @@ const boost::json::object* find_chain_peer_cache_chain_object(
     return chain_entry->if_object();
 }
 
-const boost::json::array* find_chain_peer_cache_chain_nodes(
+const boost::json::array* find_chain_peer_cache_chain_peer_array(
     const boost::json::value& parsed,
-    const std::string&        chain_name)
+    const std::string&        chain_name,
+    std::string_view          field_name)
 {
     const auto* chain_object = find_chain_peer_cache_chain_object(parsed, chain_name);
     if (chain_object == nullptr)
@@ -372,7 +375,7 @@ const boost::json::array* find_chain_peer_cache_chain_nodes(
         return nullptr;
     }
 
-    const auto* nodes = chain_object->if_contains("nodes");
+    const auto* nodes = chain_object->if_contains(std::string(field_name));
     if (nodes == nullptr)
     {
         return nullptr;
@@ -386,11 +389,12 @@ std::optional<discv4::ValidatedPeer> make_validated_peer_from_generated_node_fie
 
 std::vector<discv4::ValidatedPeer> parse_chain_peers_from_json_value(
     const boost::json::value& parsed,
-    const std::string&        chain_name)
+    const std::string&        chain_name,
+    std::string_view          field_name)
 {
     std::vector<discv4::ValidatedPeer> peers;
 
-    const auto* arr = find_chain_peer_cache_chain_nodes(parsed, chain_name);
+    const auto* arr = find_chain_peer_cache_chain_peer_array(parsed, chain_name, field_name);
     if (arr == nullptr)
     {
         return peers;
@@ -437,7 +441,7 @@ std::optional<std::array<uint8_t, 4>> parse_chain_fork_id_hash_from_json_value(
     const boost::json::value& parsed,
     const std::string&        chain_name)
 {
-    const auto* arr = find_chain_peer_cache_chain_nodes(parsed, chain_name);
+    const auto* arr = find_chain_peer_cache_chain_peer_array(parsed, chain_name, kChainPeerNodesFieldName);
     if (arr == nullptr)
     {
         return std::nullopt;
@@ -519,8 +523,9 @@ std::optional<discv4::ChainPeerConfig> parse_chain_peer_config_from_json_value(
 
     const auto* network_id_value = chain_object->if_contains("networkId");
     const auto* genesis_hex_value = chain_object->if_contains("genesisHex");
-    const auto* nodes = find_chain_peer_cache_chain_nodes(parsed, chain_name);
-    if (network_id_value == nullptr || genesis_hex_value == nullptr || nodes == nullptr)
+    const auto* nodes = find_chain_peer_cache_chain_peer_array(parsed, chain_name, kChainPeerNodesFieldName);
+    const auto* bootnodes = find_chain_peer_cache_chain_peer_array(parsed, chain_name, kChainPeerBootnodesFieldName);
+    if (network_id_value == nullptr || genesis_hex_value == nullptr || nodes == nullptr || bootnodes == nullptr)
     {
         return std::nullopt;
     }
@@ -546,7 +551,8 @@ std::optional<discv4::ChainPeerConfig> parse_chain_peer_config_from_json_value(
     config.canonical_name = chain_name;
     config.network_id = static_cast<uint64_t>(network_id_signed);
     config.genesis_hash = *genesis_hash;
-    config.nodes = parse_chain_peers_from_json_value(parsed, chain_name);
+    config.nodes = parse_chain_peers_from_json_value(parsed, chain_name, kChainPeerNodesFieldName);
+    config.bootnodes = parse_chain_peers_from_json_value(parsed, chain_name, kChainPeerBootnodesFieldName);
 
     if (const auto* fork_id_value = chain_object->if_contains("forkId");
         fork_id_value != nullptr && fork_id_value->is_string())
@@ -895,7 +901,7 @@ std::vector<ValidatedPeer> load_chain_peers_from_json_text(
         return peers;
     }
 
-    return parse_chain_peers_from_json_value(parsed, chain_name);
+    return parse_chain_peers_from_json_value(parsed, chain_name, kChainPeerNodesFieldName);
 }
 
 std::vector<ValidatedPeer> load_chain_peers_from_json(

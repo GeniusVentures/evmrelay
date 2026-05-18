@@ -27,6 +27,7 @@ target_include_directories(eth PUBLIC
 
 target_link_libraries(eth PUBLIC
         libsecp256k1::secp256k1
+        spdlog::spdlog
 )
 
 # Install headers

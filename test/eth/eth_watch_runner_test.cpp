@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
+#include <eth/eth_watch_dialer.hpp>
 #include <eth/eth_watch_runner.hpp>
 #include <eth/messages.hpp>
 #include <eth/eth_types.hpp>
 #include <boost/asio/spawn.hpp>
+#include <chrono>
 
 namespace {
 
@@ -37,6 +39,23 @@ void append_uint256(eth::codec::ByteBuffer& buffer, uint64_t value)
     {
         buffer.push_back(static_cast<uint8_t>((value >> (i * 8)) & 0xFF));
     }
+}
+
+discv4::ValidatedPeer make_validated_peer(
+    const uint8_t seed,
+    const uint16_t port)
+{
+    discv4::ValidatedPeer peer{};
+    for (size_t i = 0; i < peer.peer.node_id.size(); ++i)
+    {
+        peer.peer.node_id[i] = static_cast<uint8_t>(seed + i);
+        peer.pubkey[i] = peer.peer.node_id[i];
+    }
+    peer.peer.ip = "127.0.0.1";
+    peer.peer.udp_port = port;
+    peer.peer.tcp_port = port;
+    peer.peer.last_seen = std::chrono::steady_clock::now();
+    return peer;
 }
 
 eth::codec::LogEntry make_transfer_log(
@@ -144,6 +163,69 @@ TEST(EthWatchRunnerTest, NotificationContextDefaultsAreEmpty)
     EXPECT_TRUE(notification.context.peer_address.empty());
     EXPECT_TRUE(notification.event_signature.empty());
     EXPECT_TRUE(notification.values.empty());
+}
+
+TEST(EthWatchRunnerTest, ConnectionConfigDefaultsToThreePerChain)
+{
+    const eth::EthWatchConnectionConfig config{};
+
+    EXPECT_EQ(config.max_total_connections, 24);
+    EXPECT_EQ(config.max_connections_per_chain, 3);
+}
+
+TEST(EthWatchRunnerTest, ConnectionConfigStoresOverrides)
+{
+    eth::EthWatchConnectionConfig config{};
+    config.max_total_connections = 12;
+    config.max_connections_per_chain = 2;
+
+    EXPECT_EQ(config.max_total_connections, 12);
+    EXPECT_EQ(config.max_connections_per_chain, 2);
+}
+
+TEST(EthWatchRunnerTest, MakeEthWatcherPoolUsesConnectionConfig)
+{
+    eth::EthWatchConnectionConfig config{};
+    config.max_total_connections = 7;
+    config.max_connections_per_chain = 2;
+
+    const auto pool = eth::make_eth_watcher_pool(config);
+
+    ASSERT_TRUE(static_cast<bool>(pool));
+    EXPECT_EQ(pool->max_total, 7);
+    EXPECT_EQ(pool->max_per_chain, 2);
+}
+
+TEST(EthWatchRunnerTest, StartEthWatchChainPeerDialingEnqueuesPeersBehindActiveLimit)
+{
+    boost::asio::io_context io;
+    eth::EthWatchConnectionConfig config{};
+    config.max_total_connections = 1;
+    config.max_connections_per_chain = 1;
+    const auto pool = eth::make_eth_watcher_pool(config);
+
+    const std::vector<discv4::ValidatedPeer> peers{
+        make_validated_peer(0x10, 30303U),
+        make_validated_peer(0x20, 30304U)
+    };
+
+    const auto scheduler = eth::start_eth_watch_chain_peer_dialing(
+        io,
+        pool,
+        [](discv4::ValidatedPeer,
+           std::function<void()>,
+           std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
+           boost::asio::yield_context)
+        {
+        },
+        peers);
+
+    ASSERT_TRUE(static_cast<bool>(scheduler));
+    EXPECT_EQ(scheduler->active, 1);
+    EXPECT_EQ(pool->active_total.load(), 1);
+    ASSERT_EQ(scheduler->queue.size(), 1U);
+    EXPECT_EQ(scheduler->queue.front().peer.tcp_port, 30304U);
+    scheduler->stop();
 }
 
 TEST(EthWatchRunnerTest, SendLocalStatusPostsStatusAtNegotiatedOffset)
@@ -285,4 +367,3 @@ TEST(EthWatchRunnerTest, WatchEventEmitsEnrichedCallbackWithChainAndPeerMetadata
 }
 
 } // namespace
-

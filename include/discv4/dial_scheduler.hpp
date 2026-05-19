@@ -59,6 +59,12 @@ using DialFn = std::function<void(
     std::function<void(std::shared_ptr<rlpx::RlpxSession>)>    on_connected,
     boost::asio::yield_context                                  yield)>;
 
+/// Callback signature for dial/session exit feedback.
+using DialFeedbackFn = std::function<void(
+    const ValidatedPeer&     vp,
+    rlpx::DisconnectReason   reason,
+    bool                     was_connected)>;
+
 /// @brief Predicate applied to a DiscoveredPeer before it is enqueued for dialing.
 ///        Return true to allow dialing, false to drop.
 ///        When unset (nullptr), all peers are accepted.
@@ -74,6 +80,7 @@ struct DialScheduler : std::enable_shared_from_this<DialScheduler>
     boost::asio::io_context&              io;
     std::shared_ptr<WatcherPool>          pool;
     DialFn                                dial_fn;
+    DialFeedbackFn                        feedback_fn{};
     FilterFn                              filter_fn{};  ///< Optional peer filter; nullptr = accept all.
     std::shared_ptr<DialHistory>          dial_history;
 
@@ -171,23 +178,38 @@ private:
     {
         auto sched         = shared_from_this();
         auto was_validated = std::make_shared<bool>(false);
+        auto reported      = std::make_shared<bool>(false);
         static auto log    = rlp::base::createLogger("dial_scheduler");
         SPDLOG_LOGGER_DEBUG(log, "Dialing peer: {}:{}", vp.peer.ip, vp.peer.tcp_port);
         boost::asio::spawn(io,
-            [sched, vp = std::move(vp), was_validated](boost::asio::yield_context yc)
+            [sched, vp = std::move(vp), was_validated, reported](boost::asio::yield_context yc)
             {
                 sched->dial_fn(
                     vp,
-                    [sched, was_validated]()
+                    [sched, vp, was_validated, reported]()
                     {
+                        if (sched->feedback_fn && !*reported)
+                        {
+                            *reported = true;
+                            sched->feedback_fn(vp, rlpx::DisconnectReason::kTcpError, *was_validated);
+                        }
                         if (*was_validated) { --sched->validated_count; }
                         sched->release();
                     },
-                    [sched, was_validated](std::shared_ptr<rlpx::RlpxSession> s)
+                    [sched, vp, was_validated, reported](std::shared_ptr<rlpx::RlpxSession> s)
                     {
                         *was_validated = true;
                         ++sched->validated_count;
                         ++sched->total_validated;
+                        s->set_disconnect_handler(
+                            [sched, vp, reported](const rlpx::protocol::DisconnectMessage& msg)
+                            {
+                                if (sched->feedback_fn)
+                                {
+                                    *reported = true;
+                                    sched->feedback_fn(vp, msg.reason, true);
+                                }
+                            });
                         sched->active_sessions.push_back(s);
                     },
                     yc);

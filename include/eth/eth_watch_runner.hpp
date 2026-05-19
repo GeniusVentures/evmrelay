@@ -12,27 +12,6 @@
 
 namespace eth {
 
-/// @brief Context metadata attached to a filtered watch event.
-struct WatchEventContext
-{
-    std::string chain_name;
-    uint64_t    network_id = 0;
-    std::string peer_client_id;
-    std::string peer_address;
-};
-
-/// @brief Enriched event payload emitted by EthWatchRunner.
-struct WatchEventNotification
-{
-    WatchEventContext               context;
-    MatchedEvent                    event;
-    std::vector<abi::AbiValue>      values;
-    std::string                     event_signature;
-};
-
-/// @brief Callback invoked for each decoded filtered event with chain/session metadata.
-using WatchEventNotificationCallback = std::function<void(const WatchEventNotification&)>;
-
 /// @brief Per-session ETH watch runner layered above RLPx and EthWatchService.
 class EthWatchRunner
 {
@@ -68,7 +47,9 @@ public:
     EventWatchId watch_event(
         const codec::Address&             contract_address,
         const std::string&                event_signature,
-        const std::vector<abi::AbiParam>& params) noexcept;
+        const std::vector<abi::AbiParam>& params,
+        std::optional<uint64_t>           from_block = std::nullopt,
+        std::optional<uint64_t>           to_block   = std::nullopt) noexcept;
 
     /// @brief Access the enriched event context.
     [[nodiscard]] const WatchEventContext& context() const noexcept;

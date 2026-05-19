@@ -2,10 +2,21 @@
 // SPDX-License-Identifier: MIT
 
 #include <eth/eth_watch_service.hpp>
+#include <eth/eth_handshake.hpp>
 #include <eth/eth_watch_dialer.hpp>
+#include <eth/eth_watch_runner.hpp>
 #include <eth/messages.hpp>
+#include <rlpx/crypto/ecdh.hpp>
+#include <rlpx/rlpx_session.hpp>
+
+#include <algorithm>
 
 namespace eth {
+
+EthWatchService::~EthWatchService()
+{
+    stop();
+}
 
 // ---------------------------------------------------------------------------
 // make_eth_watcher_pool
@@ -42,6 +53,305 @@ std::shared_ptr<discv4::DialScheduler> start_eth_watch_chain_peer_dialing(
     }
 
     return scheduler;
+}
+
+// ---------------------------------------------------------------------------
+// initialize / run / stop
+// ---------------------------------------------------------------------------
+
+bool EthWatchService::initialize(
+    EthWatchServiceConfig          config,
+    WatchEventNotificationCallback callback) noexcept
+{
+    stop();
+    orchestration_initialized_ = false;
+    orchestration_config_ = {};
+    orchestration_callback_ = {};
+
+    if (config.chains.empty())
+    {
+        return false;
+    }
+
+    for (const auto& chain : config.chains)
+    {
+        if (chain.canonical_name.empty())
+        {
+            return false;
+        }
+        if (chain.nodes.empty() && chain.bootnodes.empty())
+        {
+            return false;
+        }
+    }
+
+    orchestration_config_ = std::move(config);
+    orchestration_callback_ = std::move(callback);
+    orchestration_initialized_ = true;
+    return true;
+}
+
+void EthWatchService::run(boost::asio::io_context& io) noexcept
+{
+    if (!orchestration_initialized_ || orchestration_running_)
+    {
+        return;
+    }
+
+    runtime_chains_.clear();
+    active_runners_.clear();
+    auto pool = make_eth_watcher_pool(orchestration_config_.connection);
+
+    for (const auto& chain_config : orchestration_config_.chains)
+    {
+        RuntimeChain runtime{};
+        runtime.config = chain_config;
+
+        auto dial_fn = orchestration_config_.dial_fn_factory
+            ? orchestration_config_.dial_fn_factory(chain_config)
+            : make_default_dial_fn(chain_config);
+
+        runtime.scheduler = std::make_shared<discv4::DialScheduler>(
+            io,
+            pool,
+            std::move(dial_fn));
+
+        if (chain_config.fork_id.has_value())
+        {
+            runtime.scheduler->filter_fn =
+                discv4::make_fork_id_filter(chain_config.fork_id->fork_hash);
+        }
+
+        runtime.peer_queue = make_eth_peer_queue(
+            runtime.scheduler,
+            runtime.config,
+            orchestration_config_.peer_queue);
+
+        if (orchestration_config_.enable_discv4_fallback
+            && runtime.peer_queue
+            && runtime.peer_queue->needs_discovery())
+        {
+            start_discv4_fallback(io, runtime);
+        }
+
+        runtime_chains_.push_back(std::move(runtime));
+    }
+
+    orchestration_running_ = true;
+}
+
+void EthWatchService::stop() noexcept
+{
+    for (auto& runtime : runtime_chains_)
+    {
+        if (runtime.scheduler)
+        {
+            runtime.scheduler->stop();
+        }
+        if (runtime.discovery_client)
+        {
+            runtime.discovery_client->stop();
+        }
+    }
+    active_runners_.clear();
+    runtime_chains_.clear();
+    orchestration_running_ = false;
+}
+
+bool EthWatchService::initialized() const noexcept
+{
+    return orchestration_initialized_;
+}
+
+size_t EthWatchService::runtime_chain_count() const noexcept
+{
+    return runtime_chains_.size();
+}
+
+size_t EthWatchService::scheduler_count() const noexcept
+{
+    return std::count_if(runtime_chains_.begin(), runtime_chains_.end(),
+        [](const RuntimeChain& runtime) { return runtime.scheduler != nullptr; });
+}
+
+size_t EthWatchService::peer_queue_count() const noexcept
+{
+    return std::count_if(runtime_chains_.begin(), runtime_chains_.end(),
+        [](const RuntimeChain& runtime) { return runtime.peer_queue != nullptr; });
+}
+
+size_t EthWatchService::discovery_client_count() const noexcept
+{
+    return std::count_if(runtime_chains_.begin(), runtime_chains_.end(),
+        [](const RuntimeChain& runtime) { return runtime.discovery_client != nullptr; });
+}
+
+size_t EthWatchService::discv4_fallback_count() const noexcept
+{
+    return std::count_if(runtime_chains_.begin(), runtime_chains_.end(),
+        [](const RuntimeChain& runtime) { return runtime.discv4_fallback_started; });
+}
+
+std::shared_ptr<EthPeerQueue> EthWatchService::peer_queue(
+    const std::string& chain_name) const noexcept
+{
+    auto it = std::find_if(runtime_chains_.begin(), runtime_chains_.end(),
+        [&chain_name](const RuntimeChain& runtime)
+        {
+            return runtime.config.canonical_name == chain_name;
+        });
+    if (it == runtime_chains_.end())
+    {
+        return nullptr;
+    }
+    return it->peer_queue;
+}
+
+discv4::DialFn EthWatchService::make_default_dial_fn(
+    const discv4::ChainPeerConfig& chain_config) noexcept
+{
+    return [this, chain_config](
+        discv4::ValidatedPeer                                      vp,
+        std::function<void()>                                      on_done,
+        std::function<void(std::shared_ptr<rlpx::RlpxSession>)>    on_connected,
+        boost::asio::yield_context                                yield)
+    {
+        auto keypair_result = rlpx::crypto::Ecdh::generate_ephemeral_keypair();
+        if (!keypair_result)
+        {
+            on_done();
+            return;
+        }
+
+        const auto& keypair = keypair_result.value();
+        const rlpx::SessionConnectParams params{
+            vp.peer.ip,
+            vp.peer.tcp_port,
+            keypair.public_key,
+            keypair.private_key,
+            vp.pubkey,
+            "rlp-eth-watch",
+            0
+        };
+
+        auto session_result = rlpx::RlpxSession::connect(params, yield);
+        if (!session_result)
+        {
+            on_done();
+            return;
+        }
+
+        auto session = std::move(session_result.value());
+        auto fork_id = chain_config.fork_id.value_or(ForkId{});
+        auto runner = std::make_shared<EthWatchRunner>(
+            session,
+            chain_config.canonical_name,
+            chain_config.network_id,
+            chain_config.genesis_hash,
+            fork_id);
+
+        const auto handshake_result = PerformEthStatusHandshake(
+            EthStatusHandshakeStart{
+                std::make_shared<RlpxEthSessionChannel>(session),
+                chain_config.network_id,
+                chain_config.genesis_hash,
+                fork_id,
+                EthStatusAcceptedHandler{},
+                rlpx::EthMessageHandler{}
+            },
+            yield);
+        if (!handshake_result)
+        {
+            (void)session->disconnect(rlpx::DisconnectReason::kSubprotocolError);
+            on_done();
+            return;
+        }
+
+        on_connected(session);
+        runner->set_event_callback(orchestration_callback_);
+        for (const auto& watch : orchestration_config_.watches)
+        {
+            (void)runner->watch_event(
+                watch.contract_address,
+                watch.event_signature,
+                watch.params,
+                watch.from_block,
+                watch.to_block);
+        }
+        runner->install_session_bridge();
+        active_runners_.push_back(std::move(runner));
+    };
+}
+
+void EthWatchService::start_discv4_fallback(
+    boost::asio::io_context& io,
+    RuntimeChain&            runtime) noexcept
+{
+    if (orchestration_config_.discv4_fallback_starter)
+    {
+        runtime.discv4_fallback_started =
+            orchestration_config_.discv4_fallback_starter(
+                io,
+                runtime.config,
+                runtime.peer_queue);
+        return;
+    }
+
+    discv4::discv4Config discovery_config = orchestration_config_.discovery;
+    auto keypair_result = rlpx::crypto::Ecdh::generate_ephemeral_keypair();
+    if (keypair_result)
+    {
+        discovery_config.private_key = keypair_result.value().private_key;
+        discovery_config.public_key = keypair_result.value().public_key;
+    }
+
+    try
+    {
+        runtime.discovery_client = orchestration_config_.discovery_client_factory
+            ? orchestration_config_.discovery_client_factory(io, discovery_config)
+            : std::make_shared<discv4::discv4_client>(io, discovery_config);
+    }
+    catch (...)
+    {
+        runtime.discovery_client.reset();
+        return;
+    }
+
+    if (!runtime.discovery_client)
+    {
+        return;
+    }
+
+    auto queue = runtime.peer_queue;
+    runtime.discovery_client->set_peer_discovered_callback(
+        [queue](const discv4::DiscoveredPeer& peer)
+        {
+            if (queue)
+            {
+                (void)queue->enqueue_discovered_peer(peer);
+            }
+        });
+
+    const auto start_result = runtime.discovery_client->start();
+    if (!start_result)
+    {
+        runtime.discovery_client.reset();
+        return;
+    }
+    runtime.discv4_fallback_started = true;
+
+    for (const auto& bootnode : runtime.peer_queue->discovery_bootnodes())
+    {
+        const std::string host = bootnode.peer.ip;
+        const uint16_t port = bootnode.peer.udp_port;
+        const discv4::NodeId node_id = bootnode.peer.node_id;
+        auto client = runtime.discovery_client;
+        boost::asio::spawn(io,
+            [client, host, port, node_id](boost::asio::yield_context yield)
+            {
+                (void)client->find_node(host, port, node_id, yield);
+            });
+    }
 }
 
 // ---------------------------------------------------------------------------

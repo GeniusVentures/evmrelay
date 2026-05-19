@@ -130,7 +130,9 @@ void EthWatchRunner::install_session_bridge() noexcept
 EventWatchId EthWatchRunner::watch_event(
     const codec::Address&             contract_address,
     const std::string&                event_signature,
-    const std::vector<abi::AbiParam>& params) noexcept
+    const std::vector<abi::AbiParam>& params,
+    std::optional<uint64_t>           from_block,
+    std::optional<uint64_t>           to_block) noexcept
 {
     return watch_service_.watch_event(
         contract_address,
@@ -139,7 +141,9 @@ EventWatchId EthWatchRunner::watch_event(
         [this, event_signature](const MatchedEvent& event, const std::vector<abi::AbiValue>& values)
         {
             notify_event(event_signature, event, values);
-        });
+        },
+        from_block,
+        to_block);
 }
 
 } // namespace eth

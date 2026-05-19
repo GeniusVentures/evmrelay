@@ -52,6 +52,52 @@ eth::codec::LogEntry make_transfer_log(
     return log;
 }
 
+discv4::ValidatedPeer make_validated_peer(uint8_t seed)
+{
+    discv4::ValidatedPeer peer{};
+    for (size_t i = 0; i < peer.peer.node_id.size(); ++i)
+    {
+        peer.peer.node_id[i] = static_cast<uint8_t>(seed + i);
+    }
+    std::copy(peer.peer.node_id.begin(), peer.peer.node_id.end(), peer.pubkey.begin());
+    peer.peer.ip = "127.0.0.1";
+    peer.peer.udp_port = static_cast<uint16_t>(30300 + seed);
+    peer.peer.tcp_port = static_cast<uint16_t>(30400 + seed);
+    discv4::ForkId fork_id{};
+    fork_id.hash = {0x11, 0x22, 0x33, 0x44};
+    peer.peer.eth_fork_id = fork_id;
+    return peer;
+}
+
+discv4::ChainPeerConfig make_chain_config(
+    std::string chain_name,
+    std::vector<discv4::ValidatedPeer> nodes,
+    std::vector<discv4::ValidatedPeer> bootnodes = {})
+{
+    discv4::ChainPeerConfig config{};
+    config.canonical_name = std::move(chain_name);
+    config.network_id = 100;
+    config.genesis_hash = make_filled<eth::Hash256>(0x42);
+    eth::ForkId fork_id{};
+    fork_id.fork_hash = {0x11, 0x22, 0x33, 0x44};
+    config.fork_id = fork_id;
+    config.nodes = std::move(nodes);
+    config.bootnodes = std::move(bootnodes);
+    return config;
+}
+
+discv4::DialFn no_op_dial_fn()
+{
+    return [](
+        discv4::ValidatedPeer,
+        std::function<void()> done,
+        std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
+        boost::asio::yield_context)
+    {
+        done();
+    };
+}
+
 } // namespace
 
 // ============================================================================
@@ -481,4 +527,104 @@ TEST(EthWatchServiceTest, BlockRangeFilteringRespected)
     svc.process_receipts({receipt}, {{}}, 250, {});   // after range — no dispatch
 
     EXPECT_EQ(call_count, 1);
+}
+
+// ============================================================================
+// EthWatchService — production orchestration
+// ============================================================================
+
+TEST(EthWatchServiceTest, InitializeRunCreatesSchedulerAndPeerQueueFromCachedNodes)
+{
+    boost::asio::io_context io;
+
+    eth::EthWatchServiceConfig config{};
+    config.chains.push_back(make_chain_config("test-chain", {make_validated_peer(0x10)}));
+    config.dial_fn_factory = [](const discv4::ChainPeerConfig&) { return no_op_dial_fn(); };
+
+    eth::EthWatchService svc;
+    ASSERT_TRUE(svc.initialize(std::move(config), [](const eth::WatchEventNotification&) {}));
+    svc.run(io);
+
+    EXPECT_EQ(svc.runtime_chain_count(), 1U);
+    EXPECT_EQ(svc.scheduler_count(), 1U);
+    EXPECT_EQ(svc.peer_queue_count(), 1U);
+    EXPECT_EQ(svc.discovery_client_count(), 0U);
+
+    auto queue = svc.peer_queue("test-chain");
+    ASSERT_NE(queue, nullptr);
+    EXPECT_EQ(queue->cached_peer_count(), 1U);
+    EXPECT_FALSE(queue->needs_discovery());
+}
+
+TEST(EthWatchServiceTest, EmptyCachedNodesWithBootnodesStartsDiscv4Fallback)
+{
+    boost::asio::io_context io;
+
+    eth::EthWatchServiceConfig config{};
+    config.discovery.bind_port = 0;
+    config.chains.push_back(make_chain_config(
+        "gnosis-mainnet",
+        {},
+        {make_validated_peer(0x20)}));
+    config.dial_fn_factory = [](const discv4::ChainPeerConfig&) { return no_op_dial_fn(); };
+    config.discv4_fallback_starter = [](
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig&,
+        std::shared_ptr<eth::EthPeerQueue>)
+    {
+        return true;
+    };
+
+    eth::EthWatchService svc;
+    ASSERT_TRUE(svc.initialize(std::move(config), [](const eth::WatchEventNotification&) {}));
+    svc.run(io);
+
+    EXPECT_EQ(svc.runtime_chain_count(), 1U);
+    EXPECT_EQ(svc.scheduler_count(), 1U);
+    EXPECT_EQ(svc.peer_queue_count(), 1U);
+    EXPECT_EQ(svc.discv4_fallback_count(), 1U);
+
+    auto queue = svc.peer_queue("gnosis-mainnet");
+    ASSERT_NE(queue, nullptr);
+    EXPECT_EQ(queue->cached_peer_count(), 0U);
+    EXPECT_EQ(queue->discovery_bootnodes().size(), 1U);
+    EXPECT_TRUE(queue->needs_discovery());
+}
+
+TEST(EthWatchServiceTest, SchedulerFeedbackRequeuesThroughProductionPeerQueue)
+{
+    boost::asio::io_context io;
+    const auto peer = make_validated_peer(0x30);
+
+    eth::EthWatchServiceConfig config{};
+    config.connection.max_total_connections = 0;
+    config.connection.max_connections_per_chain = 0;
+    config.chains.push_back(make_chain_config("feedback-chain", {peer}));
+    config.dial_fn_factory = [](const discv4::ChainPeerConfig&) { return no_op_dial_fn(); };
+
+    eth::EthWatchService svc;
+    ASSERT_TRUE(svc.initialize(std::move(config), [](const eth::WatchEventNotification&) {}));
+    svc.run(io);
+
+    auto queue = svc.peer_queue("feedback-chain");
+    ASSERT_NE(queue, nullptr);
+    ASSERT_NE(queue->scheduler(), nullptr);
+    ASSERT_TRUE(static_cast<bool>(queue->scheduler()->feedback_fn));
+
+    queue->scheduler()->feedback_fn(peer, rlpx::DisconnectReason::kTooManyPeers, true);
+
+    EXPECT_EQ(queue->requeued_peer_count(), 1U);
+    EXPECT_EQ(queue->scheduler()->queue.size(), 2U);
+}
+
+TEST(EthWatchServiceTest, InitializeRejectsIncompleteRuntimeConfig)
+{
+    eth::EthWatchService svc;
+
+    eth::EthWatchServiceConfig empty_config{};
+    EXPECT_FALSE(svc.initialize(std::move(empty_config), [](const eth::WatchEventNotification&) {}));
+
+    eth::EthWatchServiceConfig no_peers_config{};
+    no_peers_config.chains.push_back(make_chain_config("no-peers", {}, {}));
+    EXPECT_FALSE(svc.initialize(std::move(no_peers_config), [](const eth::WatchEventNotification&) {}));
 }

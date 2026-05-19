@@ -84,6 +84,27 @@ std::optional<eth::Hash256> parse_hash256(std::string_view value)
     return hash;
 }
 
+std::optional<eth::EthWatchDiscoveryMode> parse_peer_selection_mode(std::string_view value) noexcept
+{
+    if (value == "cache-only")
+    {
+        return eth::EthWatchDiscoveryMode::kCacheOnly;
+    }
+    if (value == "discover-if-needed")
+    {
+        return eth::EthWatchDiscoveryMode::kDiscoverIfNeeded;
+    }
+    if (value == "discover-first")
+    {
+        return eth::EthWatchDiscoveryMode::kDiscoverFirst;
+    }
+    if (value == "hybrid")
+    {
+        return eth::EthWatchDiscoveryMode::kHybrid;
+    }
+    return std::nullopt;
+}
+
 std::optional<Config> parse_enode(std::string_view enode) {
     constexpr std::string_view kPrefix = "enode://";
     if (enode.size() < kPrefix.size() || enode.substr(0, kPrefix.size()) != kPrefix) {
@@ -248,6 +269,7 @@ void print_usage(const char* exe)
               << "  --display-events <count>          Print full decoded details for only the first count matches (default 2).\n"
               << "  --max-peers-per-chain <count>     Active dial/watch slots per chain (default 3).\n"
               << "  --max-peers-total <count>         Active dial/watch slots across all chains (default 24).\n"
+              << "  --peer-selection <mode>           cache-only, discover-if-needed, discover-first, or hybrid.\n"
               << "\nExamples:\n"
               << "  " << exe << " --chain ethereum-sepolia --watch-event Transfer(address,address,uint256)\n"
               << "  " << exe << " --all-chains --watch-event Transfer(address,address,uint256)\n"
@@ -624,6 +646,7 @@ int main(int argc, char** argv) {
         bool chain_peers_url_enabled = true;
         auto output_state = std::make_shared<WatchOutputState>();
         eth::EthWatchConnectionConfig watch_connection_config{};
+        eth::EthWatchDiscoveryMode discovery_mode = eth::EthWatchDiscoveryMode::kDiscoverIfNeeded;
 
         for (int i = 1; i < argc; ++i)
         {
@@ -811,6 +834,18 @@ int main(int argc, char** argv) {
                 }
                 watch_connection_config.max_total_connections = static_cast<int>(*max_peers_total);
                 next_arg += 2;
+            } else if (arg == "--peer-selection") {
+                if (next_arg + 1 >= argc) {
+                    std::cout << "--peer-selection requires a mode argument.\n";
+                    return 1;
+                }
+                const auto parsed_mode = parse_peer_selection_mode(argv[next_arg + 1]);
+                if (!parsed_mode) {
+                    std::cout << "Invalid --peer-selection mode. Expected cache-only, discover-if-needed, discover-first, or hybrid.\n";
+                    return 1;
+                }
+                discovery_mode = *parsed_mode;
+                next_arg += 2;
             } else if (arg == "--network-id") {
                 if (next_arg + 1 >= argc) {
                     std::cout << "--network-id requires an integer argument.\n";
@@ -941,7 +976,8 @@ int main(int argc, char** argv) {
             auto service_config = eth::cli::build_service_config(
                 watch_connection_config,
                 std::move(*service_watches),
-                std::move(service_chains));
+                std::move(service_chains),
+                discovery_mode);
 
             if (!service.initialize(
                     std::move(service_config),
@@ -969,7 +1005,8 @@ int main(int argc, char** argv) {
             auto service_config = eth::cli::build_service_config(
                 watch_connection_config,
                 std::move(*service_watches),
-                {config->chain_peer_config});
+                {config->chain_peer_config},
+                discovery_mode);
 
             SPDLOG_LOGGER_INFO(log,
                                "Starting eth watch service for chain '{}' with {} cached peer(s) and {} bootnode(s)",

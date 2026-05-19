@@ -54,6 +54,22 @@ struct EthWatchConnectionConfig
     int max_connections_per_chain = 3;
 };
 
+/// @brief Peer source strategy for production eth-watch startup.
+enum class EthWatchDiscoveryMode
+{
+    /// Use cached `nodes` only; never start discovery from `bootnodes`.
+    kCacheOnly,
+
+    /// Use cached `nodes`; start discovery only when no cached nodes are available.
+    kDiscoverIfNeeded,
+
+    /// Start from discovery `bootnodes` and do not enqueue cached `nodes` initially.
+    kDiscoverFirst,
+
+    /// Enqueue cached `nodes` and also start discovery from `bootnodes`.
+    kHybrid
+};
+
 /// @brief Typed callback for a decoded event log.
 using DecodedEventCallback = std::function<void(
     const MatchedEvent&,
@@ -76,6 +92,7 @@ struct EthWatchServiceConfig
     EthPeerQueueConfig                     peer_queue{};
     std::vector<discv4::ChainPeerConfig>   chains;
     std::vector<EthWatchEventSpec>         watches;
+    EthWatchDiscoveryMode                  discovery_mode = EthWatchDiscoveryMode::kDiscoverIfNeeded;
     bool                                   enable_discv4_fallback = true;
     discv4::discv4Config                  discovery{};
 

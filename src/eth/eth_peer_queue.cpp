@@ -194,11 +194,15 @@ bool EthPeerQueue::is_requeueable_disconnect(const EthPeerDisconnectFeedback& fe
 std::shared_ptr<EthPeerQueue> make_eth_peer_queue(
     std::shared_ptr<discv4::DialScheduler> scheduler,
     const discv4::ChainPeerConfig&         chain_config,
-    EthPeerQueueConfig                     config)
+    EthPeerQueueConfig                     config,
+    bool                                   preload_cached_peers)
 {
     auto queue = std::make_shared<EthPeerQueue>(std::move(scheduler), config);
     queue->set_discovery_bootnodes(chain_config.bootnodes);
-    queue->preload_cached_peers(chain_config.nodes);
+    if (preload_cached_peers)
+    {
+        queue->preload_cached_peers(chain_config.nodes);
+    }
     return queue;
 }
 

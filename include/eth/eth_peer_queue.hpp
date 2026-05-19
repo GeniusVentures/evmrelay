@@ -94,7 +94,8 @@ private:
 [[nodiscard]] std::shared_ptr<EthPeerQueue> make_eth_peer_queue(
     std::shared_ptr<discv4::DialScheduler> scheduler,
     const discv4::ChainPeerConfig&         chain_config,
-    EthPeerQueueConfig                     config = {});
+    EthPeerQueueConfig                     config = {},
+    bool                                   preload_cached_peers = true);
 
 } // namespace eth
 

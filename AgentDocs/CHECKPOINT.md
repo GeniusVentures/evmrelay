@@ -1,5 +1,46 @@
 # Checkpoint Log
 
+## EVM relay bootstrap peer loader split and explicit peer selection - 2026-05-19
+
+### Current state
+
+- Repository: `evmrelay`
+- Branch: `develop`
+- Current local HEAD before this uncommitted step: `0f96446 Replace eth watch shell smoke tests`
+
+### New local changes in this step
+
+- `test/discv4/chain_peers_test.cpp`
+  - Adds file-path loader coverage proving `load_bootstrap_peers_from_json(...)` reads `bootnodes` and ignores `nodes`.
+- `include/eth/eth_watch_service.hpp` / `src/eth/eth_watch_service.cpp`
+  - Adds `EthWatchDiscoveryMode` with explicit cache-only, discover-if-needed, discover-first, and hybrid peer selection.
+  - Keeps the existing default behavior as discover-if-needed.
+  - Discover-first starts from `bootnodes` without preloading cached `nodes`.
+  - Hybrid preloads cached `nodes` and starts discovery from `bootnodes` in parallel.
+- `include/eth/eth_peer_queue.hpp` / `src/eth/eth_peer_queue.cpp`
+  - Allows service orchestration to create a peer queue without preloading cached nodes for discover-first mode.
+- `include/eth/eth_watch_cli.hpp`
+  - Carries explicit discovery mode through `build_service_config(...)`.
+- `examples/eth_watch/eth_watch.cpp`
+  - Adds `--peer-selection cache-only|discover-if-needed|discover-first|hybrid` for cache-backed service modes.
+- `test/eth/eth_watch_service_test.cpp`
+  - Covers cache-only, discover-first, and hybrid mode behavior.
+- `test/eth/eth_watch_cli_test.cpp`
+  - Covers default and explicit discovery mode propagation through CLI config construction.
+- `AgentDocs/EVMRELAY_COMPLETION_PLAN.md`
+  - Marks the `bootstrap_peers` loader split and explicit peer selection items complete.
+
+### Still intentionally not done
+
+- `rlp_enodes` was not touched.
+- gzip/JSON loading behavior was not changed.
+- No bridge consensus/finality logic was added.
+- Direct-enode/manual testing path remains example-local.
+
+### Next implementation step
+
+Continue production cleanup around later ENR-tree discovery support and deeper discovery/dialer lifecycle tests, or decide whether the direct host/port/pubkey and `--direct-enode` helper should stay example-local permanently.
+
 ## EVM relay eth_watch C++ example tests - 2026-05-19
 
 ### Current state

@@ -66,7 +66,7 @@ Current uncommitted implementation state:
 
 Immediate next step:
 
-Decide whether the direct host/port/pubkey and `--direct-enode` helper should stay example-local permanently or move behind a small production direct-session API. If it stays example-local, continue with loader cleanup: update `bootstrap_peers` so bootstrap loading parses only `bootnodes`.
+Decide whether the direct host/port/pubkey and `--direct-enode` helper should stay example-local permanently or move behind a small production direct-session API. If it stays example-local, continue with the remaining production cleanup after explicit peer selection: later ENR-tree discovery support and deeper discovery/dialer lifecycle tests.
 
 Suggested tests for the next session:
 
@@ -142,7 +142,7 @@ Keep the implementation modular and keep source roles separate:
 
 - ~~Extend `ChainPeerConfig` or add a sibling structure so chain peer candidates and bootnode candidates are represented separately.~~
 - ~~Keep `load_chain_peers_from_json_text(...)` parsing only `nodes`.~~
-- Update `bootstrap_peers` so `load_bootstrap_peers_from_json_text(...)` parses only `bootnodes`, not `nodes`.
+- ~~Update `bootstrap_peers` so `load_bootstrap_peers_from_json_text(...)` and `load_bootstrap_peers_from_json(...)` parse only `bootnodes`, not `nodes`.~~
 - Add parsing/validation tests for ENR entries originating from EIP-1459 trees, including invalid ENR records and trees that resolve to zero usable bootnodes.
 - Add tests proving:
   - ~~chain peer loading ignores `bootnodes`;~~
@@ -156,7 +156,7 @@ Keep the implementation modular and keep source roles separate:
 - In `eth_watch` and relay startup code, load `chain_enodes.json.gz` as a pre-cache before live discovery.
 - ~~For each chain, enqueue pre-cached `nodes` into the dial queue when present.~~
 - ~~For chains with no usable pre-cached `nodes`, start discv4 discovery from pre-cached `bootnodes`, validate discovered peers, and enqueue them into the same dial queue.~~
-- Allow discovery to continue in parallel even when pre-cached `nodes` exist, but keep the behavior explicit so operators can choose cache-only, discover-first, or hybrid mode.
+- ~~Allow discovery to continue in parallel even when pre-cached `nodes` exist, but keep the behavior explicit so operators can choose cache-only, discover-first, or hybrid mode.~~
 - Add an explicit ENR-tree discovery source path for EIP-1459 after the discv4 fallback path is complete:
   - resolve `enrtree://` / DNS discovery records into ENR bootnodes;
   - seed discv4/discv5 discovery from the resolved bootnodes;
@@ -169,7 +169,7 @@ Keep the implementation modular and keep source roles separate:
   - ~~`discv4_client::set_peer_discovered_callback(...)` and `discv5_client::set_peer_discovered_callback(...)` are discovery producer hooks;~~
   - ~~`DialScheduler::enqueue(...)` is the dialer handoff point;~~
   - ~~`DialScheduler` owns active dial counts, retry suppression, queue draining, and session slot recycling.~~
-- Wire `eth_watch` discover-first mode so discv4/discv5 callbacks enqueue peers into `DialScheduler` while discovery continues in parallel.
+- ~~Wire `eth_watch` discover-first mode so discv4 callbacks enqueue peers into `DialScheduler` while discovery continues in parallel.~~
 - ~~Add a small adapter layer if needed to convert discv4/discv5 peer records into one dialer peer type; keep protocol-specific discovery details out of the connection code.~~
 - ~~Add backpressure policy for the peer queue: bounded size, duplicate suppression, recent-dial suppression, and deterministic drop behavior when discovery outpaces dialing.~~
 - ~~Move reusable connection-pool, dial-queue, and discovery callback wiring out of `examples/eth_watch/eth_watch.cpp` into `evmrelay/src/eth/eth_watch_service.cpp` or a focused `src/eth` helper owned by `EthWatchService`.~~
@@ -204,7 +204,7 @@ Remaining work:
 - Direct `--direct-enode` remains available for local and manual testing.
 - `chain_enodes.json.gz` is used as the startup pre-cache for both peer dialing (`nodes`) and discovery seeding (`bootnodes`).
 - Chains without pre-cached `nodes`, including Gnosis Chain, can still start from `bootnodes`, run discv4 discovery, and enqueue validated discovered peers.
-- Optional discover-first/hybrid mode uses `bootnodes` only for discovery.
+- ~~Optional discover-first/hybrid mode uses `bootnodes` only for discovery.~~
 - Optional ENR-tree mode supports EIP-1459 DNS discovery later, keeps resolved ENRs in the discovery-only path, and becomes the preferred default for Ethereum and Polygon chains once implemented.
 - Discovery and connection dialing are decoupled: discovery producers enqueue peers continuously, and dialers consume queued peers according to connection limits.
 - Core discovery/dial/session orchestration lives in `src/eth` production code, not in `examples/eth_watch/eth_watch.cpp`.
@@ -230,13 +230,13 @@ Remaining work:
 
 1. Lock schema filename and documentation examples.
 2. ~~Add failing C++ tests for `nodes` vs `bootnodes` separation.~~
-3. Update `bootstrap_peers` to parse `bootnodes`.
+3. ~~Update `bootstrap_peers` to parse `bootnodes`.~~
 4. Treat `chain_enodes.json.gz` as the startup pre-cache: load `nodes` for immediate dialing and `bootnodes` for discovery seeding.
 5. ~~Add or formalize the discovery-to-dialer queue adapter and backpressure policy under `include/eth` / `src/eth`.~~
 6. ~~Implement discv4 fallback for chains without usable pre-cached `nodes`, with Gnosis Chain as the first target.~~
 7. ~~Move reusable scheduler/discovery orchestration out of `examples/eth_watch/eth_watch.cpp` and into `EthWatchService` production code.~~
 8. ~~Add chain config support for both arrays without changing direct peer behavior.~~
-9. Update `eth_watch` peer selection so direct mode, cache-first mode, bootnode discovery fallback, and hybrid mode are explicit through production service APIs. Cache-first and bootnode fallback now use production service APIs; direct mode remains an example-local manual helper.
+9. ~~Update `eth_watch` peer selection so direct mode, cache-first mode, bootnode discovery fallback, and hybrid mode are explicit through production service APIs. Cache-first and bootnode fallback now use production service APIs; direct mode remains an example-local manual helper.~~
 10. Add EIP-1459 / ENR tree source support and tests for discovery seed generation for chains that support it, with Ethereum/Polygon defaulting to ENR-tree discovery and other chains defaulting to discv4.
 11. Run focused discv4, discv5, eth, and eth_watch tests.
 12. Refresh docs and smoke-test commands.

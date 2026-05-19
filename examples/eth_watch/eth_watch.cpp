@@ -24,7 +24,6 @@
 
 #include <eth/messages.hpp>
 #include <eth/eth_peer_session.hpp>
-#include <eth/eth_watch_dialer.hpp>
 #include <eth/eth_watch_runner.hpp>
 #include <eth/eth_watch_service.hpp>
 #include <eth/eth_watch_cli.hpp>
@@ -65,6 +64,7 @@ struct Config {
     eth::Hash256 genesis_hash{};
     eth::ForkId  fork_id{};   ///< EIP-2124 fork identifier; set per chain
     std::vector<discv4::ValidatedPeer> chain_peers;
+    discv4::ChainPeerConfig chain_peer_config{};
 };
 
 struct WatchOutputState
@@ -131,11 +131,101 @@ void apply_chain_peer_config(
     config.network_id = chain_peer_config.network_id;
     config.genesis_hash = chain_peer_config.genesis_hash;
     config.chain_peers = chain_peer_config.nodes;
-    config.use_chain_peer_cache = !config.chain_peers.empty();
+    config.chain_peer_config = chain_peer_config;
+    config.use_chain_peer_cache = !chain_peer_config.nodes.empty() || !chain_peer_config.bootnodes.empty();
     if (!config.fork_id_overridden && chain_peer_config.fork_id.has_value())
     {
         config.fork_id = *chain_peer_config.fork_id;
     }
+}
+
+void log_watch_notification(
+    const eth::WatchEventNotification& notification,
+    const std::shared_ptr<WatchOutputState>& output_state)
+{
+    static auto ev_log = rlp::base::createLogger("eth_watch");
+    auto bytes_to_hex = [](const auto& arr)
+    {
+        std::string s;
+        s.reserve(arr.size() * 2);
+        for (const auto b : arr)
+        {
+            const char hex[] = "0123456789abcdef";
+            s += hex[(static_cast<uint8_t>(b) >> 4) & 0xf];
+            s += hex[ static_cast<uint8_t>(b)       & 0xf];
+        }
+        return s;
+    };
+
+    ++output_state->total_events;
+    const auto chain_count = ++output_state->events_by_chain[notification.context.chain_name];
+
+    std::string header = "event_count=" + std::to_string(output_state->total_events) +
+                         " chain_count=" + std::to_string(chain_count) +
+                         " " + notification.event_signature + " at block " +
+                         std::to_string(notification.event.block_number) +
+                         " chain=" + notification.context.chain_name;
+    if (notification.event.tx_hash != eth::codec::Hash256{})
+    {
+        header += "  tx: 0x" + bytes_to_hex(notification.event.tx_hash);
+    }
+    SPDLOG_LOGGER_INFO(ev_log, "{}", header);
+
+    if (output_state->total_events > output_state->detailed_event_limit)
+    {
+        return;
+    }
+
+    for (size_t i = 0; i < notification.values.size(); ++i)
+    {
+        const std::string label = std::to_string(i);
+        std::string value;
+        if (const auto* addr = std::get_if<eth::codec::Address>(&notification.values[i]))
+        {
+            value = "0x" + bytes_to_hex(*addr);
+        }
+        else if (const auto* u256 = std::get_if<intx::uint256>(&notification.values[i]))
+        {
+            value = intx::to_string(*u256);
+        }
+        else if (const auto* b32 = std::get_if<eth::codec::Hash256>(&notification.values[i]))
+        {
+            value = "0x" + bytes_to_hex(*b32);
+        }
+        else if (const auto* bval = std::get_if<bool>(&notification.values[i]))
+        {
+            value = (*bval ? "true" : "false");
+        }
+        SPDLOG_LOGGER_INFO(ev_log, "  [{}] {}", label, value);
+    }
+}
+
+std::optional<std::vector<eth::EthWatchEventSpec>> build_service_watch_specs(
+    const std::vector<eth::cli::WatchSpec>& watch_specs)
+{
+    std::vector<eth::EthWatchEventSpec> service_watches;
+    service_watches.reserve(watch_specs.size());
+
+    for (const auto& spec : watch_specs)
+    {
+        eth::EthWatchEventSpec watch{};
+        if (!spec.contract_hex.empty())
+        {
+            auto addr = eth::cli::parse_address(spec.contract_hex);
+            if (!addr)
+            {
+                std::cout << "Invalid contract address: " << spec.contract_hex << "\n";
+                return std::nullopt;
+            }
+            watch.contract_address = *addr;
+        }
+
+        watch.event_signature = spec.event_signature;
+        watch.params = eth::cli::infer_params(spec.event_signature);
+        service_watches.push_back(std::move(watch));
+    }
+
+    return service_watches;
 }
 
 std::optional<discv4::ChainPeerConfig> load_chain_peer_config(
@@ -323,61 +413,7 @@ void run_watch(std::string host,
 
     watch_runner->set_event_callback([output_state](const eth::WatchEventNotification& notification)
     {
-        static auto ev_log = rlp::base::createLogger("eth_watch");
-        auto bytes_to_hex = [](const auto& arr)
-        {
-            std::string s;
-            s.reserve(arr.size() * 2);
-            for (const auto b : arr)
-            {
-                const char hex[] = "0123456789abcdef";
-                s += hex[(static_cast<uint8_t>(b) >> 4) & 0xf];
-                s += hex[ static_cast<uint8_t>(b)       & 0xf];
-            }
-            return s;
-        };
-
-        ++output_state->total_events;
-        const auto chain_count = ++output_state->events_by_chain[notification.context.chain_name];
-
-        std::string header = "event_count=" + std::to_string(output_state->total_events) +
-                             " chain_count=" + std::to_string(chain_count) +
-                             " " + notification.event_signature + " at block " +
-                             std::to_string(notification.event.block_number) +
-                             " chain=" + notification.context.chain_name;
-        if (notification.event.tx_hash != eth::codec::Hash256{})
-        {
-            header += "  tx: 0x" + bytes_to_hex(notification.event.tx_hash);
-        }
-        SPDLOG_LOGGER_INFO(ev_log, "{}", header);
-
-        if (output_state->total_events > output_state->detailed_event_limit)
-        {
-            return;
-        }
-
-        for (size_t i = 0; i < notification.values.size(); ++i)
-        {
-            const std::string label = std::to_string(i);
-            std::string value;
-            if (const auto* addr = std::get_if<eth::codec::Address>(&notification.values[i]))
-            {
-                value = "0x" + bytes_to_hex(*addr);
-            }
-            else if (const auto* u256 = std::get_if<intx::uint256>(&notification.values[i]))
-            {
-                value = intx::to_string(*u256);
-            }
-            else if (const auto* b32 = std::get_if<eth::codec::Hash256>(&notification.values[i]))
-            {
-                value = "0x" + bytes_to_hex(*b32);
-            }
-            else if (const auto* bval = std::get_if<bool>(&notification.values[i]))
-            {
-                value = (*bval ? "true" : "false");
-            }
-            SPDLOG_LOGGER_INFO(ev_log, "  [{}] {}", label, value);
-        }
+        log_watch_notification(notification, output_state);
     });
 
     if (watch_specs.empty())
@@ -905,79 +941,77 @@ int main(int argc, char** argv) {
             io.stop();
         });
 
+        eth::EthWatchService service;
+
         if (!multi_chain_configs.empty())
         {
-            auto pool = eth::make_eth_watcher_pool(watch_connection_config);
-            std::vector<std::shared_ptr<discv4::DialScheduler>> schedulers;
-            schedulers.reserve(multi_chain_configs.size());
-
             static auto log = rlp::base::createLogger("eth_watch");
+            auto service_watches = build_service_watch_specs(config->watch_specs);
+            if (!service_watches)
+            {
+                return 1;
+            }
+
+            eth::EthWatchServiceConfig service_config{};
+            service_config.connection = watch_connection_config;
+            service_config.watches = std::move(*service_watches);
+            service_config.chains.reserve(multi_chain_configs.size());
+
             for (const auto& chain_config : multi_chain_configs)
             {
-                const std::string chain_peer_chain_name = chain_config.canonical_chain_name;
-                const uint64_t   network_id   = chain_config.network_id;
-                const auto       genesis_hash = chain_config.genesis_hash;
-                const auto       fork_id      = chain_config.fork_id;
-                const auto       watch_specs  = chain_config.watch_specs;
-
-                auto scheduler = eth::start_eth_watch_chain_peer_dialing(
-                    io,
-                    pool,
-                    [chain_peer_chain_name, network_id, genesis_hash, fork_id, watch_specs, output_state]
-                    (discv4::ValidatedPeer                                            vp,
-                     std::function<void()>                                            on_done,
-                     std::function<void(std::shared_ptr<rlpx::RlpxSession>)>         on_connected,
-                     boost::asio::yield_context                                       yc)
-                    {
-                        run_watch(vp.peer.ip, vp.peer.tcp_port, vp.pubkey,
-                                  chain_peer_chain_name,
-                                  network_id, genesis_hash, fork_id, watch_specs,
-                                  output_state,
-                                  std::move(on_done), std::move(on_connected), yc);
-                    },
-                    chain_config.chain_peers);
-
-                SPDLOG_LOGGER_INFO(log, "Dialing {} cached chain peers for chain '{}'",
-                                   chain_config.chain_peers.size(), chain_peer_chain_name);
-                schedulers.push_back(std::move(scheduler));
+                service_config.chains.push_back(chain_config.chain_peer_config);
+                SPDLOG_LOGGER_INFO(log,
+                                   "Starting eth watch service for chain '{}' with {} cached peer(s) and {} bootnode(s)",
+                                   chain_config.canonical_chain_name,
+                                   chain_config.chain_peer_config.nodes.size(),
+                                   chain_config.chain_peer_config.bootnodes.size());
             }
-            std::cout << "Dialing cached peers for Ethereum, Polygon, BNB Smart Chain, and Base...\n";
+
+            if (!service.initialize(
+                    std::move(service_config),
+                    [output_state](const eth::WatchEventNotification& notification)
+                    {
+                        log_watch_notification(notification, output_state);
+                    }))
+            {
+                std::cout << "Invalid eth watch service configuration.\n";
+                return 1;
+            }
+            service.run(io);
+            std::cout << "Starting eth watch service for Ethereum, Polygon, BNB Smart Chain, and Base...\n";
         }
         else if (config->use_chain_peer_cache && !config->prefer_direct_enode)
         {
-            // Capture config values needed in the callback
-            const std::string chain_peer_chain_name = config->canonical_chain_name;
-            const uint64_t   network_id   = config->network_id;
-            const auto       genesis_hash = config->genesis_hash;
-            const auto       fork_id      = config->fork_id;
-            const auto       watch_specs  = config->watch_specs;
-
-            // Two-level resource caps.
-            // Embedding apps pass platform-appropriate eth::EthWatchConnectionConfig values.
-            auto pool = eth::make_eth_watcher_pool(watch_connection_config);
-            auto scheduler = eth::start_eth_watch_chain_peer_dialing(
-                io,
-                pool,
-                [chain_peer_chain_name, network_id, genesis_hash, fork_id, watch_specs, output_state]
-                (discv4::ValidatedPeer                                            vp,
-                 std::function<void()>                                            on_done,
-                 std::function<void(std::shared_ptr<rlpx::RlpxSession>)>         on_connected,
-                 boost::asio::yield_context                                       yc)
-                {
-                    run_watch(vp.peer.ip, vp.peer.tcp_port, vp.pubkey,
-                              chain_peer_chain_name,
-                              network_id, genesis_hash, fork_id, watch_specs,
-                              output_state,
-                              std::move(on_done), std::move(on_connected), yc);
-                },
-                config->chain_peers);
-
             static auto log = rlp::base::createLogger("eth_watch");
-            SPDLOG_LOGGER_INFO(log, "Dialing {} cached chain peers for chain '{}'",
-                               config->chain_peers.size(), chain_peer_chain_name);
-            (void)scheduler;
+            auto service_watches = build_service_watch_specs(config->watch_specs);
+            if (!service_watches)
+            {
+                return 1;
+            }
 
-            std::cout << "Dialing cached chain peers...\n";
+            eth::EthWatchServiceConfig service_config{};
+            service_config.connection = watch_connection_config;
+            service_config.watches = std::move(*service_watches);
+            service_config.chains.push_back(config->chain_peer_config);
+
+            SPDLOG_LOGGER_INFO(log,
+                               "Starting eth watch service for chain '{}' with {} cached peer(s) and {} bootnode(s)",
+                               config->canonical_chain_name,
+                               config->chain_peer_config.nodes.size(),
+                               config->chain_peer_config.bootnodes.size());
+
+            if (!service.initialize(
+                    std::move(service_config),
+                    [output_state](const eth::WatchEventNotification& notification)
+                    {
+                        log_watch_notification(notification, output_state);
+                    }))
+            {
+                std::cout << "Invalid eth watch service configuration.\n";
+                return 1;
+            }
+            service.run(io);
+            std::cout << "Starting eth watch service...\n";
         }
         else
         {

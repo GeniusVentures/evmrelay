@@ -63,7 +63,50 @@ Result:
 
 ### Next implementation step
 
-Reduce `examples/eth_watch/eth_watch.cpp` to config loading plus callback registration over `EthWatchService`, now that the production service API exists and has focused tests. Keep direct-enode/manual testing available while moving cached-node and discovery-fallback orchestration out of the example.
+Continue hardening the production service path now that `examples/eth_watch` cache modes delegate to `EthWatchService`. Direct-enode/manual testing still uses the example's direct helper path.
+
+## EVM relay eth_watch service wrapper progress - 2026-05-19
+
+### Current state
+
+- Repository: `evmrelay`
+- Branch: `develop`
+- Current local HEAD before this uncommitted step: `7f4778a Add eth watch service orchestration`
+
+### New local changes in this step
+
+- `examples/eth_watch/eth_watch.cpp`
+  - Cache-based `--chain` mode now builds `EthWatchServiceConfig`, registers decoded notification output, and calls `service.initialize(...)` / `service.run(io)`.
+  - Cache-based `--all-chains` mode now delegates shared pool, per-chain schedulers, peer queues, cached `nodes`, and `bootnodes` discovery fallback to `EthWatchService`.
+  - Direct host/port/pubkey and `--direct-enode` manual modes remain on the existing direct `run_watch(...)` helper for local testing.
+  - Event output formatting was factored into a shared notification logger used by both direct runner callbacks and service callbacks.
+- `test/eth/eth_watch_service_test.cpp`
+  - Adds service-level coverage that a discv4 fallback-produced peer enters the same production dial queue.
+
+### Verification run after these local changes
+
+```bash
+cd evmrelay/build/OSX/Debug
+ninja
+ctest -R 'eth_watch_service_test|eth_watch_runner_test|eth_watch_cli_test|discv4_chain_peers_test|discv4_dial_scheduler_test' --output-on-failure
+```
+
+Result:
+
+```text
+100% tests passed, 0 tests failed out of 5
+```
+
+### Still intentionally not done
+
+- `rlp_enodes` was not touched.
+- gzip/JSON loading behavior was not changed.
+- No bridge consensus/finality logic was added.
+- Direct-enode/manual testing path was kept in the example instead of being folded into service orchestration.
+
+### Next implementation step
+
+Add explicit service/example coverage for no-cached-node chain config using real loaded chain metadata, then consider moving the remaining direct-enode helper into a production direct-session API if needed. Update smoke-test docs after the next live validation pass.
 
 ## EVM relay peer queue refactor handoff - 2026-05-19
 

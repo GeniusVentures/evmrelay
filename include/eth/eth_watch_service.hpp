@@ -5,8 +5,12 @@
 
 #include <eth/abi_decoder.hpp>
 #include <eth/chain_tracker.hpp>
+#include <eth/eth_peer_queue.hpp>
 #include <eth/event_filter.hpp>
 #include <eth/messages.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/spawn.hpp>
+#include <discv4/discv4_client.hpp>
 #include <functional>
 #include <map>
 #include <memory>
@@ -16,8 +20,31 @@
 
 namespace eth {
 
+class EthWatchRunner;
+
 /// @brief Subscription handle returned by EthWatchService::watch_event().
 using EventWatchId = WatchId;
+
+/// @brief Context metadata attached to a filtered watch event.
+struct WatchEventContext
+{
+    std::string chain_name;
+    uint64_t    network_id = 0;
+    std::string peer_client_id;
+    std::string peer_address;
+};
+
+/// @brief Enriched event payload emitted by EthWatchRunner and EthWatchService.
+struct WatchEventNotification
+{
+    WatchEventContext               context;
+    MatchedEvent                    event;
+    std::vector<abi::AbiValue>      values;
+    std::string                     event_signature;
+};
+
+/// @brief Callback invoked for each decoded filtered event with chain/session metadata.
+using WatchEventNotificationCallback = std::function<void(const WatchEventNotification&)>;
 
 /// @brief Connection pool limits for eth watch peer sessions.
 ///        Defaults keep three active dial/watch slots per chain.
@@ -31,6 +58,41 @@ struct EthWatchConnectionConfig
 using DecodedEventCallback = std::function<void(
     const MatchedEvent&,
     const std::vector<abi::AbiValue>&)>;
+
+/// @brief Event filter registration consumed by the production watch runtime.
+struct EthWatchEventSpec
+{
+    codec::Address             contract_address{};
+    std::string                event_signature;
+    std::vector<abi::AbiParam> params;
+    std::optional<uint64_t>    from_block;
+    std::optional<uint64_t>    to_block;
+};
+
+/// @brief Production eth-watch orchestration config.
+struct EthWatchServiceConfig
+{
+    EthWatchConnectionConfig               connection{};
+    EthPeerQueueConfig                     peer_queue{};
+    std::vector<discv4::ChainPeerConfig>   chains;
+    std::vector<EthWatchEventSpec>         watches;
+    bool                                   enable_discv4_fallback = true;
+    discv4::discv4Config                  discovery{};
+
+    /// @brief Optional test seam for replacing live RLPx dialing.
+    std::function<discv4::DialFn(const discv4::ChainPeerConfig&)> dial_fn_factory{};
+
+    /// @brief Optional test seam for replacing live discv4 client construction/startup.
+    std::function<std::shared_ptr<discv4::discv4_client>(
+        boost::asio::io_context&,
+        const discv4::discv4Config&)> discovery_client_factory{};
+
+    /// @brief Optional test seam for replacing live discv4 fallback startup.
+    std::function<bool(
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig&,
+        std::shared_ptr<EthPeerQueue>)> discv4_fallback_starter{};
+};
 
 /// @brief Callback used by EthWatchService to send an outgoing eth message.
 ///
@@ -66,12 +128,34 @@ class EthWatchService
 {
 public:
     EthWatchService() = default;
-    ~EthWatchService() = default;
+    ~EthWatchService();
 
     EthWatchService(const EthWatchService&) = delete;
     EthWatchService& operator=(const EthWatchService&) = delete;
     EthWatchService(EthWatchService&&) = default;
     EthWatchService& operator=(EthWatchService&&) = default;
+
+    /// @brief Initialize production orchestration from chain/watch config.
+    ///
+    /// The method stores config only. Call run() with an io_context to create
+    /// schedulers, peer queues, optional discovery fallback, and live sessions.
+    [[nodiscard]] bool initialize(
+        EthWatchServiceConfig          config,
+        WatchEventNotificationCallback callback) noexcept;
+
+    /// @brief Start production eth-watch orchestration on @p io.
+    void run(boost::asio::io_context& io) noexcept;
+
+    /// @brief Stop schedulers and discovery clients created by run().
+    void stop() noexcept;
+
+    [[nodiscard]] bool initialized() const noexcept;
+    [[nodiscard]] size_t runtime_chain_count() const noexcept;
+    [[nodiscard]] size_t scheduler_count() const noexcept;
+    [[nodiscard]] size_t peer_queue_count() const noexcept;
+    [[nodiscard]] size_t discovery_client_count() const noexcept;
+    [[nodiscard]] size_t discv4_fallback_count() const noexcept;
+    [[nodiscard]] std::shared_ptr<EthPeerQueue> peer_queue(const std::string& chain_name) const noexcept;
 
     /// @brief Provide a callback used to send outgoing eth messages.
     ///
@@ -191,6 +275,28 @@ private:
 
     /// Outstanding GetReceipts requests keyed by request_id.
     std::map<uint64_t, PendingRequest> pending_requests_;
+
+    struct RuntimeChain
+    {
+        discv4::ChainPeerConfig                 config;
+        std::shared_ptr<discv4::DialScheduler>  scheduler;
+        std::shared_ptr<EthPeerQueue>           peer_queue;
+        std::shared_ptr<discv4::discv4_client>  discovery_client;
+        bool                                    discv4_fallback_started = false;
+    };
+
+    [[nodiscard]] discv4::DialFn make_default_dial_fn(
+        const discv4::ChainPeerConfig& chain_config) noexcept;
+    void start_discv4_fallback(
+        boost::asio::io_context& io,
+        RuntimeChain&            runtime) noexcept;
+
+    bool                           orchestration_initialized_ = false;
+    bool                           orchestration_running_ = false;
+    EthWatchServiceConfig          orchestration_config_{};
+    WatchEventNotificationCallback orchestration_callback_{};
+    std::vector<RuntimeChain>      runtime_chains_{};
+    std::vector<std::shared_ptr<EthWatchRunner>> active_runners_{};
 };
 
 } // namespace eth

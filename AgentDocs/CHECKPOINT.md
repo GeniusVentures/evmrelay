@@ -1,5 +1,207 @@
 # Checkpoint Log
 
+## EVM relay EthWatchService orchestration progress - 2026-05-19
+
+### Current state
+
+- Repository: `evmrelay`
+- Branch: `develop`
+- HEAD at handoff time remains: `c819a0f Normalize eth watch runner file endings`
+- `EthWatchService` now has the target production API shape:
+
+```cpp
+eth::EthWatchService service;
+service.initialize(config, callback);
+service.run(io);
+```
+
+### New local changes in this step
+
+- `include/eth/eth_watch_service.hpp`
+  - Adds `WatchEventContext`, `WatchEventNotification`, and `WatchEventNotificationCallback` at service level.
+  - Adds `EthWatchEventSpec` and `EthWatchServiceConfig`.
+  - Adds `initialize(...)`, `run(io)`, `stop()`, and runtime inspection helpers.
+  - Adds narrow optional test seams for replacing live RLPx dial and discv4 fallback startup.
+- `src/eth/eth_watch_service.cpp`
+  - Creates the shared watcher pool.
+  - Creates one `DialScheduler` per configured chain.
+  - Creates one `EthPeerQueue` per chain and preloads cached `nodes`.
+  - Stores discovery-only `bootnodes` on the peer queue.
+  - Starts discv4 fallback for chains with empty cached `nodes` and valid `bootnodes`.
+  - Wires discovery callbacks into the same `EthPeerQueue`.
+  - Provides the default production dial path: RLPx connect, ETH Status handshake, `EthWatchRunner` setup, watch registration, and decoded notification dispatch.
+  - Stops schedulers/discovery clients from `stop()` and destructor cleanup.
+- `include/eth/eth_watch_runner.hpp` / `src/eth/eth_watch_runner.cpp`
+  - Reuses service-level notification types.
+  - Allows runtime watch registration to carry optional block ranges.
+- `test/eth/eth_watch_service_test.cpp`
+  - Adds production orchestration coverage for cached-node scheduler/queue creation.
+  - Adds Gnosis-style empty-`nodes` plus `bootnodes` discv4 fallback coverage.
+  - Adds production-path scheduler feedback requeue coverage.
+  - Adds deterministic invalid config rejection coverage.
+
+### Verification run after these local changes
+
+```bash
+cd evmrelay/build/OSX/Debug
+ninja
+ctest -R 'eth_watch_service_test|eth_watch_runner_test|discv4_chain_peers_test|discv4_dial_scheduler_test' --output-on-failure
+```
+
+Result:
+
+```text
+100% tests passed, 0 tests failed out of 4
+```
+
+### Still intentionally not done
+
+- `examples/eth_watch/eth_watch.cpp` has not been thinned yet. It still owns the CLI functional-test wrapper path as requested.
+- `rlp_enodes` was not touched.
+- gzip/JSON loading behavior was not changed.
+- No bridge consensus/finality logic was added.
+
+### Next implementation step
+
+Reduce `examples/eth_watch/eth_watch.cpp` to config loading plus callback registration over `EthWatchService`, now that the production service API exists and has focused tests. Keep direct-enode/manual testing available while moving cached-node and discovery-fallback orchestration out of the example.
+
+## EVM relay peer queue refactor handoff - 2026-05-19
+
+### Current state
+
+- Repository: `evmrelay`
+- Branch: `develop`
+- HEAD at handoff time: `c819a0f Normalize eth watch runner file endings`
+- Current tracked working tree has uncommitted refactor changes listed below.
+- The last committed and pushed refactor work before these local edits:
+  - `37270bb Add eth peer queue separation`
+  - `c819a0f Normalize eth watch runner file endings`
+
+### User constraints for the next session
+
+- Do not modify `rlp_enodes`; it is a completed/reference submodule for this phase.
+- Do not refactor gzip or JSON loading. The server filename is `chain_enodes.json.gz`, but clients receive unzipped JSON, so ignore the `.gz` suffix in loader behavior.
+- Do not refactor `examples/eth_watch` yet. It is currently a functional test / CLI wrapper. Only refactor it after production `EthWatchService` initialization owns the orchestration.
+- Bridge consensus/finality work does not belong in this relay path. The relay should watch configured chains/message filters, decode matching messages/logs, and invoke callbacks. Bridge finality and UTXO-system messaging will be verified through RPC outside this relay flow.
+- For builds, use:
+
+```bash
+cd evmrelay/build/OSX/Debug
+cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Debug
+ninja
+```
+
+### Current uncommitted tracked changes
+
+- `include/discv4/dial_scheduler.hpp`
+  - Adds `discv4::DialFeedbackFn`.
+  - `DialScheduler` now exposes `feedback_fn`.
+  - Dial exits report `kTcpError` with `was_connected` based on whether the ETH/RLPx session reached `on_connected`.
+  - Connected sessions install an RLPx disconnect handler and report peer Disconnect reasons back through the scheduler feedback path.
+- `include/eth/eth_peer_queue.hpp`
+  - Adds `EthPeerQueueConfig`.
+  - Adds `EthPeerDisconnectFeedback`.
+  - Makes `enqueue_discovered_peer(...)` return `bool`.
+  - Adds `report_peer_disconnected(...)`.
+  - Adds counters for requeued peers, duplicates, capacity drops, and flaky-peer drops.
+- `src/eth/eth_peer_queue.cpp`
+  - Subscribes `EthPeerQueue` to `DialScheduler::feedback_fn`.
+  - Requeues `kTooManyPeers`.
+  - Requeues `kTcpError` / `kTimeout` only when the peer had previously connected.
+  - Stops requeueing after `max_disconnect_requeues`.
+  - Keeps bounded pending queue behavior and duplicate suppression for discovery-produced peers.
+- `test/eth/eth_watch_runner_test.cpp`
+  - Adds positive and negative tests for duplicate discovered peers, bounded pending queue drops, too-many-peers requeue, connected network-disconnect requeue, flaky-peer suppression, scheduler feedback wiring, and ignoring unconnected dial failures.
+- `AgentDocs/EVMRELAY_COMPLETION_PLAN.md`
+  - Struck out completed peer queue/backpressure/separation work.
+  - Updated bridge-related completion language to reflect callback-only relay responsibility.
+  - Added the completed dial/session disconnect feedback item.
+
+### Verification run after these local changes
+
+```bash
+cd evmrelay/build/OSX/Debug
+ninja
+ctest -R 'eth_watch_runner_test|discv4_chain_peers_test|discv4_dial_scheduler_test' --output-on-failure
+```
+
+Result:
+
+```text
+100% tests passed, 0 tests failed out of 3
+```
+
+### Next implementation step
+
+Before refactoring `examples/eth_watch`, add a production initialization/orchestration API under `include/eth` and `src/eth`, probably on `EthWatchService` or a small helper owned by it.
+
+The target shape is:
+
+```cpp
+eth::EthWatchService service;
+service.initialize(config, callback);
+service.run(io);
+```
+
+That production API should own:
+
+- chain/watch config intake;
+- watcher pool creation;
+- per-chain `DialScheduler` creation;
+- `EthPeerQueue` creation;
+- cached `nodes` preload;
+- discovery-only `bootnodes`;
+- discv4 fallback for chains with no usable cached `nodes`, with Gnosis Chain as the first target;
+- RLPx connect + ETH Status handshake + `EthWatchRunner` setup;
+- watch registration and decoded callback dispatch.
+
+Once this exists and has tests, `examples/eth_watch/eth_watch.cpp` can become a thin wrapper that loads config, registers output callbacks, and calls the production service API.
+
+### Suggested next tests
+
+- Production service initialization creates schedulers and peer queues from cached `nodes`.
+- Empty `nodes` plus valid `bootnodes` starts discv4 discovery fallback.
+- Discovery callback enqueues discovered peers into the same `EthPeerQueue`.
+- Scheduler feedback requeues eligible disconnected peers through the production service path.
+- Decoded message/event callbacks propagate from `EthWatchService` with chain metadata.
+- Invalid config cases fail deterministically.
+
+### Current local untracked evmrelay artifacts
+
+These were present locally and should not be removed unless explicitly requested:
+
+- `AgentDocs/Refactor_chat.txt`
+- `CRDT.Datastore.TEST.unit_2/`
+- `CRDT.Datastore.TEST/`
+- `examples/all.json`
+- `examples/logs/`
+- `examples/test_discovery.sh`
+- `go-ethereum/`
+- `rlp_enodes/`
+
+### New chat handoff prompt
+
+```text
+Continue in evmrelay from AgentDocs/CHECKPOINT.md and AgentDocs/EVMRELAY_COMPLETION_PLAN.md.
+
+Branch: develop
+HEAD at handoff: c819a0f
+
+Do not touch rlp_enodes. Do not change gzip/json loading behavior. Do not refactor examples/eth_watch yet; it is still the functional test/CLI wrapper until production EthWatchService initialization exists.
+
+Current uncommitted work wires dial/session disconnect feedback into EthPeerQueue:
+- DialScheduler exposes feedback_fn and reports dial exits / peer Disconnect messages.
+- EthPeerQueue requeues eligible peers, caps flaky peers, and tracks retry/drop counters.
+- Focused tests pass with:
+  ninja
+  ctest -R 'eth_watch_runner_test|discv4_chain_peers_test|discv4_dial_scheduler_test' --output-on-failure
+
+Next step:
+Add the production EthWatchService initialize/run orchestration API under include/eth and src/eth. It should own watcher pool, per-chain DialScheduler, EthPeerQueue, cached nodes, discovery-only bootnodes, discv4 fallback for no-node chains such as Gnosis, RLPx connect, ETH Status handshake, EthWatchRunner setup, watch registration, and decoded callback dispatch.
+
+Only after that API is tested should examples/eth_watch be reduced to config loading plus callback registration.
+```
+
 ## Bridge consensus adapter handoff - 2026-05-16
 
 ### Current state

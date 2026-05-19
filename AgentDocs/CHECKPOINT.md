@@ -1,5 +1,45 @@
 # Checkpoint Log
 
+## EVM relay discovery/dialer lifecycle coverage - 2026-05-19
+
+### Current state
+
+- Repository: `evmrelay`
+- Branch: `develop`
+- Current local HEAD before this uncommitted step: `1ca92ec Add eth watch peer selection modes`
+
+### New local changes in this step
+
+- `test/eth/eth_watch_service_test.cpp`
+  - Adds service-level lifecycle coverage proving discovered peers can enqueue while the only dial slot is saturated by an active cached-node dial.
+  - Verifies queued discovery-produced peers drain through the same `DialScheduler` as slots are released.
+  - Verifies discovery can continue enqueueing peers after an unconnected dial failure releases its slot.
+
+### Still intentionally not done
+
+- `rlp_enodes` was not touched.
+- gzip/JSON loading behavior was not changed.
+- No bridge consensus/finality logic was added.
+- Direct host/port/pubkey and `--direct-enode` manual modes remain example-local.
+
+### Verification run after these local changes
+
+```bash
+cd evmrelay/build/OSX/Debug
+ninja
+ctest -R eth_watch_service_test --output-on-failure
+```
+
+Result:
+
+```text
+100% tests passed, 0 tests failed out of 1
+```
+
+### Next implementation step
+
+Continue remaining production cleanup around later ENR-tree / EIP-1459 discovery support, or decide whether direct host/port/pubkey and `--direct-enode` should stay example-local permanently or move behind a production direct-session API.
+
 ## EVM relay bootstrap peer loader split and explicit peer selection - 2026-05-19
 
 ### Current state

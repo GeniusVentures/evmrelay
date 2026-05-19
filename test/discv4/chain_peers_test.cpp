@@ -203,6 +203,49 @@ TEST_F(ChainPeersTest, LoadChainPeerConfigRequiresBootnodesArray)
     EXPECT_FALSE(config.has_value());
 }
 
+TEST_F(ChainPeersTest, LoadChainPeerConfigRequiresNodesArray)
+{
+    const std::string json_text = std::string("{")
+        + "\"ethereum-mainnet\":{"
+        + "\"networkId\":1,"
+        + "\"genesisHex\":\"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3\","
+        + "\"bootnodes\":["
+        + "{\"enode\":\"" + make_enode("10.0.0.2", 30304U, '6') + "\"}"
+        + "]}}";
+
+    const auto config = discv4::load_chain_peer_config_from_json_text(
+        "ethereum-mainnet",
+        json_text);
+
+    EXPECT_FALSE(config.has_value());
+}
+
+TEST_F(ChainPeersTest, LoadChainPeerConfigAllowsEmptyNodesWithBootnodes)
+{
+    const std::string json_text = std::string("{")
+        + "\"gnosis-chain\":{"
+        + "\"networkId\":100,"
+        + "\"genesisHex\":\"4f1dd23188aab3a0b3768e6a2b5f6cbf3fcb259af45d37b228a8a0ae61161f80\","
+        + "\"forkId\":\"06000064\","
+        + "\"forkNext\":\"0\","
+        + "\"nodes\":[],"
+        + "\"bootnodes\":["
+        + "{\"enode\":\"" + make_enode("10.0.0.2", 30304U, '7') + "\"}"
+        + "]}}";
+
+    const auto config = discv4::load_chain_peer_config_from_json_text(
+        "gnosis-chain",
+        json_text);
+
+    ASSERT_TRUE(config.has_value());
+    EXPECT_EQ(config->canonical_name, "gnosis-chain");
+    EXPECT_EQ(config->network_id, 100U);
+    EXPECT_TRUE(config->nodes.empty());
+    ASSERT_EQ(config->bootnodes.size(), 1U);
+    EXPECT_EQ(config->bootnodes[0].peer.ip, "10.0.0.2");
+    EXPECT_EQ(config->bootnodes[0].peer.tcp_port, 30304U);
+}
+
 TEST_F(ChainPeersTest, FindChainPeersJsonPathPrefersJsonThenGzip)
 {
     const std::filesystem::path bin_dir = temp_dir_ / "bin";

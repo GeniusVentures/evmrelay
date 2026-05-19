@@ -5,6 +5,7 @@ add_library(eth OBJECT
         ${CMAKE_CURRENT_LIST_DIR}/event_filter.cpp
         ${CMAKE_CURRENT_LIST_DIR}/abi_decoder.cpp
         ${CMAKE_CURRENT_LIST_DIR}/chain_tracker.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/eth_peer_queue.cpp
         ${CMAKE_CURRENT_LIST_DIR}/eth_watch_service.cpp
         ${CMAKE_CURRENT_LIST_DIR}/eth_peer_session.cpp
         ${CMAKE_CURRENT_LIST_DIR}/eth_handshake_guard.cpp

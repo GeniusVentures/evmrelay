@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
+#include <eth/eth_peer_queue.hpp>
 #include <eth/eth_watch_dialer.hpp>
 #include <eth/eth_watch_runner.hpp>
 #include <eth/messages.hpp>
 #include <eth/eth_types.hpp>
 #include <boost/asio/spawn.hpp>
+#include <algorithm>
 #include <chrono>
 
 namespace {
@@ -225,6 +227,128 @@ TEST(EthWatchRunnerTest, StartEthWatchChainPeerDialingEnqueuesPeersBehindActiveL
     EXPECT_EQ(pool->active_total.load(), 1);
     ASSERT_EQ(scheduler->queue.size(), 1U);
     EXPECT_EQ(scheduler->queue.front().peer.tcp_port, 30304U);
+    scheduler->stop();
+}
+
+TEST(EthWatchRunnerTest, EthPeerQueueKeepsBootnodesOutOfDialQueue)
+{
+    boost::asio::io_context io;
+    eth::EthWatchConnectionConfig config{};
+    config.max_total_connections = 1;
+    config.max_connections_per_chain = 1;
+    const auto pool = eth::make_eth_watcher_pool(config);
+
+    discv4::ChainPeerConfig chain_config{};
+    chain_config.canonical_name = "ethereum-mainnet";
+    chain_config.nodes = {
+        make_validated_peer(0x10, 30303U),
+        make_validated_peer(0x20, 30304U)
+    };
+    chain_config.bootnodes = {
+        make_validated_peer(0x30, 30305U)
+    };
+
+    auto scheduler = eth::start_eth_watch_chain_peer_dialing(
+        io,
+        pool,
+        [](discv4::ValidatedPeer,
+           std::function<void()>,
+           std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
+           boost::asio::yield_context)
+        {
+        },
+        {});
+    const auto queue = eth::make_eth_peer_queue(scheduler, chain_config);
+
+    ASSERT_TRUE(static_cast<bool>(queue));
+    EXPECT_EQ(queue->cached_peer_count(), 2U);
+    EXPECT_EQ(queue->discovered_peer_count(), 0U);
+    EXPECT_FALSE(queue->needs_discovery());
+    EXPECT_EQ(scheduler->active, 1);
+    ASSERT_EQ(scheduler->queue.size(), 1U);
+    EXPECT_EQ(scheduler->queue.front().peer.tcp_port, 30304U);
+    ASSERT_EQ(queue->discovery_bootnodes().size(), 1U);
+    EXPECT_EQ(queue->discovery_bootnodes().front().peer.tcp_port, 30305U);
+    scheduler->stop();
+}
+
+TEST(EthWatchRunnerTest, EthPeerQueueReportsDiscoveryFallbackWhenNoCachedPeers)
+{
+    boost::asio::io_context io;
+    const auto pool = eth::make_eth_watcher_pool(eth::EthWatchConnectionConfig{});
+
+    discv4::ChainPeerConfig chain_config{};
+    chain_config.canonical_name = "gnosis-chain";
+    chain_config.nodes = {};
+    chain_config.bootnodes = {
+        make_validated_peer(0x40, 30306U)
+    };
+
+    auto scheduler = eth::start_eth_watch_chain_peer_dialing(
+        io,
+        pool,
+        [](discv4::ValidatedPeer,
+           std::function<void()>,
+           std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
+           boost::asio::yield_context)
+        {
+        },
+        {});
+    const auto queue = eth::make_eth_peer_queue(scheduler, chain_config);
+
+    ASSERT_TRUE(static_cast<bool>(queue));
+    EXPECT_EQ(queue->cached_peer_count(), 0U);
+    EXPECT_EQ(queue->discovered_peer_count(), 0U);
+    EXPECT_TRUE(queue->needs_discovery());
+    EXPECT_EQ(scheduler->active, 0);
+    EXPECT_TRUE(scheduler->queue.empty());
+    ASSERT_EQ(queue->discovery_bootnodes().size(), 1U);
+    EXPECT_EQ(queue->discovery_bootnodes().front().peer.tcp_port, 30306U);
+    scheduler->stop();
+}
+
+TEST(EthWatchRunnerTest, EthPeerQueueEnqueuesDiscoveredPeersIntoSameDialQueue)
+{
+    boost::asio::io_context io;
+    eth::EthWatchConnectionConfig config{};
+    config.max_total_connections = 1;
+    config.max_connections_per_chain = 1;
+    const auto pool = eth::make_eth_watcher_pool(config);
+
+    auto scheduler = eth::start_eth_watch_chain_peer_dialing(
+        io,
+        pool,
+        [](discv4::ValidatedPeer,
+           std::function<void()>,
+           std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
+           boost::asio::yield_context)
+        {
+        },
+        {make_validated_peer(0x10, 30303U)});
+    auto queue = std::make_shared<eth::EthPeerQueue>(scheduler);
+
+    discv4::DiscoveredPeer discovered{};
+    for (size_t i = 0; i < discovered.node_id.size(); ++i)
+    {
+        discovered.node_id[i] = static_cast<uint8_t>(0x50 + i);
+    }
+    discovered.ip = "203.0.113.10";
+    discovered.udp_port = 30303U;
+    discovered.tcp_port = 30304U;
+    discovered.last_seen = std::chrono::steady_clock::now();
+
+    queue->enqueue_discovered_peer(discovered);
+
+    EXPECT_EQ(queue->discovered_peer_count(), 1U);
+    EXPECT_EQ(scheduler->active, 1);
+    ASSERT_EQ(scheduler->queue.size(), 1U);
+    EXPECT_EQ(scheduler->queue.front().peer.ip, "203.0.113.10");
+    EXPECT_EQ(scheduler->queue.front().peer.udp_port, 30303U);
+    EXPECT_EQ(scheduler->queue.front().peer.tcp_port, 30304U);
+    EXPECT_TRUE(std::equal(
+        discovered.node_id.begin(),
+        discovered.node_id.end(),
+        scheduler->queue.front().pubkey.begin()));
     scheduler->stop();
 }
 

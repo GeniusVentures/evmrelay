@@ -11,7 +11,7 @@ handshake, and watches for on-chain events matching registered ABI event signatu
 ```bash
 # Watch GNUS events on Sepolia
 ./build/OSX/Debug/examples/eth_watch/eth_watch \
-    --chain sepolia \
+    --chain ethereum-sepolia \
     --watch-contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70 \
     --watch-event "Transfer(address,address,uint256)" \
     --watch-contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70 \
@@ -19,7 +19,7 @@ handshake, and watches for on-chain events matching registered ABI event signatu
 
 # Watch GNUS Transfer events on Ethereum mainnet
 ./build/OSX/Debug/examples/eth_watch/eth_watch \
-    --chain mainnet \
+    --chain ethereum-mainnet \
     --watch-contract 0x614577036F0a024DBC1C88BA616b394DD65d105a \
     --watch-event "Transfer(address,address,uint256)"
 ```
@@ -37,7 +37,7 @@ eth_watch <host> <port> <peer_pubkey_hex> [eth_offset]
 
 | Flag | Description |
 |------|-------------|
-| `--chain <name>` | Use a named chain preset (see below) |
+| `--chain <name>` | Use a canonical chain cache key (see below) |
 | `--watch-contract <0x…>` | Contract address to filter events on |
 | `--watch-event <sig>` | ABI event signature to match, e.g. `Transfer(address,address,uint256)` |
 | `--log-level <level>` | Logging verbosity: `trace` `debug` `info` `warn` `error` (default `info`) |
@@ -61,25 +61,30 @@ eth_watch <host> <port> <peer_pubkey_hex> [eth_offset]
 
 ---
 
-## Chain presets (`--chain`)
+## Chain cache keys (`--chain`)
 
 | Name | Chain ID | Network |
 |------|----------|---------|
-| `mainnet` | 1 | Ethereum Mainnet |
-| `sepolia` | 11155111 | Ethereum Sepolia testnet |
-| `polygon` | 137 | Polygon Mainnet |
+| `ethereum-mainnet` | 1 | Ethereum Mainnet |
+| `ethereum-sepolia` | 11155111 | Ethereum Sepolia testnet |
+| `ethereum-holesky` | 17000 | Ethereum Holesky testnet |
+| `polygon-mainnet` | 137 | Polygon Mainnet |
 | `polygon-amoy` | 80002 | Polygon Amoy testnet |
-| `bsc` | 56 | BNB Smart Chain |
-| `bsc-testnet` | 97 | BNB Smart Chain testnet |
-| `base` | 8453 | Base Mainnet |
+| `bnb-smart-chain` | 56 | BNB Smart Chain |
+| `bnb-smart-chain-testnet` | 97 | BNB Smart Chain testnet |
+| `base-mainnet` | 8453 | Base Mainnet |
 | `base-sepolia` | 84532 | Base Sepolia testnet |
+| `gnosis-chain` | 100 | Gnosis Chain |
 
-Bootnode lists: `include/rlp/PeerDiscovery/bootnodes.hpp` (mainnets) and
-`include/rlp/PeerDiscovery/bootnodes_test.hpp` (testnets).
+`eth_watch` matches `--chain` directly against top-level `chain_enodes.json(.gz)`
+keys. Use the canonical keys in the table above.
 
 ### Optional local chain peer cache file
 
-`eth_watch` can load peers from a local JSON cache and dial those peers directly:
+`eth_watch` can load chain metadata from a local JSON cache. The `nodes` array is
+used as the RLPx/ETH dial candidate list. The `bootnodes` array is discovery-only:
+it seeds discv4 fallback when `nodes` is empty, as expected for chains such as
+Gnosis when the cache has no pre-scored peers.
 
 ```bash
 ./build/OSX/Debug/examples/eth_watch/eth_watch \
@@ -94,19 +99,26 @@ Expected file shape:
 
 ```json
 {
-  "ethereum-sepolia": [
-    { "enr": "enr:..." },
-    { "enode": "enode://<pubkey>@<ip>:<port>", "pubkey": "<128-hex-pubkey>" }
-  ]
+  "ethereum-sepolia": {
+    "networkId": 11155111,
+    "genesisHex": "<32-byte genesis hash hex>",
+    "forkId": "<4-byte fork hash hex>",
+    "forkNext": "0",
+    "nodes": [
+      { "enode": "enode://<pubkey>@<ip>:<tcp-port>", "pubkey": "<128-hex-pubkey>" }
+    ],
+    "bootnodes": [
+      { "enode": "enode://<pubkey>@<ip>:<discovery-port>" }
+    ]
+  }
 }
 ```
 
-`--chain` is matched directly against top-level JSON keys (no internal key mapping).
 JSON-style keys accepted by `eth_watch` include:
 `ethereum-mainnet`, `ethereum-sepolia`, `ethereum-holesky`,
 `polygon-mainnet`, `polygon-amoy`,
 `bnb-smart-chain`, `bnb-smart-chain-testnet`,
-`base-mainnet`, `base-sepolia`.
+`base-mainnet`, `base-sepolia`, and `gnosis-chain`.
 
 Without `--chain-peers-json`, `eth_watch` refreshes its local `chain_enodes.json`
 cache from the default remote URL when possible, then loads the cached file next to
@@ -232,76 +244,25 @@ cast call 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70 \
 
 ---
 
-## Functional test suite (`test_eth_watch.sh`)
+## C++ example tests
 
-`examples/test_eth_watch.sh` is a GTest-style end-to-end test that:
+`examples/eth_watch/eth_watch_example_test.cpp` is the compiled replacement for
+the old shell smoke harness. It is registered with CTest as
+`eth_watch_example_test` and validates the relay-facing example paths without
+spawning `eth_watch`, scraping logs, or depending on public peer reachability:
 
-1. **Preflight** — verifies the binary, `cast`, and `PRIVATE_KEY` are available
-2. **PeerConnection** — starts `eth_watch` on Sepolia and waits for `"Connected. Watching for events..."`
-3. **SendERC20Transfer** — sends a 1-unit ERC-20 `transfer` to self via `cast send`
-4. **SendBridgeOut** — calls `bridgeOut(0.1 GNUS, id=0, destChain=963)` to bridge to SuperGenius Testnet
-5. **EventsDetected** — polls the debug log for `Transfer(…) at block` and `BridgeSourceBurned(…) at block` within `WATCH_TIMEOUT` (default 120 s)
+1. **CachedChainMetadata** — loads chain metadata with `nodes` and `bootnodes`, builds GNUS watch specs, and starts `EthWatchService`.
+2. **GnosisDiscoveryFallback** — loads Gnosis-style metadata with empty `nodes` and valid `bootnodes`, then verifies discv4 fallback is started.
+3. **AllChainsConfig** — builds the multi-chain service config used by the example wrapper.
 
-Output format mirrors GTest (`[ RUN ]`, `[    OK ]`, `[ FAILED ]`) with per-test timing.
-
-### Setup
+### Run
 
 ```bash
-# 1. Build (Debug or Release)
 cd build/OSX/Debug && cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Debug && ninja
+ctest -R eth_watch_example_test --output-on-failure
 
-# 2. Install Foundry cast
-brew install foundry   # or: curl -L https://foundry.paradigm.xyz | bash && foundryup
-
-# 3. Create wallet + .env
-cp examples/.env.example examples/.env
-# Paste your 0x-prefixed private key into examples/.env as PRIVATE_KEY=0x...
-# Fund the wallet with GNUS on Sepolia: https://sepolia.etherscan.io
-
-# 4. Run
-cd /path/to/rlp
-./examples/test_eth_watch.sh
-```
-
-### Environment overrides
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PRIVATE_KEY` | *(required)* | 0x-prefixed 32-byte private key |
-| `WATCH_TIMEOUT` | `120` | Seconds to wait for events after TX |
-| `RPC_SEPOLIA` | public endpoint | Override the Sepolia RPC URL |
-
-### Multi-chain smoke test
-
-```bash
-./examples/test_eth_watch.sh gnus-all-testnets   # Sepolia, Amoy, BSC testnet, Base Sepolia
-./examples/test_eth_watch.sh all                 # all 4 mainnets (watch-only)
-./examples/test_eth_watch.sh all --send          # mainnets + send test TX on each
-```
-
-### Watch-only live traffic smoke harness
-
-For a lighter-weight live connectivity check that does not send transactions,
-use `examples/test_eth_watch_smoke.sh`. It connects to each selected chain,
-waits for the periodic `Watch stats:` line from `eth_watch`, and verifies that
-live ETH traffic is being counted. By default the harness lets `eth_watch`
-refresh and use its own local chain peer cache; `CHAIN_PEERS_JSON` is only needed
-when you want to force a specific local `.json` or `.json.gz` file.
-
-```bash
-./examples/test_eth_watch_smoke.sh           # all chains
-./examples/test_eth_watch_smoke.sh mainnets
-./examples/test_eth_watch_smoke.sh testnets
-./examples/test_eth_watch_smoke.sh sepolia bsc-testnet
-```
-
-Optional environment overrides:
-
-```bash
-CONNECT_TIMEOUT=20
-SMOKE_DURATION=12
-CHAIN_PEERS_JSON=./rlp_enodes/output/chain_enodes.json.gz
-CHAIN_PEERS_URL=https://enodes.gnus.ai/chain_enodes.json.gz
+# Or run the example test binary directly:
+./examples/eth_watch/eth_watch_example_test
 ```
 
 ### Sending test transactions separately

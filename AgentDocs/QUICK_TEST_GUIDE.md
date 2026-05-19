@@ -24,6 +24,12 @@ Connection pool defaults come from `eth::EthWatchConnectionConfig`:
 - `--max-peers-per-chain 3`
 - `--max-peers-total 24`
 
+`--chain` and `--all-chains` load `chain_enodes.json(.gz)` through
+`EthWatchService`. In that cache, `nodes` are RLPx/ETH dial candidates and
+`bootnodes` are discovery-only seeds. A chain with empty `nodes` and valid
+`bootnodes`, such as Gnosis in current cache builds, starts discv4 fallback and
+enqueues discovered peers into the same service dial queue.
+
 `--all-chains` watches cached peers for:
 
 - `ethereum-mainnet`
@@ -67,6 +73,20 @@ CTest sets `EVMRELAY_CHAIN_ENODES_JSON=${CMAKE_BINARY_DIR}/chain_enodes.json.gz`
 `discv4_chain_peers_test`. If that file is absent, the test falls back to the live URL
 and requires network access.
 
+For deterministic smoke coverage, run the compiled C++ example test:
+
+```bash
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay
+cd build/OSX/Debug
+ctest -R eth_watch_example_test --output-on-failure
+```
+
+`eth_watch_example_test` uses embedded cache metadata with both `nodes` and
+`bootnodes`, including a Gnosis-style empty-`nodes` fallback case. Live network
+connection checks should be run manually with `eth_watch --chain ...` because
+public peer reachability is intentionally not part of the deterministic CTest
+suite.
+
 ## Public RPC Endpoints (No Auth Required)
 
 **Sepolia:**
@@ -108,7 +128,7 @@ NewBlockHashes: 1 hash
 ## What Each File Does
 
 - **PUBLIC_NODES_FOR_TESTING.md**: Reference for finding public nodes and peers
-- **test_eth_watch.sh**: One-command test that does everything automatically
+- **eth_watch_example_test.cpp**: Compiled example smoke coverage for service orchestration
 - **WHY_NO_MESSAGES.md**: Explains why bootstrap nodes don't send messages
 - **BOOTNODES_CONFIGURATION.md**: Bootnode configs with clarifications
 

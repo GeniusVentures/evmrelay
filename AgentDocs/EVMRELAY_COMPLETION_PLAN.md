@@ -61,15 +61,17 @@ Current uncommitted implementation state:
 - Focused service tests cover cached-node scheduler/queue creation, Gnosis-style empty `nodes` plus valid `bootnodes` fallback startup, production-path scheduler feedback requeue, and invalid config rejection.
 - `examples/eth_watch` cache-based `--chain` and `--all-chains` modes now build `EthWatchServiceConfig`, register decoded notification output callbacks, and call `EthWatchService::initialize(...)` / `run(io)`.
 - Direct host/port/pubkey and `--direct-enode` manual modes remain on the example-local direct helper path.
+- `examples/eth_watch/eth_watch_example_test.cpp` is the compiled C++ replacement for the old shell smoke harnesses.
+- The tracked `examples/test_eth_watch.sh` and `examples/test_eth_watch_smoke.sh` shell test harnesses have been removed.
 
 Immediate next step:
 
-Add explicit service/example coverage for no-cached-node chain config using real loaded chain metadata, then refresh smoke-test docs after the next live validation pass. Direct-enode/manual testing remains available through the example's direct helper path.
+Decide whether the direct host/port/pubkey and `--direct-enode` helper should stay example-local permanently or move behind a small production direct-session API. If it stays example-local, continue with loader cleanup: update `bootstrap_peers` so bootstrap loading parses only `bootnodes`.
 
 Suggested tests for the next session:
 
-- Example cache-first mode delegates scheduler/queue creation to `EthWatchService`.
-- Example empty `nodes` plus valid `bootnodes` mode delegates discv4 fallback to `EthWatchService`.
+- ~~Example cache-first mode delegates scheduler/queue creation to `EthWatchService`.~~
+- ~~Example empty `nodes` plus valid `bootnodes` mode delegates discv4 fallback to `EthWatchService`.~~
 - Direct-enode mode remains available for local/manual smoke testing.
 - CLI output callbacks receive decoded notifications with chain metadata from the service.
 - ~~Discovery callback enqueues discovered peers into the same `EthPeerQueue` in an end-to-end service test.~~

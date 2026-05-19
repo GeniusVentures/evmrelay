@@ -62,6 +62,7 @@ Real Ethereum nodes provide block data via the **RLPx + ETH protocol** (TCP). Th
 ### What Works
 - ✅ Chain peer cache loading for supported EVM chains
 - ✅ `eth_watch --chain <canonical-chain>` dials cached peers
+- ✅ Chains with empty cached `nodes` and valid `bootnodes` can start discv4 fallback through `EthWatchService`
 - ✅ `eth_watch --all-chains` watches Ethereum, Polygon, BNB Smart Chain, and Base mainnets together
 - ✅ RLPx connection to any node
 - ✅ ETH protocol Status message exchange
@@ -92,9 +93,15 @@ Or use cached chain peers:
 
 ```bash
 cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/build/OSX/Debug
+curl -L https://enodes.gnus.ai/chain_enodes.json.gz -o chain_enodes.json.gz
 ./examples/eth_watch/eth_watch --chain ethereum-sepolia --watch-event 'Transfer(address,address,uint256)'
 ./examples/eth_watch/eth_watch --all-chains --watch-event 'Transfer(address,address,uint256)' --display-events 2
 ```
+
+In `chain_enodes.json(.gz)`, `nodes` are RLPx/ETH session candidates.
+`bootnodes` are discovery-only seeds. The service does not silently dial
+bootnodes as ETH peers; when a chain has no cached `nodes`, it starts discovery
+from `bootnodes` and promotes discovered peers into the dial queue.
 
 ### Option 2: Run Your Own Full Node
 
@@ -117,7 +124,7 @@ Use those binaries to exercise automatic peer discovery from bootstrap nodes ins
 
 ## Next Steps
 
-1. **Short-term**: Use cached chain peers or direct real peer enodes for testing.
+1. **Short-term**: Refresh `chain_enodes.json.gz`, then use cached chain peers or direct real peer enodes for testing.
 2. **Medium-term**: Continue improving peer quality and connection recycling in the existing scheduler flow.
 3. **Long-term**: Add stronger canonical/finality verification around event observations.
 
@@ -127,4 +134,3 @@ Use those binaries to exercise automatic peer discovery from bootstrap nodes ins
 - [discv4 Protocol](https://github.com/ethereum/devp2p/blob/master/discv4.md)
 - [RLPx Transport Protocol](https://github.com/ethereum/devp2p/blob/master/rlpx.md)
 - [eth Protocol Specification](https://github.com/ethereum/devp2p/blob/master/caps/eth.md)
-

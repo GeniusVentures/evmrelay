@@ -13,6 +13,62 @@
 
 namespace eth {
 
+namespace
+{
+
+bool chain_config_matches_discovery_mode(
+    const discv4::ChainPeerConfig& chain,
+    EthWatchDiscoveryMode          mode,
+    bool                           enable_discv4_fallback) noexcept
+{
+    const bool has_cached_nodes = !chain.nodes.empty();
+    const bool has_bootnodes = !chain.bootnodes.empty();
+
+    switch (mode)
+    {
+    case EthWatchDiscoveryMode::kCacheOnly:
+        return has_cached_nodes;
+    case EthWatchDiscoveryMode::kDiscoverFirst:
+        return enable_discv4_fallback && has_bootnodes;
+    case EthWatchDiscoveryMode::kDiscoverIfNeeded:
+    case EthWatchDiscoveryMode::kHybrid:
+        return has_cached_nodes || (enable_discv4_fallback && has_bootnodes);
+    }
+
+    return false;
+}
+
+bool should_preload_cached_peers(EthWatchDiscoveryMode mode) noexcept
+{
+    return mode != EthWatchDiscoveryMode::kDiscoverFirst;
+}
+
+bool should_start_discv4_discovery(
+    const EthPeerQueue&      queue,
+    EthWatchDiscoveryMode    mode,
+    bool                     enable_discv4_fallback) noexcept
+{
+    if (!enable_discv4_fallback || queue.discovery_bootnodes().empty())
+    {
+        return false;
+    }
+
+    switch (mode)
+    {
+    case EthWatchDiscoveryMode::kCacheOnly:
+        return false;
+    case EthWatchDiscoveryMode::kDiscoverIfNeeded:
+        return queue.needs_discovery();
+    case EthWatchDiscoveryMode::kDiscoverFirst:
+    case EthWatchDiscoveryMode::kHybrid:
+        return true;
+    }
+
+    return false;
+}
+
+} // namespace
+
 EthWatchService::~EthWatchService()
 {
     stop();
@@ -79,7 +135,10 @@ bool EthWatchService::initialize(
         {
             return false;
         }
-        if (chain.nodes.empty() && chain.bootnodes.empty())
+        if (!chain_config_matches_discovery_mode(
+                chain,
+                config.discovery_mode,
+                config.enable_discv4_fallback))
         {
             return false;
         }
@@ -125,11 +184,14 @@ void EthWatchService::run(boost::asio::io_context& io) noexcept
         runtime.peer_queue = make_eth_peer_queue(
             runtime.scheduler,
             runtime.config,
-            orchestration_config_.peer_queue);
+            orchestration_config_.peer_queue,
+            should_preload_cached_peers(orchestration_config_.discovery_mode));
 
-        if (orchestration_config_.enable_discv4_fallback
-            && runtime.peer_queue
-            && runtime.peer_queue->needs_discovery())
+        if (runtime.peer_queue
+            && should_start_discv4_discovery(
+                *runtime.peer_queue,
+                orchestration_config_.discovery_mode,
+                orchestration_config_.enable_discv4_fallback))
         {
             start_discv4_fallback(io, runtime);
         }

@@ -188,12 +188,14 @@ inline EventRegistry& event_registry()
 [[nodiscard]] inline EthWatchServiceConfig build_service_config(
     EthWatchConnectionConfig                    connection,
     std::vector<EthWatchEventSpec>              watches,
-    std::vector<discv4::ChainPeerConfig>        chains)
+    std::vector<discv4::ChainPeerConfig>        chains,
+    EthWatchDiscoveryMode                       discovery_mode = EthWatchDiscoveryMode::kDiscoverIfNeeded)
 {
     EthWatchServiceConfig service_config{};
     service_config.connection = connection;
     service_config.watches = std::move(watches);
     service_config.chains = std::move(chains);
+    service_config.discovery_mode = discovery_mode;
     return service_config;
 }
 

@@ -601,6 +601,98 @@ TEST(EthWatchServiceTest, EmptyCachedNodesWithBootnodesStartsDiscv4Fallback)
     EXPECT_TRUE(queue->needs_discovery());
 }
 
+TEST(EthWatchServiceTest, CacheOnlyModeUsesCachedNodesAndSkipsBootnodeDiscovery)
+{
+    boost::asio::io_context io;
+
+    eth::EthWatchServiceConfig config{};
+    config.discovery_mode = eth::EthWatchDiscoveryMode::kCacheOnly;
+    config.chains.push_back(make_chain_config(
+        "cache-only-chain",
+        {make_validated_peer(0x21)},
+        {make_validated_peer(0x22)}));
+    config.dial_fn_factory = [](const discv4::ChainPeerConfig&) { return no_op_dial_fn(); };
+    config.discv4_fallback_starter = [](
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig&,
+        std::shared_ptr<eth::EthPeerQueue>)
+    {
+        return true;
+    };
+
+    eth::EthWatchService svc;
+    ASSERT_TRUE(svc.initialize(std::move(config), [](const eth::WatchEventNotification&) {}));
+    svc.run(io);
+
+    auto queue = svc.peer_queue("cache-only-chain");
+    ASSERT_NE(queue, nullptr);
+    EXPECT_EQ(queue->cached_peer_count(), 1U);
+    EXPECT_EQ(queue->discovery_bootnodes().size(), 1U);
+    EXPECT_EQ(svc.discv4_fallback_count(), 0U);
+}
+
+TEST(EthWatchServiceTest, DiscoverFirstModeStartsDiscoveryWithoutPreloadingCachedNodes)
+{
+    boost::asio::io_context io;
+
+    eth::EthWatchServiceConfig config{};
+    config.discovery_mode = eth::EthWatchDiscoveryMode::kDiscoverFirst;
+    config.chains.push_back(make_chain_config(
+        "discover-first-chain",
+        {make_validated_peer(0x23)},
+        {make_validated_peer(0x24)}));
+    config.dial_fn_factory = [](const discv4::ChainPeerConfig&) { return no_op_dial_fn(); };
+    config.discv4_fallback_starter = [](
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig&,
+        std::shared_ptr<eth::EthPeerQueue> queue)
+    {
+        return queue && queue->cached_peer_count() == 0U && queue->needs_discovery();
+    };
+
+    eth::EthWatchService svc;
+    ASSERT_TRUE(svc.initialize(std::move(config), [](const eth::WatchEventNotification&) {}));
+    svc.run(io);
+
+    auto queue = svc.peer_queue("discover-first-chain");
+    ASSERT_NE(queue, nullptr);
+    EXPECT_EQ(queue->cached_peer_count(), 0U);
+    EXPECT_EQ(queue->discovery_bootnodes().size(), 1U);
+    EXPECT_TRUE(queue->needs_discovery());
+    EXPECT_EQ(svc.discv4_fallback_count(), 1U);
+}
+
+TEST(EthWatchServiceTest, HybridModePreloadsCachedNodesAndStartsDiscovery)
+{
+    boost::asio::io_context io;
+
+    eth::EthWatchServiceConfig config{};
+    config.discovery_mode = eth::EthWatchDiscoveryMode::kHybrid;
+    config.chains.push_back(make_chain_config(
+        "hybrid-chain",
+        {make_validated_peer(0x25)},
+        {make_validated_peer(0x26)}));
+    config.dial_fn_factory = [](const discv4::ChainPeerConfig&) { return no_op_dial_fn(); };
+    config.discv4_fallback_starter = [](
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig&,
+        std::shared_ptr<eth::EthPeerQueue> queue)
+    {
+        return queue && queue->cached_peer_count() == 1U && !queue->discovery_bootnodes().empty();
+    };
+
+    eth::EthWatchService svc;
+    ASSERT_TRUE(svc.initialize(std::move(config), [](const eth::WatchEventNotification&) {}));
+    svc.run(io);
+
+    auto queue = svc.peer_queue("hybrid-chain");
+    ASSERT_NE(queue, nullptr);
+    EXPECT_EQ(queue->cached_peer_count(), 1U);
+    EXPECT_EQ(queue->discovery_bootnodes().size(), 1U);
+    EXPECT_FALSE(queue->needs_discovery());
+    EXPECT_EQ(svc.discv4_fallback_count(), 1U);
+}
+
 TEST(EthWatchServiceTest, LoadedGnosisConfigWithNoCachedNodesStartsDiscoveryFallback)
 {
     boost::asio::io_context io;
@@ -723,4 +815,13 @@ TEST(EthWatchServiceTest, InitializeRejectsIncompleteRuntimeConfig)
     eth::EthWatchServiceConfig no_peers_config{};
     no_peers_config.chains.push_back(make_chain_config("no-peers", {}, {}));
     EXPECT_FALSE(svc.initialize(std::move(no_peers_config), [](const eth::WatchEventNotification&) {}));
+
+    eth::EthWatchServiceConfig disabled_discovery_config{};
+    disabled_discovery_config.discovery_mode = eth::EthWatchDiscoveryMode::kDiscoverFirst;
+    disabled_discovery_config.enable_discv4_fallback = false;
+    disabled_discovery_config.chains.push_back(make_chain_config(
+        "disabled-discovery",
+        {make_validated_peer(0x40)},
+        {make_validated_peer(0x41)}));
+    EXPECT_FALSE(svc.initialize(std::move(disabled_discovery_config), [](const eth::WatchEventNotification&) {}));
 }

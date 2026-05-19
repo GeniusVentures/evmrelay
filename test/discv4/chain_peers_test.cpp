@@ -186,6 +186,32 @@ TEST_F(ChainPeersTest, BootstrapPeersUseBootnodesArrayAndIgnoreNodes)
     EXPECT_EQ(peers[0].peer.tcp_port, 30304U);
 }
 
+TEST_F(ChainPeersTest, BootstrapPeersFromJsonFileUseBootnodesArrayAndIgnoreNodes)
+{
+    const auto json_path = write_file(
+        temp_dir_ / "chain_enodes.json",
+        std::string("{")
+            + "\"ethereum-mainnet\":{"
+            + "\"networkId\":1,"
+            + "\"genesisHex\":\"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3\","
+            + "\"forkId\":\"07c9462e\","
+            + "\"forkNext\":\"0\","
+            + "\"nodes\":["
+            + "{\"enode\":\"" + make_enode("127.0.0.1", 30303U, '3') + "\"}"
+            + "],"
+            + "\"bootnodes\":["
+            + "{\"enode\":\"" + make_enode("10.0.0.2", 30304U, '4') + "\"}"
+            + "]}}");
+
+    const auto peers = discv4::load_bootstrap_peers_from_json(
+        "ethereum-mainnet",
+        json_path);
+
+    ASSERT_EQ(peers.size(), 1U);
+    EXPECT_EQ(peers[0].peer.ip, "10.0.0.2");
+    EXPECT_EQ(peers[0].peer.tcp_port, 30304U);
+}
+
 TEST_F(ChainPeersTest, LoadChainPeerConfigRequiresBootnodesArray)
 {
     const std::string json_text = std::string("{")

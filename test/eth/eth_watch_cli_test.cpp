@@ -207,6 +207,19 @@ TEST(EthWatchCliTest, BuildServiceConfigPreservesLoadedGnosisDiscoveryFallbackMe
     ASSERT_EQ(service_config.chains.front().bootnodes.size(), 1U);
     EXPECT_EQ(service_config.chains.front().bootnodes.front().peer.ip, "10.0.0.2");
     EXPECT_EQ(service_config.connection.max_connections_per_chain, 1);
+    EXPECT_EQ(service_config.discovery_mode, eth::EthWatchDiscoveryMode::kDiscoverIfNeeded);
     ASSERT_EQ(service_config.watches.size(), 1U);
     EXPECT_EQ(service_config.watches.front().event_signature, "Transfer(address,address,uint256)");
+}
+
+TEST(EthWatchCliTest, BuildServiceConfigPreservesExplicitDiscoveryMode)
+{
+    eth::EthWatchConnectionConfig connection{};
+    auto service_config = eth::cli::build_service_config(
+        connection,
+        {},
+        {},
+        eth::EthWatchDiscoveryMode::kHybrid);
+
+    EXPECT_EQ(service_config.discovery_mode, eth::EthWatchDiscoveryMode::kHybrid);
 }

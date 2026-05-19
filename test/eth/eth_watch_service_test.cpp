@@ -5,6 +5,10 @@
 #include <eth/eth_watch_service.hpp>
 #include <eth/messages.hpp>
 
+#include <chrono>
+#include <functional>
+#include <vector>
+
 namespace {
 
 template <typename Array>
@@ -777,6 +781,144 @@ TEST(EthWatchServiceTest, Discv4FallbackDiscoveredPeerFeedsProductionDialQueue)
     EXPECT_EQ(svc.discv4_fallback_count(), 1U);
     EXPECT_EQ(queue->discovered_peer_count(), 1U);
     EXPECT_EQ(queue->scheduler()->queue.size(), 1U);
+}
+
+TEST(EthWatchServiceTest, DiscoveryPeersQueueWhileDialSlotIsSaturatedAndDrainOnRelease)
+{
+    boost::asio::io_context io;
+    std::vector<discv4::ValidatedPeer> dialed_peers;
+    std::vector<std::function<void()>> release_callbacks;
+
+    const auto cached_peer = make_validated_peer(0x31);
+    const auto discovered_peer_a = make_validated_peer(0x32);
+    const auto discovered_peer_b = make_validated_peer(0x33);
+
+    eth::EthWatchServiceConfig config{};
+    config.connection.max_total_connections = 1;
+    config.connection.max_connections_per_chain = 1;
+    config.discovery_mode = eth::EthWatchDiscoveryMode::kHybrid;
+    config.chains.push_back(make_chain_config(
+        "saturated-chain",
+        {cached_peer},
+        {make_validated_peer(0x34)}));
+    config.dial_fn_factory = [&dialed_peers, &release_callbacks](const discv4::ChainPeerConfig&)
+    {
+        return [&dialed_peers, &release_callbacks](
+            discv4::ValidatedPeer peer,
+            std::function<void()> done,
+            std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
+            boost::asio::yield_context)
+        {
+            dialed_peers.push_back(peer);
+            release_callbacks.push_back(std::move(done));
+        };
+    };
+    config.discv4_fallback_starter = [discovered_peer_a, discovered_peer_b](
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig&,
+        std::shared_ptr<eth::EthPeerQueue> queue)
+    {
+        return queue
+            && queue->enqueue_discovered_peer(discovered_peer_a.peer)
+            && queue->enqueue_discovered_peer(discovered_peer_b.peer);
+    };
+
+    eth::EthWatchService svc;
+    ASSERT_TRUE(svc.initialize(std::move(config), [](const eth::WatchEventNotification&) {}));
+    svc.run(io);
+
+    auto queue = svc.peer_queue("saturated-chain");
+    ASSERT_NE(queue, nullptr);
+    ASSERT_NE(queue->scheduler(), nullptr);
+    EXPECT_EQ(svc.discv4_fallback_count(), 1U);
+    EXPECT_EQ(queue->discovered_peer_count(), 2U);
+    EXPECT_EQ(queue->scheduler()->active, 1);
+    EXPECT_EQ(queue->scheduler()->queue.size(), 2U);
+
+    io.run_for(std::chrono::milliseconds(50));
+    ASSERT_EQ(dialed_peers.size(), 1U);
+    EXPECT_EQ(dialed_peers[0].peer.node_id, cached_peer.peer.node_id);
+    ASSERT_EQ(release_callbacks.size(), 1U);
+
+    release_callbacks[0]();
+    io.restart();
+    io.run_for(std::chrono::milliseconds(50));
+
+    ASSERT_EQ(dialed_peers.size(), 2U);
+    EXPECT_EQ(dialed_peers[1].peer.node_id, discovered_peer_a.peer.node_id);
+    EXPECT_EQ(queue->scheduler()->active, 1);
+    EXPECT_EQ(queue->scheduler()->queue.size(), 1U);
+
+    release_callbacks[1]();
+    io.restart();
+    io.run_for(std::chrono::milliseconds(50));
+
+    ASSERT_EQ(dialed_peers.size(), 3U);
+    EXPECT_EQ(dialed_peers[2].peer.node_id, discovered_peer_b.peer.node_id);
+    EXPECT_EQ(queue->scheduler()->active, 1);
+    EXPECT_TRUE(queue->scheduler()->queue.empty());
+}
+
+TEST(EthWatchServiceTest, DiscoveryCanContinueProducingPeersAfterDialFailureReleasesSlot)
+{
+    boost::asio::io_context io;
+    std::vector<discv4::ValidatedPeer> dialed_peers;
+    std::vector<std::function<void()>> release_callbacks;
+
+    const auto first_peer = make_validated_peer(0x35);
+    const auto later_peer = make_validated_peer(0x36);
+
+    eth::EthWatchServiceConfig config{};
+    config.connection.max_total_connections = 1;
+    config.connection.max_connections_per_chain = 1;
+    config.chains.push_back(make_chain_config(
+        "continued-discovery-chain",
+        {},
+        {make_validated_peer(0x37)}));
+    config.dial_fn_factory = [&dialed_peers, &release_callbacks](const discv4::ChainPeerConfig&)
+    {
+        return [&dialed_peers, &release_callbacks](
+            discv4::ValidatedPeer peer,
+            std::function<void()> done,
+            std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
+            boost::asio::yield_context)
+        {
+            dialed_peers.push_back(peer);
+            release_callbacks.push_back(std::move(done));
+        };
+    };
+    config.discv4_fallback_starter = [first_peer](
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig&,
+        std::shared_ptr<eth::EthPeerQueue> queue)
+    {
+        return queue && queue->enqueue_discovered_peer(first_peer.peer);
+    };
+
+    eth::EthWatchService svc;
+    ASSERT_TRUE(svc.initialize(std::move(config), [](const eth::WatchEventNotification&) {}));
+    svc.run(io);
+
+    auto queue = svc.peer_queue("continued-discovery-chain");
+    ASSERT_NE(queue, nullptr);
+    ASSERT_NE(queue->scheduler(), nullptr);
+
+    io.run_for(std::chrono::milliseconds(50));
+    ASSERT_EQ(dialed_peers.size(), 1U);
+    EXPECT_EQ(dialed_peers[0].peer.node_id, first_peer.peer.node_id);
+    ASSERT_EQ(release_callbacks.size(), 1U);
+
+    release_callbacks[0]();
+    EXPECT_EQ(queue->scheduler()->active, 0);
+    EXPECT_TRUE(queue->enqueue_discovered_peer(later_peer.peer));
+    EXPECT_EQ(queue->discovered_peer_count(), 2U);
+
+    io.restart();
+    io.run_for(std::chrono::milliseconds(50));
+
+    ASSERT_EQ(dialed_peers.size(), 2U);
+    EXPECT_EQ(dialed_peers[1].peer.node_id, later_peer.peer.node_id);
+    EXPECT_EQ(queue->scheduler()->active, 1);
 }
 
 TEST(EthWatchServiceTest, SchedulerFeedbackRequeuesThroughProductionPeerQueue)

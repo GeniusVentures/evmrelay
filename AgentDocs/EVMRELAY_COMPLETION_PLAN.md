@@ -189,28 +189,29 @@ Existing code already has several useful pieces:
 
 Remaining work:
 
-- Move the example-only callback-to-scheduler wiring into reusable `EthWatchService` production orchestration under `include/eth` and `src/eth`.
-- Remove scheduler ownership and discovery lifecycle ownership from `examples/eth_watch/eth_watch.cpp` once the production API exists.
-- Ensure cached `nodes`, discv4 discovery, discv5 discovery, and EIP-1459-derived seeds all feed the same dial queue abstraction.
+- ~~Move the example-only callback-to-scheduler wiring into reusable `EthWatchService` production orchestration under `include/eth` and `src/eth`.~~
+- ~~Remove scheduler ownership and discovery lifecycle ownership from `examples/eth_watch/eth_watch.cpp` once the production API exists.~~
+- ~~Ensure cached `nodes` and discv4 discovery feed the same dial queue abstraction.~~
+- Ensure discv5 discovery and EIP-1459-derived seeds feed the same dial queue abstraction.
 - ~~Ensure the pre-cache path and discovery fallback path feed the same queue abstraction: `nodes` enqueue immediately, `bootnodes` only seed discovery, discovered peers enqueue after validation.~~
 - ~~Wire dial/session disconnect feedback into the peer queue so eligible peers are requeued and flaky peers stop cycling.~~
-- Keep discovery loops alive while the dial queue drains; do not structure discovery as a blocking pre-scan before dialing.
-- Add tests that simulate discovery producing peers while dial slots are saturated and verify queued peers are dialed as slots release.
-- Add tests that discovery can continue producing peers after successful and failed RLPx sessions without coupling lifecycle ownership.
+- ~~Keep discovery loops alive while the dial queue drains; do not structure discovery as a blocking pre-scan before dialing.~~
+- ~~Add tests that simulate discovery producing peers while dial slots are saturated and verify queued peers are dialed as slots release.~~
+- ~~Add tests that discovery can continue producing peers after successful and failed RLPx sessions without coupling lifecycle ownership.~~
 
 ### 5. Completion Criteria for EVM Relay
 
-- Event watching works from cached `nodes` for configured chains.
-- Direct `--direct-enode` remains available for local and manual testing.
-- `chain_enodes.json.gz` is used as the startup pre-cache for both peer dialing (`nodes`) and discovery seeding (`bootnodes`).
-- Chains without pre-cached `nodes`, including Gnosis Chain, can still start from `bootnodes`, run discv4 discovery, and enqueue validated discovered peers.
+- ~~Event watching works from cached `nodes` for configured chains.~~
+- ~~Direct `--direct-enode` remains available for local and manual testing.~~
+- ~~`chain_enodes.json.gz` is used as the startup pre-cache for both peer dialing (`nodes`) and discovery seeding (`bootnodes`).~~
+- ~~Chains without pre-cached `nodes`, including Gnosis Chain, can still start from `bootnodes`, run discv4 discovery, and enqueue validated discovered peers.~~
 - ~~Optional discover-first/hybrid mode uses `bootnodes` only for discovery.~~
 - Optional ENR-tree mode supports EIP-1459 DNS discovery later, keeps resolved ENRs in the discovery-only path, and becomes the preferred default for Ethereum and Polygon chains once implemented.
-- Discovery and connection dialing are decoupled: discovery producers enqueue peers continuously, and dialers consume queued peers according to connection limits.
-- Core discovery/dial/session orchestration lives in `src/eth` production code, not in `examples/eth_watch/eth_watch.cpp`.
-- The relay can watch configured chain/message filters, decode matching logs/messages, and invoke callbacks. Bridge-message finality verification and UTXO-system messaging are handled outside this relay path through RPC-based verification.
-- Unit tests cover loader semantics, peer selection, fork metadata, signature validation, event filtering, ABI decoding, receipt sources, and runner behavior.
-- Smoke tests document exact known-good commands for local direct-enode and cached peer cache flows.
+- ~~Discovery and connection dialing are decoupled: discovery producers enqueue peers continuously, and dialers consume queued peers according to connection limits.~~
+- ~~Core discovery/dial/session orchestration lives in `src/eth` production code, not in `examples/eth_watch/eth_watch.cpp`.~~
+- ~~The relay can watch configured chain/message filters, decode matching logs/messages, and invoke callbacks. Bridge-message finality verification and UTXO-system messaging are handled outside this relay path through RPC-based verification.~~
+- ~~Unit tests cover loader semantics, peer selection, fork metadata, signature validation, event filtering, ABI decoding, receipt sources, and runner behavior.~~
+- ~~Smoke tests document exact known-good commands for local direct-enode and cached peer cache flows.~~
 
 ### 6. Documentation Cleanup
 

@@ -200,34 +200,6 @@ void log_watch_notification(
     }
 }
 
-std::optional<std::vector<eth::EthWatchEventSpec>> build_service_watch_specs(
-    const std::vector<eth::cli::WatchSpec>& watch_specs)
-{
-    std::vector<eth::EthWatchEventSpec> service_watches;
-    service_watches.reserve(watch_specs.size());
-
-    for (const auto& spec : watch_specs)
-    {
-        eth::EthWatchEventSpec watch{};
-        if (!spec.contract_hex.empty())
-        {
-            auto addr = eth::cli::parse_address(spec.contract_hex);
-            if (!addr)
-            {
-                std::cout << "Invalid contract address: " << spec.contract_hex << "\n";
-                return std::nullopt;
-            }
-            watch.contract_address = *addr;
-        }
-
-        watch.event_signature = spec.event_signature;
-        watch.params = eth::cli::infer_params(spec.event_signature);
-        service_watches.push_back(std::move(watch));
-    }
-
-    return service_watches;
-}
-
 std::optional<discv4::ChainPeerConfig> load_chain_peer_config(
     const std::string&                   chain_name,
     const std::string&                   argv0,
@@ -946,26 +918,30 @@ int main(int argc, char** argv) {
         if (!multi_chain_configs.empty())
         {
             static auto log = rlp::base::createLogger("eth_watch");
-            auto service_watches = build_service_watch_specs(config->watch_specs);
+            auto service_watches = eth::cli::build_service_watch_specs(config->watch_specs);
             if (!service_watches)
             {
+                std::cout << "Invalid watch contract address.\n";
                 return 1;
             }
 
-            eth::EthWatchServiceConfig service_config{};
-            service_config.connection = watch_connection_config;
-            service_config.watches = std::move(*service_watches);
-            service_config.chains.reserve(multi_chain_configs.size());
+            std::vector<discv4::ChainPeerConfig> service_chains;
+            service_chains.reserve(multi_chain_configs.size());
 
             for (const auto& chain_config : multi_chain_configs)
             {
-                service_config.chains.push_back(chain_config.chain_peer_config);
+                service_chains.push_back(chain_config.chain_peer_config);
                 SPDLOG_LOGGER_INFO(log,
                                    "Starting eth watch service for chain '{}' with {} cached peer(s) and {} bootnode(s)",
                                    chain_config.canonical_chain_name,
                                    chain_config.chain_peer_config.nodes.size(),
                                    chain_config.chain_peer_config.bootnodes.size());
             }
+
+            auto service_config = eth::cli::build_service_config(
+                watch_connection_config,
+                std::move(*service_watches),
+                std::move(service_chains));
 
             if (!service.initialize(
                     std::move(service_config),
@@ -983,16 +959,17 @@ int main(int argc, char** argv) {
         else if (config->use_chain_peer_cache && !config->prefer_direct_enode)
         {
             static auto log = rlp::base::createLogger("eth_watch");
-            auto service_watches = build_service_watch_specs(config->watch_specs);
+            auto service_watches = eth::cli::build_service_watch_specs(config->watch_specs);
             if (!service_watches)
             {
+                std::cout << "Invalid watch contract address.\n";
                 return 1;
             }
 
-            eth::EthWatchServiceConfig service_config{};
-            service_config.connection = watch_connection_config;
-            service_config.watches = std::move(*service_watches);
-            service_config.chains.push_back(config->chain_peer_config);
+            auto service_config = eth::cli::build_service_config(
+                watch_connection_config,
+                std::move(*service_watches),
+                {config->chain_peer_config});
 
             SPDLOG_LOGGER_INFO(log,
                                "Starting eth watch service for chain '{}' with {} cached peer(s) and {} bootnode(s)",

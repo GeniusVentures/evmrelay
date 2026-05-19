@@ -69,6 +69,16 @@ discv4::ValidatedPeer make_validated_peer(uint8_t seed)
     return peer;
 }
 
+std::string make_enode(const std::string& ip, uint16_t port, char fill)
+{
+    return std::string("enode://")
+        + std::string(128, fill)
+        + "@"
+        + ip
+        + ":"
+        + std::to_string(port);
+}
+
 discv4::ChainPeerConfig make_chain_config(
     std::string chain_name,
     std::vector<discv4::ValidatedPeer> nodes,
@@ -588,6 +598,59 @@ TEST(EthWatchServiceTest, EmptyCachedNodesWithBootnodesStartsDiscv4Fallback)
     ASSERT_NE(queue, nullptr);
     EXPECT_EQ(queue->cached_peer_count(), 0U);
     EXPECT_EQ(queue->discovery_bootnodes().size(), 1U);
+    EXPECT_TRUE(queue->needs_discovery());
+}
+
+TEST(EthWatchServiceTest, LoadedGnosisConfigWithNoCachedNodesStartsDiscoveryFallback)
+{
+    boost::asio::io_context io;
+
+    const std::string json_text = std::string("{")
+        + "\"gnosis-chain\":{"
+        + "\"networkId\":100,"
+        + "\"genesisHex\":\"4f1dd23188aab3a0b3768e6a2b5f6cbf3fcb259af45d37b228a8a0ae61161f80\","
+        + "\"forkId\":\"06000064\","
+        + "\"forkNext\":\"0\","
+        + "\"nodes\":[],"
+        + "\"bootnodes\":["
+        + "{\"enode\":\"" + make_enode("10.0.0.2", 30304U, '7') + "\"}"
+        + "]}}";
+
+    auto loaded_config = discv4::load_chain_peer_config_from_json_text(
+        "gnosis-chain",
+        json_text);
+    ASSERT_TRUE(loaded_config.has_value());
+    ASSERT_TRUE(loaded_config->nodes.empty());
+    ASSERT_EQ(loaded_config->bootnodes.size(), 1U);
+
+    eth::EthWatchServiceConfig config{};
+    config.discovery.bind_port = 0;
+    config.chains.push_back(*loaded_config);
+    config.dial_fn_factory = [](const discv4::ChainPeerConfig&) { return no_op_dial_fn(); };
+    config.discv4_fallback_starter = [](
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig& chain,
+        std::shared_ptr<eth::EthPeerQueue> queue)
+    {
+        return chain.canonical_name == "gnosis-chain"
+            && chain.network_id == 100U
+            && chain.nodes.empty()
+            && !chain.bootnodes.empty()
+            && queue
+            && queue->needs_discovery();
+    };
+
+    eth::EthWatchService svc;
+    ASSERT_TRUE(svc.initialize(std::move(config), [](const eth::WatchEventNotification&) {}));
+    svc.run(io);
+
+    auto queue = svc.peer_queue("gnosis-chain");
+    ASSERT_NE(queue, nullptr);
+    EXPECT_EQ(svc.discv4_fallback_count(), 1U);
+    EXPECT_EQ(queue->cached_peer_count(), 0U);
+    ASSERT_EQ(queue->discovery_bootnodes().size(), 1U);
+    EXPECT_EQ(queue->discovery_bootnodes().front().peer.ip, "10.0.0.2");
+    EXPECT_EQ(queue->discovery_bootnodes().front().peer.tcp_port, 30304U);
     EXPECT_TRUE(queue->needs_discovery());
 }
 

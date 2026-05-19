@@ -59,10 +59,12 @@ Current uncommitted implementation state:
 - `EthWatchService` now exposes `initialize(config, callback)` and `run(io)`.
 - The production service runtime creates the shared watcher pool, per-chain `DialScheduler`, per-chain `EthPeerQueue`, cached-node preload, discovery-only bootnode storage, discv4 fallback for empty cached `nodes`, RLPx connect, ETH Status handshake, `EthWatchRunner` setup, watch registration, and decoded notification dispatch.
 - Focused service tests cover cached-node scheduler/queue creation, Gnosis-style empty `nodes` plus valid `bootnodes` fallback startup, production-path scheduler feedback requeue, and invalid config rejection.
+- `examples/eth_watch` cache-based `--chain` and `--all-chains` modes now build `EthWatchServiceConfig`, register decoded notification output callbacks, and call `EthWatchService::initialize(...)` / `run(io)`.
+- Direct host/port/pubkey and `--direct-enode` manual modes remain on the example-local direct helper path.
 
 Immediate next step:
 
-Thin `examples/eth_watch/eth_watch.cpp` so it loads config, registers output callbacks, and calls the production `EthWatchService` API. Keep direct-enode/manual testing behavior available while moving cached-node and discovery fallback orchestration out of the example.
+Add explicit service/example coverage for no-cached-node chain config using real loaded chain metadata, then refresh smoke-test docs after the next live validation pass. Direct-enode/manual testing remains available through the example's direct helper path.
 
 Suggested tests for the next session:
 
@@ -70,7 +72,7 @@ Suggested tests for the next session:
 - Example empty `nodes` plus valid `bootnodes` mode delegates discv4 fallback to `EthWatchService`.
 - Direct-enode mode remains available for local/manual smoke testing.
 - CLI output callbacks receive decoded notifications with chain metadata from the service.
-- Discovery callback enqueues discovered peers into the same `EthPeerQueue` in an end-to-end service test.
+- ~~Discovery callback enqueues discovered peers into the same `EthPeerQueue` in an end-to-end service test.~~
 
 ## Context
 
@@ -169,10 +171,10 @@ Keep the implementation modular and keep source roles separate:
 - ~~Add a small adapter layer if needed to convert discv4/discv5 peer records into one dialer peer type; keep protocol-specific discovery details out of the connection code.~~
 - ~~Add backpressure policy for the peer queue: bounded size, duplicate suppression, recent-dial suppression, and deterministic drop behavior when discovery outpaces dialing.~~
 - ~~Move reusable connection-pool, dial-queue, and discovery callback wiring out of `examples/eth_watch/eth_watch.cpp` into `evmrelay/src/eth/eth_watch_service.cpp` or a focused `src/eth` helper owned by `EthWatchService`.~~
-- Keep `examples/eth_watch/eth_watch.cpp` as a thin consumer of the production service API: argument parsing, config construction, watch registration, and output formatting only.
+- Keep `examples/eth_watch/eth_watch.cpp` as a thin consumer of the production service API for cache-based modes: argument parsing, config construction, watch registration, and output formatting only. Direct-enode/manual mode remains as a local test helper for now.
 - ~~Do not silently mix bootnodes into direct ETH session candidates.~~
 - Preserve fork ID, network ID, and genesis hash from chain metadata through direct peer and discovered peer paths.
-- Add end-to-end Gnosis Chain coverage for the no-pre-cached-nodes path: fallback startup is covered; still add a service-level test proving discovered peers feed the dial queue through the live discovery callback wiring.
+- Add Gnosis Chain coverage for the no-pre-cached-nodes path using real loaded chain metadata; fallback startup and service-level discovery-to-dial-queue handoff are covered.
 
 ### 4. Discovery/Dialer Decoupling Checks
 
@@ -231,8 +233,8 @@ Remaining work:
 5. ~~Add or formalize the discovery-to-dialer queue adapter and backpressure policy under `include/eth` / `src/eth`.~~
 6. ~~Implement discv4 fallback for chains without usable pre-cached `nodes`, with Gnosis Chain as the first target.~~
 7. ~~Move reusable scheduler/discovery orchestration out of `examples/eth_watch/eth_watch.cpp` and into `EthWatchService` production code.~~
-8. Add chain config support for both arrays without changing direct peer behavior.
-9. Update `eth_watch` peer selection so direct mode, cache-first mode, bootnode discovery fallback, and hybrid mode are explicit through production service APIs.
+8. ~~Add chain config support for both arrays without changing direct peer behavior.~~
+9. Update `eth_watch` peer selection so direct mode, cache-first mode, bootnode discovery fallback, and hybrid mode are explicit through production service APIs. Cache-first and bootnode fallback now use production service APIs; direct mode remains an example-local manual helper.
 10. Add EIP-1459 / ENR tree source support and tests for discovery seed generation for chains that support it, with Ethereum/Polygon defaulting to ENR-tree discovery and other chains defaulting to discv4.
 11. Run focused discv4, discv5, eth, and eth_watch tests.
 12. Refresh docs and smoke-test commands.

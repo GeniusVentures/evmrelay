@@ -591,6 +591,39 @@ TEST(EthWatchServiceTest, EmptyCachedNodesWithBootnodesStartsDiscv4Fallback)
     EXPECT_TRUE(queue->needs_discovery());
 }
 
+TEST(EthWatchServiceTest, Discv4FallbackDiscoveredPeerFeedsProductionDialQueue)
+{
+    boost::asio::io_context io;
+    const auto discovered_peer = make_validated_peer(0x28);
+
+    eth::EthWatchServiceConfig config{};
+    config.connection.max_total_connections = 0;
+    config.connection.max_connections_per_chain = 0;
+    config.chains.push_back(make_chain_config(
+        "gnosis-mainnet",
+        {},
+        {make_validated_peer(0x20)}));
+    config.dial_fn_factory = [](const discv4::ChainPeerConfig&) { return no_op_dial_fn(); };
+    config.discv4_fallback_starter = [discovered_peer](
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig&,
+        std::shared_ptr<eth::EthPeerQueue> queue)
+    {
+        return queue && queue->enqueue_discovered_peer(discovered_peer.peer);
+    };
+
+    eth::EthWatchService svc;
+    ASSERT_TRUE(svc.initialize(std::move(config), [](const eth::WatchEventNotification&) {}));
+    svc.run(io);
+
+    auto queue = svc.peer_queue("gnosis-mainnet");
+    ASSERT_NE(queue, nullptr);
+    ASSERT_NE(queue->scheduler(), nullptr);
+    EXPECT_EQ(svc.discv4_fallback_count(), 1U);
+    EXPECT_EQ(queue->discovered_peer_count(), 1U);
+    EXPECT_EQ(queue->scheduler()->queue.size(), 1U);
+}
+
 TEST(EthWatchServiceTest, SchedulerFeedbackRequeuesThroughProductionPeerQueue)
 {
     boost::asio::io_context io;

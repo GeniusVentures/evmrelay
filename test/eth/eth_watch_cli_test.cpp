@@ -3,6 +3,21 @@
 
 #include <gtest/gtest.h>
 #include <eth/eth_watch_cli.hpp>
+#include <discv4/chain_peers.hpp>
+
+namespace {
+
+std::string make_enode(const std::string& ip, uint16_t port, char fill)
+{
+    return std::string("enode://")
+        + std::string(128, fill)
+        + "@"
+        + ip
+        + ":"
+        + std::to_string(port);
+}
+
+} // namespace
 
 // ============================================================================
 // parse_address
@@ -143,3 +158,55 @@ TEST(EthWatchCliTest, WatchSpecAggregateInit)
     EXPECT_EQ(spec.event_signature, "Transfer(address,address,uint256)");
 }
 
+TEST(EthWatchCliTest, BuildServiceWatchSpecsRejectsInvalidContract)
+{
+    const std::vector<eth::cli::WatchSpec> watch_specs{
+        {"not-an-address", "Transfer(address,address,uint256)"},
+    };
+
+    const auto service_watches = eth::cli::build_service_watch_specs(watch_specs);
+    EXPECT_FALSE(service_watches.has_value());
+}
+
+TEST(EthWatchCliTest, BuildServiceConfigPreservesLoadedGnosisDiscoveryFallbackMetadata)
+{
+    const std::string json_text = std::string("{")
+        + "\"gnosis-chain\":{"
+        + "\"networkId\":100,"
+        + "\"genesisHex\":\"4f1dd23188aab3a0b3768e6a2b5f6cbf3fcb259af45d37b228a8a0ae61161f80\","
+        + "\"forkId\":\"06000064\","
+        + "\"forkNext\":\"0\","
+        + "\"nodes\":[],"
+        + "\"bootnodes\":["
+        + "{\"enode\":\"" + make_enode("10.0.0.2", 30304U, '7') + "\"}"
+        + "]}}";
+
+    auto loaded_config = discv4::load_chain_peer_config_from_json_text(
+        "gnosis-chain",
+        json_text);
+    ASSERT_TRUE(loaded_config.has_value());
+
+    const auto service_watches = eth::cli::build_service_watch_specs({
+        {"", "Transfer(address,address,uint256)"},
+    });
+    ASSERT_TRUE(service_watches.has_value());
+
+    eth::EthWatchConnectionConfig connection{};
+    connection.max_total_connections = 4;
+    connection.max_connections_per_chain = 1;
+
+    auto service_config = eth::cli::build_service_config(
+        connection,
+        *service_watches,
+        {*loaded_config});
+
+    ASSERT_EQ(service_config.chains.size(), 1U);
+    EXPECT_EQ(service_config.chains.front().canonical_name, "gnosis-chain");
+    EXPECT_EQ(service_config.chains.front().network_id, 100U);
+    EXPECT_TRUE(service_config.chains.front().nodes.empty());
+    ASSERT_EQ(service_config.chains.front().bootnodes.size(), 1U);
+    EXPECT_EQ(service_config.chains.front().bootnodes.front().peer.ip, "10.0.0.2");
+    EXPECT_EQ(service_config.connection.max_connections_per_chain, 1);
+    ASSERT_EQ(service_config.watches.size(), 1U);
+    EXPECT_EQ(service_config.watches.front().event_signature, "Transfer(address,address,uint256)");
+}

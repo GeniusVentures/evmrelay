@@ -6,6 +6,7 @@
 
 #include <base/parse_utility.hpp>
 #include <eth/abi_decoder.hpp>
+#include <eth/eth_watch_service.hpp>
 #include <array>
 #include <optional>
 #include <string>
@@ -153,6 +154,47 @@ inline EventRegistry& event_registry()
 [[nodiscard]] inline std::vector<abi::AbiParam> infer_params(const std::string& sig)
 {
     return event_registry().params_for(sig);
+}
+
+/// @brief Convert CLI watch flags into service-level watch specs.
+[[nodiscard]] inline std::optional<std::vector<EthWatchEventSpec>> build_service_watch_specs(
+    const std::vector<WatchSpec>& watch_specs)
+{
+    std::vector<EthWatchEventSpec> service_watches;
+    service_watches.reserve(watch_specs.size());
+
+    for (const auto& spec : watch_specs)
+    {
+        EthWatchEventSpec watch{};
+        if (!spec.contract_hex.empty())
+        {
+            auto addr = parse_address(spec.contract_hex);
+            if (!addr)
+            {
+                return std::nullopt;
+            }
+            watch.contract_address = *addr;
+        }
+
+        watch.event_signature = spec.event_signature;
+        watch.params = infer_params(spec.event_signature);
+        service_watches.push_back(std::move(watch));
+    }
+
+    return service_watches;
+}
+
+/// @brief Build the production service config used by cache-backed CLI modes.
+[[nodiscard]] inline EthWatchServiceConfig build_service_config(
+    EthWatchConnectionConfig                    connection,
+    std::vector<EthWatchEventSpec>              watches,
+    std::vector<discv4::ChainPeerConfig>        chains)
+{
+    EthWatchServiceConfig service_config{};
+    service_config.connection = connection;
+    service_config.watches = std::move(watches);
+    service_config.chains = std::move(chains);
+    return service_config;
 }
 
 } // namespace eth::cli

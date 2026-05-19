@@ -92,7 +92,9 @@ cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGen
 ./examples/eth_watch/eth_watch --chain <canonical_chain_name>
 ```
 
-`--chain` now loads chain metadata and peer enodes from `chain_enodes.json(.gz)`.
+`--chain` now loads chain metadata from `chain_enodes.json(.gz)`.
+Within each chain entry, `nodes` are RLPx/ETH peer candidates and `bootnodes`
+are discovery-only seeds. Bootnodes are not direct event-watching peers.
 Use canonical chain keys such as `ethereum-sepolia` or `ethereum-mainnet`.
 
 If no local cache exists, `eth_watch` attempts to refresh from:
@@ -105,7 +107,10 @@ cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGen
 curl -L https://enodes.gnus.ai/chain_enodes.json.gz -o chain_enodes.json.gz
 ```
 
-**Note**: Bootstrap nodes are discovery-only. Cached peers are the intended input for RLPx/ETH message watching.
+**Note**: Bootstrap nodes are discovery-only. Cached `nodes` are the intended
+input for RLPx/ETH message watching. If cached `nodes` is empty but `bootnodes`
+is valid, `EthWatchService` starts discv4 fallback and enqueues discovered peers
+into the dial queue.
 If you connect directly to a bootstrap node, most likely you'll see:
 ```
 Connected. Waiting for messages...
@@ -143,6 +148,9 @@ Example with a real Sepolia peer:
 ./examples/eth_watch/eth_watch --chain base-mainnet
 ./examples/eth_watch/eth_watch --chain base-sepolia
 
+# Gnosis, discovery fallback when nodes is empty and bootnodes is present
+./examples/eth_watch/eth_watch --chain gnosis-chain
+
 # Four mainnet EVM chains at once
 ./examples/eth_watch/eth_watch --all-chains --watch-event 'Transfer(address,address,uint256)' --display-events 2
 ```
@@ -166,29 +174,35 @@ Example:
 
 ### Chain Loader
 
-- **Chain selection logic:** `/examples/eth_watch/eth_watch.cpp` uses `load_chain_peer_config(...)`
+- **Chain selection logic:** `/examples/eth_watch/eth_watch.cpp` loads chain metadata and delegates cache-backed orchestration to `EthWatchService`
+
+## Smoke Validation
+
+Run the compiled C++ example smoke test:
+
+```bash
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay
+cd build/OSX/Debug
+ctest -R eth_watch_example_test --output-on-failure
+```
+
+`eth_watch_example_test` validates cache-backed service startup, multi-chain
+service config, and Gnosis empty-`nodes` discovery fallback without shell
+wrappers or live peer reachability assumptions.
 
 ## Connection Status
 
-### ✅ Successfully Tested
+The current implementation can load cache-backed chain metadata and start the
+production `EthWatchService` path for supported chains. Live connection success
+still depends on the freshness and reachability of cached `nodes`, local network
+egress, and whether selected peers complete RLPx/ETH handshakes.
 
-- Ethereum Mainnet
-- Ethereum Sepolia
-- Polygon Mainnet
-- Polygon Amoy
+Last local deterministic validation on May 19, 2026:
 
-### ⚠️ Network Issues (Bootnodes Configured But Unreachable)
-
-- Ethereum Holesky (bootstrap nodes may be offline)
-- BSC Mainnet (bootnodes may not be accepting connections or may be offline)
-
-### ⏳ Requires Testing
-
-- BSC Testnet (bootnodes configured, needs network connectivity test)
-
-### ❌ Not Yet Configured
-
-- Base Mainnet (requires OP Stack discovery setup)
+- `eth_watch_example_test` passed.
+- The Gnosis fixture had empty `nodes` and valid `bootnodes`, matching the
+  discovery-fallback path.
+- Live connection success remains a manual/network-environment validation.
 - Base Sepolia (requires OP Stack discovery setup)
 
 ## Enode Format
@@ -236,4 +250,3 @@ To update bootnodes:
 - [BSC Documentation](https://docs.bnbchain.org/bnb-smart-chain/developers/node_operators/boot_node)
 - [Base Documentation](https://docs.base.org/base-chain/node-operators/run-a-base-node)
 - [Enode Format Specification](https://ethereum.org/en/developers/docs/networking-layer/network-addresses/)
-

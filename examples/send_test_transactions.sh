@@ -2,8 +2,8 @@
 #
 # send_test_transactions.sh — Send GNUS test transactions on multiple chains
 #
-# Sends a small GNUS Transfer on each selected chain so that test_eth_watch.sh
-# can verify live event detection end-to-end.
+# Sends a small GNUS Transfer on each selected chain for manual live event
+# validation with the eth_watch example.
 #
 # Required environment variables:
 #   PRIVATE_KEY   — 0x-prefixed private key of the sender wallet
@@ -210,10 +210,9 @@ done
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 if [ $FAILED -eq 0 ]; then
-    print_success "All transactions submitted. Now run:"
+    print_success "All transactions submitted. Now run eth_watch for the target chain, for example:"
     echo ""
-    echo "  ./test_eth_watch.sh all           # mainnets"
-    echo "  ./test_eth_watch.sh gnus-all-testnets  # testnets"
+    echo "  ./eth_watch/eth_watch --chain ethereum-sepolia --watch-event 'Transfer(address,address,uint256)'"
     echo ""
     echo "  Events should appear within ~1-2 block confirmations."
 else

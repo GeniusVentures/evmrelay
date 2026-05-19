@@ -1,5 +1,59 @@
 # Checkpoint Log
 
+## EVM relay eth_watch C++ example tests - 2026-05-19
+
+### Current state
+
+- Repository: `evmrelay`
+- Branch: `develop`
+- Current local HEAD before this uncommitted step: `2d31e28 Add eth watch loaded metadata coverage`
+
+### New local changes in this step
+
+- `examples/eth_watch/eth_watch_example_test.cpp`
+  - Adds a compiled C++ example smoke test for the cache-backed eth_watch service path.
+  - Covers cached chain metadata with `nodes` and `bootnodes`.
+  - Covers GNUS watch-spec construction for Transfer and BridgeSourceBurned events.
+  - Covers Gnosis-style empty `nodes` plus valid `bootnodes` discv4 fallback through `EthWatchService`.
+  - Covers multi-chain service config creation without spawning the `eth_watch` process or scraping logs.
+- `examples/eth_watch/CMakeLists.txt`
+  - Builds `eth_watch_example_test` and registers it with CTest.
+- `examples/test_eth_watch.sh` and `examples/test_eth_watch_smoke.sh`
+  - Removed tracked shell test harnesses in favor of the compiled C++ example test.
+- Docs updated:
+  - `examples/README.md`
+  - `AgentDocs/BOOTNODES_CONFIGURATION.md`
+  - `AgentDocs/COMMANDS_REFERENCE.md`
+  - `AgentDocs/PUBLIC_NODES_FOR_TESTING.md`
+  - `AgentDocs/QUICK_TEST_GUIDE.md`
+  - `AgentDocs/WHY_NO_MESSAGES.md`
+
+### Verification run after these local changes
+
+```bash
+cd evmrelay/build/OSX/Debug
+ninja
+ctest -R 'eth_watch_example_test|eth_watch_service_test|eth_watch_cli_test|eth_watch_runner_test|discv4_chain_peers_test|discv4_dial_scheduler_test' --output-on-failure
+```
+
+Result:
+
+```text
+100% tests passed, 0 tests failed out of 6
+```
+
+### Still intentionally not done
+
+- `rlp_enodes` was not touched.
+- gzip/JSON loading behavior was not changed.
+- No bridge consensus/finality logic was added.
+- Direct-enode/manual testing path remains example-local.
+- Live public-peer connectivity remains a manual validation because peer reachability is network-environment dependent.
+
+### Next implementation step
+
+Decide whether the remaining direct host/port/pubkey and `--direct-enode` helper should stay example-local permanently or become a small production direct-session API. If it stays example-local, the next production work is loader cleanup around `bootstrap_peers` parsing only `bootnodes`.
+
 ## EVM relay EthWatchService orchestration progress - 2026-05-19
 
 ### Current state

@@ -130,66 +130,17 @@ echo "Port: $PORT"
 ./examples/eth_watch/eth_watch "$HOST" "$PORT" "$PUBKEY"
 ```
 
-## Automated Test Script
+## Compiled Example Test
 
-Save as `test_eth_watch.sh`:
+The repository uses compiled C++ example tests for eth_watch smoke coverage:
+
 ```bash
-#!/bin/bash
-
-CHAIN=${1:-sepolia}
-RPC=""
-TIMEOUT=10
-
-case "$CHAIN" in
-  mainnet)
-    RPC="https://eth.llamarpc.com"
-    ;;
-  sepolia)
-    RPC="https://sepolia.llamarpc.com"
-    ;;
-  *)
-    echo "Usage: $0 [mainnet|sepolia]"
-    exit 1
-    ;;
-esac
-
-echo "Getting peer from $CHAIN..."
-PEER_JSON=$(curl -s -X POST "$RPC" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"admin_peers","params":[],"id":1}')
-
-ENODE=$(echo "$PEER_JSON" | jq -r '.result[0].enode' 2>/dev/null)
-
-if [ -z "$ENODE" ] || [ "$ENODE" = "null" ]; then
-  echo "❌ Failed to get peer from RPC"
-  echo "Response: $PEER_JSON"
-  exit 1
-fi
-
-echo "✅ Got peer: $ENODE"
-
-# Parse enode://PUBKEY@HOST:PORT
-PUBKEY=$(echo "$ENODE" | sed 's/enode:\/\/\([^@]*\)@.*/\1/')
-HOST=$(echo "$ENODE" | sed 's/.*@\([^:]*\):.*/\1/')
-PORT=$(echo "$ENODE" | sed 's/.*:\([0-9]*\)$/\1/')
-
-echo "📌 Connecting to:"
-echo "   Host: $HOST"
-echo "   Port: $PORT"
-echo "   Pubkey: ${PUBKEY:0:20}..."
-
-timeout $TIMEOUT ./examples/eth_watch/eth_watch "$HOST" "$PORT" "$PUBKEY" || true
-
-echo ""
-echo "Test complete!"
+cd build/OSX/Debug
+ctest -R eth_watch_example_test --output-on-failure
 ```
 
-Make it executable and run:
-```bash
-chmod +x test_eth_watch.sh
-./test_eth_watch.sh sepolia
-./test_eth_watch.sh mainnet
-```
+Use the manual `eth_watch <host> <port> <peer_pubkey_hex>` command above when
+you specifically need to validate a public peer from an RPC `admin_peers` result.
 
 ## Limitations
 
@@ -233,5 +184,4 @@ curl -s -X POST http://127.0.0.1:8545 \
 - [1RPC Public Endpoint](https://1rpc.io/)
 - [Ankr RPC](https://www.ankr.com/)
 - [Geth Installation](https://geth.ethereum.org/docs/install-and-build/installing-geth)
-
 

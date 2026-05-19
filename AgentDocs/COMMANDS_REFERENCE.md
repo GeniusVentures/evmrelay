@@ -54,6 +54,10 @@ cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGen
 ```bash
 cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/build/OSX/Debug
 
+# Refresh the cache when validating live paths. The current schema must include
+# both nodes and bootnodes arrays.
+curl -L https://enodes.gnus.ai/chain_enodes.json.gz -o chain_enodes.json.gz
+
 # Single chain, canonical cache key
 ./examples/eth_watch/eth_watch --chain ethereum-sepolia --watch-event 'Transfer(address,address,uint256)'
 
@@ -83,19 +87,35 @@ curl -L https://enodes.gnus.ai/chain_enodes.json.gz -o chain_enodes.json.gz
 ctest -R discv4_chain_peers_test --output-on-failure
 ```
 
+### C++ eth_watch example smoke test
+```bash
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay
+cd build/OSX/Debug
+ctest -R eth_watch_example_test --output-on-failure
+
+# Or run the example test binary directly:
+./examples/eth_watch/eth_watch_example_test
+```
+
+This compiled example test replaces the old shell smoke harness. It validates
+cache-backed service startup, GNUS watch-spec construction, multi-chain service
+config, and Gnosis empty-`nodes` discovery fallback.
+
 ## Common Issues
 
 ### "Failed to connect"
-- Bootstrap nodes were used
-- Try using `./test_eth_watch.sh` to get a real peer instead
+- The selected cached peers may be offline or unreachable from the local network.
+- If the log says `Unknown or unconfigured chain`, refresh `chain_enodes.json.gz`;
+  stale caches that lack `bootnodes` are rejected by the current loader.
+- Do not use `bootnodes` as direct RLPx/ETH peers. They are discovery-only seeds.
 
 ### "Connected but no messages"
-- Check if using a bootstrap node with `--chain` flag
-- Use real peer enodes from `./test_eth_watch.sh`
+- Check whether the connected peer is sending useful ETH traffic during the smoke window.
+- Use another cached peer set or direct real peer enodes from a local full node.
 
 ### "HELLO from peer but still no messages"
 - Some peers may not actively broadcast blocks
-- Try different peer with `./test_eth_watch.sh`
+- Try a different peer from a local full node.
 
 ## File Locations
 
@@ -103,7 +123,7 @@ ctest -R discv4_chain_peers_test --output-on-failure
 Project Root: /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/
 
 Key Files:
-- ./examples/test_eth_watch.sh      (Automated test, if present locally)
+- ./examples/eth_watch/eth_watch_example_test.cpp
 - ./AgentDocs/QUICK_TEST_GUIDE.md   (Quick guide)
 - ./AgentDocs/PUBLIC_NODES_FOR_TESTING.md
 - ./AgentDocs/WHY_NO_MESSAGES.md

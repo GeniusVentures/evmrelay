@@ -143,4 +143,3 @@ EventWatchId EthWatchRunner::watch_event(
 }
 
 } // namespace eth
-

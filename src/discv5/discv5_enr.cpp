@@ -22,6 +22,42 @@
 
 namespace discv5
 {
+namespace
+{
+
+bool read_enr_value(rlp::RlpDecoder& decoder, std::vector<uint8_t>& out) noexcept
+{
+    auto header = decoder.PeekHeader();
+    if (!header)
+    {
+        return false;
+    }
+
+    if (!header.value().list)
+    {
+        rlp::Bytes val_bytes;
+        if (!decoder.read(val_bytes))
+        {
+            return false;
+        }
+        out.assign(val_bytes.begin(), val_bytes.end());
+        return true;
+    }
+
+    const rlp::ByteView raw = decoder.Remaining();
+    const size_t total_size = header.value().header_size_bytes + header.value().payload_size_bytes;
+    if (raw.size() < total_size)
+    {
+        return false;
+    }
+
+    out.assign(
+        reinterpret_cast<const uint8_t*>(raw.data()),
+        reinterpret_cast<const uint8_t*>(raw.data()) + total_size);
+    return decoder.SkipItem().has_value();
+}
+
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Base64url decode lookup table
@@ -237,13 +273,12 @@ Result<EnrRecord> EnrParser::decode_rlp(const std::vector<uint8_t>& raw) noexcep
         }
         const std::string key(key_bytes.begin(), key_bytes.end());
 
-        // Value: encoded as RLP string or embedded list.
-        rlp::Bytes val_bytes;
-        if (!decoder.read(val_bytes))
+        // Value: encoded as an RLP string or embedded list.
+        std::vector<uint8_t> val;
+        if (!read_enr_value(decoder, val))
         {
             break;
         }
-        const std::vector<uint8_t> val(val_bytes.begin(), val_bytes.end());
 
         if (key == "id")
         {

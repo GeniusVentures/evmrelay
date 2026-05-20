@@ -8,6 +8,7 @@
 #include <array>
 #include <cctype>
 #include <cstring>
+#include <deque>
 #include <sstream>
 #include <string_view>
 #include <unordered_set>
@@ -25,6 +26,7 @@ inline constexpr std::string_view kRootPrefix = "enrtree-root:v1";
 inline constexpr std::string_view kBranchPrefix = "enrtree-branch:";
 inline constexpr std::string_view kEnrPrefix = "enr:";
 inline constexpr size_t kMaxDnsResponseBytes = 65536U;
+inline constexpr size_t kMaxTreeLookups = 8192U;
 
 std::string trim_copy(std::string_view value)
 {
@@ -231,6 +233,9 @@ std::vector<std::string> EnrTreeResolver::resolve_url(
     size_t            max_records) const noexcept
 {
     std::vector<std::string> out;
+    std::deque<std::string> pending_labels;
+    std::unordered_set<std::string> seen_labels;
+
     const auto root_records = lookup_(url.domain);
     for (const auto& root : root_records)
     {
@@ -243,12 +248,43 @@ std::vector<std::string> EnrTreeResolver::resolve_url(
         {
             continue;
         }
-        resolve_entry(url.domain, label, max_records, out);
-        if (out.size() >= max_records)
+        pending_labels.push_back(label);
+    }
+
+    size_t lookups = 0U;
+    while (!pending_labels.empty() && out.size() < max_records && lookups < kMaxTreeLookups)
+    {
+        std::string label = std::move(pending_labels.front());
+        pending_labels.pop_front();
+        if (!seen_labels.insert(label).second)
         {
-            break;
+            continue;
+        }
+
+        ++lookups;
+        const std::string name = label + "." + url.domain;
+        for (const auto& raw_entry : lookup_(name))
+        {
+            const auto entry = trim_copy(raw_entry);
+            if (append_valid_enr(entry, out))
+            {
+                if (out.size() >= max_records)
+                {
+                    break;
+                }
+                continue;
+            }
+
+            for (const auto& child : split_branch_labels(entry))
+            {
+                if (seen_labels.count(child) == 0U)
+                {
+                    pending_labels.push_back(child);
+                }
+            }
         }
     }
+
     return out;
 }
 

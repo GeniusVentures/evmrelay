@@ -45,6 +45,29 @@ TEST(EnrTreeResolverTest, ResolvesRootBranchAndValidEnrs)
     EXPECT_EQ(enrs.front(), kValidEnr);
 }
 
+TEST(EnrTreeResolverTest, ResolvesBreadthFirstAcrossBranches)
+{
+    const std::unordered_map<std::string, std::vector<std::string>> records = {
+        {"example.org", {"enrtree-root:v1 e=root l=links seq=1 sig=ignored"}},
+        {"root.example.org", {"enrtree-branch:deep,leaf"}},
+        {"deep.example.org", {"enrtree-branch:deeper"}},
+        {"deeper.example.org", {"enrtree-branch:deepest"}},
+        {"deepest.example.org", {"enr:invalid"}},
+        {"leaf.example.org", {kValidEnr}}
+    };
+
+    discv5::EnrTreeResolver resolver(
+        [&records](const std::string& name)
+        {
+            const auto it = records.find(name);
+            return it == records.end() ? std::vector<std::string>{} : it->second;
+        });
+
+    const auto enrs = resolver.resolve({"enrtree://PUBKEY@example.org"}, 1U);
+    ASSERT_EQ(enrs.size(), 1U);
+    EXPECT_EQ(enrs.front(), kValidEnr);
+}
+
 TEST(EnrTreeResolverTest, DefaultEthereumRootsAreConfigured)
 {
     const auto roots = discv5::default_enr_tree_urls_for_chain("ethereum-mainnet", 1U);

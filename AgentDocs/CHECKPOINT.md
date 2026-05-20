@@ -1,5 +1,83 @@
 # Checkpoint Log
 
+## ENR-tree discovery and live peer queue validation - 2026-05-19
+
+### Current state
+
+- Repository: `evmrelay`
+- Branch: `develop`
+- Current local HEAD after completed code commits: `af96e2c Add live ENR tree peer queue test`
+
+### Completed in this step
+
+- `examples/chains.json` was replaced with `examples/chains_config.json`.
+- `examples/chains_config.json` now uses canonical chain keys directly:
+  - `ethereum-mainnet`
+  - `ethereum-sepolia`
+  - `ethereum-holesky`
+  - `ethereum-hoodi`
+  - `polygon-mainnet`
+  - `polygon-amoy`
+- `examples/chain_config.hpp`
+  - Loads fork hashes from generated `chain_enodes.json(.gz)` only.
+  - Loads ENR-tree roots from `chains_config.json`.
+  - Removed the short-name alias helper for cache keys.
+- `include/discv5/enr_tree.hpp` / `src/discv5/enr_tree.cpp`
+  - Add EIP-1459 `enrtree://` parsing and DNS TXT traversal.
+  - Resolve usable ENR bootnodes from Ethereum and Polygon DNS discovery trees.
+  - Traverse production trees breadth-first so broad DNS tries yield usable ENR leaves promptly.
+- `src/discv5/discv5_enr.cpp`
+  - Handles production ENRs with list-valued fields such as `eth`, `snap`, and `wit`.
+- `include/eth/eth_watch_service.hpp` / `src/eth/eth_watch_service.cpp`
+  - Resolve ENR-tree roots into discovery-only ENR bootnodes.
+  - Start discv5 discovery from resolved ENRs.
+  - Feed discv5-discovered peers into the shared `EthPeerQueue`.
+  - Fall back to discv4 bootnodes when ENR-tree resolution produces no usable ENRs and valid bootnodes exist.
+- `test/eth/eth_enr_tree_peer_cache_live_test.cpp`
+  - Adds an opt-in live functional test that starts from an empty `EthPeerQueue`.
+  - Runs ENR-tree/discv5 discovery for five seconds.
+  - Reports and asserts that discovered peers enter the peer queue.
+- Project headers touched in this phase now use include guards instead of `#pragma once`.
+
+### Live functional validation
+
+```bash
+cd evmrelay/build/OSX/Debug
+env EVMRELAY_RUN_LIVE_ENR_TREE_TEST=1 EVMRELAY_LIVE_ENR_TREE_CHAIN=polygon-mainnet EVMRELAY_LIVE_ENR_TREE_SECONDS=5 ./test_bin/eth_enr_tree_peer_cache_live_test
+env EVMRELAY_RUN_LIVE_ENR_TREE_TEST=1 EVMRELAY_LIVE_ENR_TREE_CHAIN=ethereum-mainnet EVMRELAY_LIVE_ENR_TREE_SECONDS=5 ./test_bin/eth_enr_tree_peer_cache_live_test
+```
+
+Observed results on 2026-05-19:
+
+- `polygon-mainnet`: 493 peers accepted into an empty `EthPeerQueue` over 5 seconds.
+- `ethereum-mainnet`: 862 peers accepted into an empty `EthPeerQueue` over 5 seconds.
+
+### Verification
+
+```bash
+cd evmrelay/build/OSX/Debug
+ninja
+ctest -R 'discv5_enr_test|discv5_enr_tree_test|discv5_bootnodes_test|eth_enr_tree_peer_cache_live_test|eth_watch_service_test|eth_watch_example_test|eth_watch_cli_test|eth_watch_runner_test|discv4_chain_peers_test|discv4_dial_scheduler_test' --output-on-failure
+git diff --check
+```
+
+Result:
+
+```text
+100% tests passed, 0 tests failed out of 10
+```
+
+### Still intentionally not done
+
+- Direct host/port/pubkey and `--direct-enode` remain example-local.
+- No bridge consensus/finality logic was added.
+- gzip/JSON loading behavior was not changed.
+- `rlp_enodes` remains reference-only unless explicitly requested.
+
+### Next implementation step
+
+Decide whether direct host/port/pubkey and `--direct-enode` should remain example-local permanently or become a production direct-session API. Remaining ENR-tree work is documentation and operational hardening rather than core discovery wiring.
+
 ## EVM relay discovery/dialer lifecycle coverage - 2026-05-19
 
 ### Current state

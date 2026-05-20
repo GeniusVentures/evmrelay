@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_DISCOVERY_DISCOVERED_PEER_HPP
+#define EVMRELAY_INCLUDE_DISCOVERY_DISCOVERED_PEER_HPP
 
 #include <array>
 #include <chrono>
@@ -47,3 +48,5 @@ struct ValidatedPeer
 };
 
 } // namespace discovery
+
+#endif // EVMRELAY_INCLUDE_DISCOVERY_DISCOVERED_PEER_HPP

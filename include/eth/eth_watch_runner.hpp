@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_ETH_ETH_WATCH_RUNNER_HPP
+#define EVMRELAY_INCLUDE_ETH_ETH_WATCH_RUNNER_HPP
 
 #include <eth/eth_peer_session.hpp>
 #include <eth/eth_session_channel.hpp>
@@ -71,3 +72,5 @@ private:
 };
 
 } // namespace eth
+
+#endif // EVMRELAY_INCLUDE_ETH_ETH_WATCH_RUNNER_HPP

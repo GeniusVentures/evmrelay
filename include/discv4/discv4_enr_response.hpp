@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_DISCV4_DISCV4_ENR_RESPONSE_HPP
+#define EVMRELAY_INCLUDE_DISCV4_DISCV4_ENR_RESPONSE_HPP
 
 #include <array>
 #include <cstdint>
@@ -75,3 +76,5 @@ struct discv4_enr_response
 
 } // namespace discv4
 
+
+#endif // EVMRELAY_INCLUDE_DISCV4_DISCV4_ENR_RESPONSE_HPP

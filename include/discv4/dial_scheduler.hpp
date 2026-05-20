@@ -1,6 +1,7 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
-#pragma once
+#ifndef EVMRELAY_INCLUDE_DISCV4_DIAL_SCHEDULER_HPP
+#define EVMRELAY_INCLUDE_DISCV4_DIAL_SCHEDULER_HPP
 
 #include <atomic>
 #include <deque>
@@ -247,3 +248,5 @@ private:
 }
 
 } // namespace discv4
+
+#endif // EVMRELAY_INCLUDE_DISCV4_DIAL_SCHEDULER_HPP

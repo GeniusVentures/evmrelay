@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_ETH_ETH_HANDSHAKE_HPP
+#define EVMRELAY_INCLUDE_ETH_ETH_HANDSHAKE_HPP
 
 #include <eth/eth_peer_session.hpp>
 #include <boost/asio/spawn.hpp>
@@ -20,3 +21,5 @@ PerformEthStatusHandshake(
 
 } // namespace eth
 
+
+#endif // EVMRELAY_INCLUDE_ETH_ETH_HANDSHAKE_HPP

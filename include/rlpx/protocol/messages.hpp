@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_RLPX_PROTOCOL_MESSAGES_HPP
+#define EVMRELAY_INCLUDE_RLPX_PROTOCOL_MESSAGES_HPP
 
 #include "../rlpx_types.hpp"
 #include "../rlpx_error.hpp"
@@ -76,3 +77,5 @@ struct Message {
 };
 
 } // namespace rlpx::protocol
+
+#endif // EVMRELAY_INCLUDE_RLPX_PROTOCOL_MESSAGES_HPP

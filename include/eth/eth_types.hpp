@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_ETH_ETH_TYPES_HPP
+#define EVMRELAY_INCLUDE_ETH_ETH_TYPES_HPP
 
 #include <array>
 #include <cstdint>
@@ -152,3 +153,5 @@ struct NewBlockMessage {
 
 } // namespace eth
 
+
+#endif // EVMRELAY_INCLUDE_ETH_ETH_TYPES_HPP

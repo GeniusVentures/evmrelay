@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_ETH_EVENT_FILTER_HPP
+#define EVMRELAY_INCLUDE_ETH_EVENT_FILTER_HPP
 
 #include <eth/objects.hpp>
 #include <functional>
@@ -129,3 +130,5 @@ private:
 };
 
 } // namespace eth
+
+#endif // EVMRELAY_INCLUDE_ETH_EVENT_FILTER_HPP

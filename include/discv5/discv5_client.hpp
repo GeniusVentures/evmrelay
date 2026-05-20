@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_DISCV5_DISCV5_CLIENT_HPP
+#define EVMRELAY_INCLUDE_DISCV5_DISCV5_CLIENT_HPP
 
 #include <array>
 #include <atomic>
@@ -286,3 +287,5 @@ private:
 };
 
 } // namespace discv5
+
+#endif // EVMRELAY_INCLUDE_DISCV5_DISCV5_CLIENT_HPP

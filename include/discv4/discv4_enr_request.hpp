@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_DISCV4_DISCV4_ENR_REQUEST_HPP
+#define EVMRELAY_INCLUDE_DISCV4_DISCV4_ENR_REQUEST_HPP
 
 #include <cstdint>
 #include <vector>
@@ -34,3 +35,5 @@ struct discv4_enr_request
 
 } // namespace discv4
 
+
+#endif // EVMRELAY_INCLUDE_DISCV4_DISCV4_ENR_REQUEST_HPP

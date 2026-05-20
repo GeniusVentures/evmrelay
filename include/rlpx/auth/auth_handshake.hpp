@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_RLPX_AUTH_AUTH_HANDSHAKE_HPP
+#define EVMRELAY_INCLUDE_RLPX_AUTH_AUTH_HANDSHAKE_HPP
 
 #include "../rlpx_types.hpp"
 #include "../rlpx_error.hpp"
@@ -101,3 +102,5 @@ private:
 derive_frame_secrets(const AuthKeyMaterial& keys, bool is_initiator) noexcept;
 
 } // namespace rlpx::auth
+
+#endif // EVMRELAY_INCLUDE_RLPX_AUTH_AUTH_HANDSHAKE_HPP

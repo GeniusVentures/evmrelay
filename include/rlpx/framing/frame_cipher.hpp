@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_RLPX_FRAMING_FRAME_CIPHER_HPP
+#define EVMRELAY_INCLUDE_RLPX_FRAMING_FRAME_CIPHER_HPP
 
 #include "../rlpx_types.hpp"
 #include "../rlpx_error.hpp"
@@ -82,3 +83,5 @@ private:
 };
 
 } // namespace rlpx::framing
+
+#endif // EVMRELAY_INCLUDE_RLPX_FRAMING_FRAME_CIPHER_HPP

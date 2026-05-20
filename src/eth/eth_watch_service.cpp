@@ -6,6 +6,7 @@
 #include <eth/eth_watch_dialer.hpp>
 #include <eth/eth_watch_runner.hpp>
 #include <eth/messages.hpp>
+#include <discv5/enr_tree.hpp>
 #include <rlpx/crypto/ecdh.hpp>
 #include <rlpx/rlpx_session.hpp>
 
@@ -19,20 +20,25 @@ namespace
 bool chain_config_matches_discovery_mode(
     const discv4::ChainPeerConfig& chain,
     EthWatchDiscoveryMode          mode,
-    bool                           enable_discv4_fallback) noexcept
+    bool                           enable_discv4_fallback,
+    bool                           enable_enr_tree_discovery) noexcept
 {
     const bool has_cached_nodes = !chain.nodes.empty();
     const bool has_bootnodes = !chain.bootnodes.empty();
+    const bool has_enr_tree = enable_enr_tree_discovery
+        && (!chain.enr_trees.empty()
+            || !discv5::default_enr_tree_urls_for_chain(chain.canonical_name, chain.network_id).empty());
+    const bool has_discovery_source = has_enr_tree || (enable_discv4_fallback && has_bootnodes);
 
     switch (mode)
     {
     case EthWatchDiscoveryMode::kCacheOnly:
         return has_cached_nodes;
     case EthWatchDiscoveryMode::kDiscoverFirst:
-        return enable_discv4_fallback && has_bootnodes;
+        return has_discovery_source;
     case EthWatchDiscoveryMode::kDiscoverIfNeeded:
     case EthWatchDiscoveryMode::kHybrid:
-        return has_cached_nodes || (enable_discv4_fallback && has_bootnodes);
+        return has_cached_nodes || has_discovery_source;
     }
 
     return false;
@@ -59,6 +65,41 @@ bool should_start_discv4_discovery(
         return false;
     case EthWatchDiscoveryMode::kDiscoverIfNeeded:
         return queue.needs_discovery();
+    case EthWatchDiscoveryMode::kDiscoverFirst:
+    case EthWatchDiscoveryMode::kHybrid:
+        return true;
+    }
+
+    return false;
+}
+
+std::vector<std::string> configured_enr_tree_urls(
+    const discv4::ChainPeerConfig& chain) noexcept
+{
+    if (!chain.enr_trees.empty())
+    {
+        return chain.enr_trees;
+    }
+    return discv5::default_enr_tree_urls_for_chain(chain.canonical_name, chain.network_id);
+}
+
+bool should_start_enr_tree_discovery(
+    const EthPeerQueue&            queue,
+    const discv4::ChainPeerConfig& chain,
+    EthWatchDiscoveryMode          mode,
+    bool                           enable_enr_tree_discovery) noexcept
+{
+    if (!enable_enr_tree_discovery || configured_enr_tree_urls(chain).empty())
+    {
+        return false;
+    }
+
+    switch (mode)
+    {
+    case EthWatchDiscoveryMode::kCacheOnly:
+        return false;
+    case EthWatchDiscoveryMode::kDiscoverIfNeeded:
+        return queue.cached_peer_count() == 0U;
     case EthWatchDiscoveryMode::kDiscoverFirst:
     case EthWatchDiscoveryMode::kHybrid:
         return true;
@@ -138,7 +179,8 @@ bool EthWatchService::initialize(
         if (!chain_config_matches_discovery_mode(
                 chain,
                 config.discovery_mode,
-                config.enable_discv4_fallback))
+                config.enable_discv4_fallback,
+                config.enable_enr_tree_discovery))
         {
             return false;
         }
@@ -188,6 +230,17 @@ void EthWatchService::run(boost::asio::io_context& io) noexcept
             should_preload_cached_peers(orchestration_config_.discovery_mode));
 
         if (runtime.peer_queue
+            && should_start_enr_tree_discovery(
+                *runtime.peer_queue,
+                runtime.config,
+                orchestration_config_.discovery_mode,
+                orchestration_config_.enable_enr_tree_discovery))
+        {
+            runtime.discv5_enr_tree_started = start_enr_tree_discovery(io, runtime);
+        }
+
+        if (runtime.peer_queue
+            && !runtime.discv5_enr_tree_started
             && should_start_discv4_discovery(
                 *runtime.peer_queue,
                 orchestration_config_.discovery_mode,
@@ -213,6 +266,10 @@ void EthWatchService::stop() noexcept
         if (runtime.discovery_client)
         {
             runtime.discovery_client->stop();
+        }
+        if (runtime.discv5_client)
+        {
+            runtime.discv5_client->stop();
         }
     }
     active_runners_.clear();
@@ -343,6 +400,94 @@ discv4::DialFn EthWatchService::make_default_dial_fn(
         runner->install_session_bridge();
         active_runners_.push_back(std::move(runner));
     };
+}
+
+bool EthWatchService::start_enr_tree_discovery(
+    boost::asio::io_context& io,
+    RuntimeChain&            runtime) noexcept
+{
+    const auto urls = configured_enr_tree_urls(runtime.config);
+    if (urls.empty())
+    {
+        return false;
+    }
+
+    std::vector<std::string> bootstrap_enrs;
+    if (orchestration_config_.enr_tree_resolver)
+    {
+        bootstrap_enrs = orchestration_config_.enr_tree_resolver(runtime.config, urls);
+    }
+    else
+    {
+        bootstrap_enrs = discv5::EnrTreeResolver{}.resolve(urls);
+    }
+
+    if (bootstrap_enrs.empty())
+    {
+        return false;
+    }
+
+    if (orchestration_config_.discv5_enr_tree_starter)
+    {
+        return orchestration_config_.discv5_enr_tree_starter(
+            io,
+            runtime.config,
+            runtime.peer_queue,
+            bootstrap_enrs);
+    }
+
+    discv5::discv5Config discovery_config = orchestration_config_.discv5_discovery;
+    discovery_config.bootstrap_enrs = bootstrap_enrs;
+    if (runtime.config.fork_id.has_value())
+    {
+        discv5::ForkId fork_id{};
+        fork_id.hash = runtime.config.fork_id->fork_hash;
+        fork_id.next = runtime.config.fork_id->next_fork;
+        discovery_config.required_fork_id = fork_id;
+    }
+
+    auto keypair_result = rlpx::crypto::Ecdh::generate_ephemeral_keypair();
+    if (keypair_result)
+    {
+        discovery_config.private_key = keypair_result.value().private_key;
+        discovery_config.public_key = keypair_result.value().public_key;
+    }
+
+    try
+    {
+        runtime.discv5_client = orchestration_config_.discv5_client_factory
+            ? orchestration_config_.discv5_client_factory(io, discovery_config)
+            : std::make_shared<discv5::discv5_client>(io, discovery_config);
+    }
+    catch (...)
+    {
+        runtime.discv5_client.reset();
+        return false;
+    }
+
+    if (!runtime.discv5_client)
+    {
+        return false;
+    }
+
+    auto queue = runtime.peer_queue;
+    runtime.discv5_client->set_peer_discovered_callback(
+        [queue](const discovery::ValidatedPeer& peer)
+        {
+            if (queue)
+            {
+                (void)queue->enqueue_validated_discovery_peer(peer);
+            }
+        });
+
+    const auto start_result = runtime.discv5_client->start();
+    if (!start_result)
+    {
+        runtime.discv5_client.reset();
+        return false;
+    }
+
+    return true;
 }
 
 void EthWatchService::start_discv4_fallback(

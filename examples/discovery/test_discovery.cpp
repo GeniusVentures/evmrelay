@@ -56,7 +56,7 @@
 
 static constexpr uint64_t kMainnetNetworkId = 1;
 static constexpr uint8_t  kEthOffset        = 0x10;
-static constexpr const char* kForkHashChainKey = "mainnet";
+static constexpr const char* kForkHashChainKey = "ethereum-mainnet";
 static constexpr const char* kChainPeerCacheChainKey = "ethereum-mainnet";
 static constexpr const char* kChainPeersUrlDefault = "https://enodes.gnus.ai/chain_enodes.json.gz";
 
@@ -102,9 +102,9 @@ static eth::Hash256 hash256_from_hex(const char* hex)
 static std::vector<ChainTarget> all_chain_targets()
 {
     return {
-        { "mainnet", "ethereum-mainnet", 1, "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3", &ETHEREUM_MAINNET_BOOTNODES, std::array<uint8_t, 4U>{ 0x07, 0xc9, 0x46, 0x2e } },
-        { "sepolia", "ethereum-sepolia", 11155111, "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9", &ETHEREUM_SEPOLIA_BOOTNODES, std::array<uint8_t, 4U>{ 0x26, 0x89, 0x56, 0xb6 } },
-        { "holesky", "ethereum-holesky", 17000, "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4", &ETHEREUM_HOLESKY_BOOTNODES, std::array<uint8_t, 4U>{ 0x9b, 0xc6, 0xcb, 0x31 } }
+        { "ethereum-mainnet", "ethereum-mainnet", 1, "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3", &ETHEREUM_MAINNET_BOOTNODES, std::array<uint8_t, 4U>{ 0x07, 0xc9, 0x46, 0x2e } },
+        { "ethereum-sepolia", "ethereum-sepolia", 11155111, "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9", &ETHEREUM_SEPOLIA_BOOTNODES, std::array<uint8_t, 4U>{ 0x26, 0x89, 0x56, 0xb6 } },
+        { "ethereum-holesky", "ethereum-holesky", 17000, "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4", &ETHEREUM_HOLESKY_BOOTNODES, std::array<uint8_t, 4U>{ 0x9b, 0xc6, 0xcb, 0x31 } }
     };
 }
 
@@ -113,8 +113,8 @@ static eth::Hash256 mainnet_genesis()
     return hash256_from_hex("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");
 }
 
-// Ethereum mainnet fallback hash — used only when chains.json is not found.
-// Update chains.json instead of this constant when the fork advances.
+// Ethereum mainnet fallback hash — used only when chain_enodes.json(.gz) is not found.
+// Update chain_enodes.json instead of this constant when the fork advances.
 static const std::array<uint8_t, 4U> kMainnetForkHashFallback{ 0x07, 0xc9, 0x46, 0x2e };
 
 // ── Dial-attempt statistics ───────────────────────────────────────────────────
@@ -629,11 +629,11 @@ int main(int argc, char** argv)
         }
     }
 
-    // ── Fork hash — loaded from chains.json, fallback to compiled-in value ──────
+    // ── Fork hash — loaded from chain_enodes.json(.gz), fallback to compiled-in value ──────
     const auto loaded_hash = load_fork_hash(kForkHashChainKey, argv[0]);
     if ( !loaded_hash )
     {
-        std::cout << "[  WARN    ] chains.json not found or missing 'mainnet' key — "
+        std::cout << "[  WARN    ] chain_enodes.json(.gz) not found or missing 'ethereum-mainnet' forkId — "
                      "using compiled-in fallback hash.\n";
     }
     const eth::ForkId mainnet_fork_id{

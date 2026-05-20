@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_ETH_MESSAGES_HPP
+#define EVMRELAY_INCLUDE_ETH_MESSAGES_HPP
 
 #include "eth_types.hpp"
 #include <rlp/rlp_encoder.hpp>
@@ -108,3 +109,5 @@ using ValidationResult = rlp::outcome::result<void, eth::StatusValidationError,
 [[nodiscard]] DecodeResult<PooledTransactionsMessage> decode_pooled_transactions(rlp::ByteView rlp_data) noexcept;
 
 } // namespace eth::protocol
+
+#endif // EVMRELAY_INCLUDE_ETH_MESSAGES_HPP

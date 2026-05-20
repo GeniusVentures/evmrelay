@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_DISCV4_DISCV4_CLIENT_HPP
+#define EVMRELAY_INCLUDE_DISCV4_DISCV4_CLIENT_HPP
 
 #include <boost/asio.hpp>
 #include <boost/asio/spawn.hpp>
@@ -217,3 +218,5 @@ private:
 
 } // namespace discv4
 
+
+#endif // EVMRELAY_INCLUDE_DISCV4_DISCV4_CLIENT_HPP

@@ -4,14 +4,10 @@
 
 Branch at handoff: `develop`
 
-HEAD at handoff: `c819a0f Normalize eth watch runner file endings`
+HEAD at handoff: `af96e2c Add live ENR tree peer queue test`
 
-Current tracked working tree has local, uncommitted peer queue refactor changes:
+Current tracked working tree has local documentation updates:
 
-- `include/discv4/dial_scheduler.hpp`
-- `include/eth/eth_peer_queue.hpp`
-- `src/eth/eth_peer_queue.cpp`
-- `test/eth/eth_watch_runner_test.cpp`
 - `AgentDocs/CHECKPOINT.md`
 - `AgentDocs/EVMRELAY_COMPLETION_PLAN.md`
 
@@ -28,7 +24,7 @@ Do not touch these unrelated local untracked artifacts unless explicitly request
 
 Non-negotiable handoff constraints:
 
-- Do not modify `rlp_enodes`; it is complete/reference-only for this phase.
+- Do not modify `rlp_enodes` except when explicitly requested; it is otherwise reference-only for this phase.
 - Do not change gzip or JSON loading behavior. The hosted filename may be `chain_enodes.json.gz`, but the client receives JSON, so the `.gz` suffix should not drive loader refactors.
 - Do not refactor `examples/eth_watch` yet. It remains a functional test / CLI wrapper until production `EthWatchService` orchestration exists.
 - Do not add bridge consensus/finality logic here. Relay responsibility is chain/message filtering, decoding, and callback dispatch. Bridge finality and UTXO messaging are handled outside this path through RPC verification.
@@ -39,15 +35,17 @@ Build/test commands verified for the current local changes:
 cd evmrelay/build/OSX/Debug
 ninja
 ctest -R 'eth_watch_runner_test|discv4_chain_peers_test|discv4_dial_scheduler_test' --output-on-failure
+ctest -R 'discv5_enr_test|discv5_enr_tree_test|discv5_bootnodes_test|eth_enr_tree_peer_cache_live_test|eth_watch_service_test|eth_watch_example_test|eth_watch_cli_test|eth_watch_runner_test|discv4_chain_peers_test|discv4_dial_scheduler_test' --output-on-failure
+git diff --check
 ```
 
 Verified result:
 
 ```text
-100% tests passed, 0 tests failed out of 3
+100% tests passed, 0 tests failed out of 10
 ```
 
-Current uncommitted implementation state:
+Current implementation state:
 
 - `EthPeerQueue` is the shared queue for cached peers, discovery-produced peers, and eligible reconnect feedback.
 - `DialScheduler` has a feedback hook for dial/session exits.
@@ -63,10 +61,22 @@ Current uncommitted implementation state:
 - Direct host/port/pubkey and `--direct-enode` manual modes remain on the example-local direct helper path.
 - `examples/eth_watch/eth_watch_example_test.cpp` is the compiled C++ replacement for the old shell smoke harnesses.
 - The tracked `examples/test_eth_watch.sh` and `examples/test_eth_watch_smoke.sh` shell test harnesses have been removed.
+- ENR-tree / EIP-1459 discovery is implemented for configured Ethereum and Polygon chains.
+- `examples/chains.json` was replaced with `examples/chains_config.json`, using canonical keys such as `ethereum-mainnet`, `ethereum-sepolia`, `polygon-mainnet`, and `polygon-amoy`.
+- `examples/chain_config.hpp` loads fork hashes from generated `chain_enodes.json(.gz)` only, and loads ENR-tree roots from `chains_config.json`.
+- `discv5::EnrTreeResolver` resolves `enrtree://` DNS discovery roots into ENR bootnodes and traverses production trees breadth-first.
+- The ENR parser handles production ENRs with list-valued fields such as `eth`, `snap`, and `wit`.
+- `EthWatchService` resolves configured/default ENR trees, keeps resolved ENRs discovery-only, starts discv5 discovery from them, and feeds discovered peers into the shared `EthPeerQueue`.
+- If ENR-tree resolution produces no usable ENRs, `EthWatchService` falls back to discv4 bootnodes when valid bootnodes exist.
+- `test/eth/eth_enr_tree_peer_cache_live_test.cpp` is an opt-in live functional test that starts with an empty `EthPeerQueue`, runs ENR-tree/discv5 discovery for five seconds, and reports accepted peers.
+- Live validation on 2026-05-19:
+  - `polygon-mainnet`: 493 peers accepted into an empty queue over 5 seconds.
+  - `ethereum-mainnet`: 862 peers accepted into an empty queue over 5 seconds.
+- Project headers under the touched project paths now use include guards instead of `#pragma once`.
 
 Immediate next step:
 
-Decide whether the direct host/port/pubkey and `--direct-enode` helper should stay example-local permanently or move behind a small production direct-session API. If it stays example-local, continue with the remaining production cleanup after explicit peer selection: later ENR-tree discovery support and deeper discovery/dialer lifecycle tests.
+Decide whether the direct host/port/pubkey and `--direct-enode` helper should stay example-local permanently or move behind a small production direct-session API. Remaining ENR-tree work is operational hardening: wider live coverage, documentation, and explicit operator override controls.
 
 Suggested tests for the next session:
 
@@ -91,7 +101,7 @@ The downloaded `chain_enodes.json.gz` file is a pre-cache for both connection an
 - use `bootnodes` as the first discovery seed set when discovery is needed;
 - when a chain has no usable pre-cached `nodes` set, such as Gnosis Chain in the current workflow, start discv4 discovery from `bootnodes` and promote discovered peers into the dial queue after validation.
 
-EIP-1459 / ENR tree support is a later discovery-source enhancement for chains that publish DNS discovery trees. Based on current chain support assumptions, Ethereum-family chains and Polygon-family chains should eventually default to EIP-1459 ENR-tree discovery, while other chains should default to discv4 discovery unless their chain config explicitly provides a usable `enrtree://` source. ENR-tree support should extend the discovery seed acquisition path without replacing the `chain_enodes.json.gz` pre-cache behavior.
+EIP-1459 / ENR tree support is implemented for chains that publish DNS discovery trees. Based on current chain support assumptions, configured Ethereum-family chains and Polygon-family chains default to EIP-1459 ENR-tree discovery, while other chains default to discv4 discovery unless their chain config explicitly provides a usable `enrtree://` source. ENR-tree support extends the discovery seed acquisition path without replacing the `chain_enodes.json.gz` pre-cache behavior.
 
 The schema file in this checkout is `evmrelay/rlp_enodes/chain_enodes_schema.json`.
 
@@ -104,7 +114,7 @@ Keep the implementation modular and keep source roles separate:
 - `discv4::bootstrap_peers`: loads discovery seed data from `bootnodes`.
 - Chain pre-cache: `chain_enodes.json.gz` is loaded before live discovery and supplies both pre-cached peer candidates (`nodes`) and discovery seeds (`bootnodes`).
 - Discovery fallback: chains without usable pre-cached `nodes` use discv4 discovery from `bootnodes` and feed discovered peers into the dial queue.
-- ENR tree / EIP-1459 support: later enhancement that resolves `enrtree://` sources into ENR bootnodes and feeds them only into discovery seed paths. It becomes the default discovery source for Ethereum and Polygon chains that publish DNS discovery trees; all other chains remain discv4-first by default.
+- ENR tree / EIP-1459 support: resolves `enrtree://` sources into ENR bootnodes and feeds them only into discovery seed paths. It is the default discovery source for configured Ethereum and Polygon chains that publish DNS discovery trees; all other chains remain discv4-first by default.
 - Discovery-to-dialer handoff: discovery producers emit validated peer candidates into a bounded peer queue; dialers consume from that queue independently under per-chain/global connection limits.
 - `eth::EthWatchService` / relay runner: production owner for chain metadata intake, discovery-to-dialer queue orchestration, RLPx/ETH session setup, event watching, and decoded message/event callbacks.
 - `examples/eth_watch/eth_watch.cpp`: thin CLI/example wrapper only; it should parse arguments, build configs, call production eth-watch APIs, and avoid owning scheduler/discovery orchestration.
@@ -117,7 +127,7 @@ Keep the implementation modular and keep source roles separate:
 - `chain_enodes.json.gz` is a pre-cache, not a hard requirement that every chain has pre-cached `nodes`.
 - Missing or empty `nodes` is not fatal when `bootnodes` can seed discovery. Gnosis Chain is the expected example: use discv4 discovery and enqueue validated discovered peers.
 - `enrtree://` entries and EIP-1459 DNS-discovery records are later-stage discovery sources, not direct ETH session peers.
-- Discovery defaults are chain-specific: Ethereum and Polygon chains should prefer EIP-1459 once implemented and configured; non-Ethereum/Polygon chains should prefer discv4 unless explicit ENR-tree support is present and validated.
+- Discovery defaults are chain-specific: Ethereum and Polygon chains prefer EIP-1459 when configured; non-Ethereum/Polygon chains prefer discv4 unless explicit ENR-tree support is present and validated.
 - Direct ETH session code must not fall back to `bootnodes` when `nodes` is empty unless the mode is explicitly "discover first".
 - Discovery and RLPx/ETH connections must remain decoupled. Discovery should keep running and enqueue peers as they are found; the dialer should pull/drain from that queue as connection slots become available.
 - Discovery callbacks must not perform blocking RLPx work directly. They may validate, deduplicate, filter, and enqueue.
@@ -133,7 +143,7 @@ Keep the implementation modular and keep source roles separate:
 - Update `rlp_enodes/README.md` examples so every chain output includes both `nodes` and `bootnodes`.
 - Add generator tests that assert combined and per-chain output contain separate `nodes` and `bootnodes` arrays.
 - Add generator tests that allow chains to have empty or missing usable pre-cached `nodes` as long as they have valid `bootnodes` for discovery fallback.
-- Defer generator support/tests for `bootnodes_enrtree` sources until after the pre-cache/discv4 fallback path is working. When added, EIP-1459 trees must resolve into the `bootnodes` array without polluting `nodes`.
+- Generator support/tests for `bootnodes_enrtree` sources should keep EIP-1459 trees resolving into the `bootnodes` array without polluting `nodes`.
 - Record source metadata for bootnodes where practical so operators can trace whether a bootnode came from static config, Go/YAML source, or later EIP-1459 DNS discovery.
 - Add negative tests for missing `nodes`, missing `bootnodes`, malformed `enr`, malformed `pubkey`, invalid `score`, invalid `ip`, and invalid `port`.
 - Keep signature generation over the final combined document with `signature` and `signerAddress` excluded from the signed payload.
@@ -143,7 +153,7 @@ Keep the implementation modular and keep source roles separate:
 - ~~Extend `ChainPeerConfig` or add a sibling structure so chain peer candidates and bootnode candidates are represented separately.~~
 - ~~Keep `load_chain_peers_from_json_text(...)` parsing only `nodes`.~~
 - ~~Update `bootstrap_peers` so `load_bootstrap_peers_from_json_text(...)` and `load_bootstrap_peers_from_json(...)` parse only `bootnodes`, not `nodes`.~~
-- Add parsing/validation tests for ENR entries originating from EIP-1459 trees, including invalid ENR records and trees that resolve to zero usable bootnodes.
+- ~~Add parsing/validation tests for ENR entries originating from EIP-1459 trees, including invalid ENR records and trees that resolve to zero usable bootnodes.~~
 - Add tests proving:
   - ~~chain peer loading ignores `bootnodes`;~~
   - ~~bootstrap loading ignores `nodes`;~~
@@ -157,14 +167,14 @@ Keep the implementation modular and keep source roles separate:
 - ~~For each chain, enqueue pre-cached `nodes` into the dial queue when present.~~
 - ~~For chains with no usable pre-cached `nodes`, start discv4 discovery from pre-cached `bootnodes`, validate discovered peers, and enqueue them into the same dial queue.~~
 - ~~Allow discovery to continue in parallel even when pre-cached `nodes` exist, but keep the behavior explicit so operators can choose cache-only, discover-first, or hybrid mode.~~
-- Add an explicit ENR-tree discovery source path for EIP-1459 after the discv4 fallback path is complete:
-  - resolve `enrtree://` / DNS discovery records into ENR bootnodes;
-  - seed discv4/discv5 discovery from the resolved bootnodes;
-  - validate discovered peers before promoting them into RLPx/ETH candidates.
-- Add chain discovery strategy selection:
-  - Ethereum mainnet/testnets and Polygon mainnet/testnets default to EIP-1459 ENR-tree discovery once sources are configured;
-  - all other chains default to discv4 from `bootnodes`;
-  - explicit operator config may override the default, but invalid or missing ENR-tree data must fall back to discv4 when valid `bootnodes` exist.
+- ~~Add an explicit ENR-tree discovery source path for EIP-1459 after the discv4 fallback path is complete:~~
+  - ~~resolve `enrtree://` / DNS discovery records into ENR bootnodes;~~
+  - ~~seed discv5 discovery from the resolved bootnodes;~~
+  - ~~validate discovered peers before promoting them into RLPx/ETH candidates.~~
+- ~~Add chain discovery strategy selection:~~
+  - ~~Ethereum mainnet/testnets and Polygon mainnet/testnets default to EIP-1459 ENR-tree discovery once sources are configured;~~
+  - ~~all other chains default to discv4 from `bootnodes`;~~
+  - ~~invalid or missing ENR-tree data falls back to discv4 when valid `bootnodes` exist.~~
 - ~~Preserve the producer/consumer split that is partially present today:~~
   - ~~`discv4_client::set_peer_discovered_callback(...)` and `discv5_client::set_peer_discovered_callback(...)` are discovery producer hooks;~~
   - ~~`DialScheduler::enqueue(...)` is the dialer handoff point;~~
@@ -192,7 +202,7 @@ Remaining work:
 - ~~Move the example-only callback-to-scheduler wiring into reusable `EthWatchService` production orchestration under `include/eth` and `src/eth`.~~
 - ~~Remove scheduler ownership and discovery lifecycle ownership from `examples/eth_watch/eth_watch.cpp` once the production API exists.~~
 - ~~Ensure cached `nodes` and discv4 discovery feed the same dial queue abstraction.~~
-- Ensure discv5 discovery and EIP-1459-derived seeds feed the same dial queue abstraction.
+- ~~Ensure discv5 discovery and EIP-1459-derived seeds feed the same dial queue abstraction.~~
 - ~~Ensure the pre-cache path and discovery fallback path feed the same queue abstraction: `nodes` enqueue immediately, `bootnodes` only seed discovery, discovered peers enqueue after validation.~~
 - ~~Wire dial/session disconnect feedback into the peer queue so eligible peers are requeued and flaky peers stop cycling.~~
 - ~~Keep discovery loops alive while the dial queue drains; do not structure discovery as a blocking pre-scan before dialing.~~
@@ -206,7 +216,7 @@ Remaining work:
 - ~~`chain_enodes.json.gz` is used as the startup pre-cache for both peer dialing (`nodes`) and discovery seeding (`bootnodes`).~~
 - ~~Chains without pre-cached `nodes`, including Gnosis Chain, can still start from `bootnodes`, run discv4 discovery, and enqueue validated discovered peers.~~
 - ~~Optional discover-first/hybrid mode uses `bootnodes` only for discovery.~~
-- Optional ENR-tree mode supports EIP-1459 DNS discovery later, keeps resolved ENRs in the discovery-only path, and becomes the preferred default for Ethereum and Polygon chains once implemented.
+- ~~Optional ENR-tree mode supports EIP-1459 DNS discovery, keeps resolved ENRs in the discovery-only path, and becomes the preferred default for configured Ethereum and Polygon chains.~~
 - ~~Discovery and connection dialing are decoupled: discovery producers enqueue peers continuously, and dialers consume queued peers according to connection limits.~~
 - ~~Core discovery/dial/session orchestration lives in `src/eth` production code, not in `examples/eth_watch/eth_watch.cpp`.~~
 - ~~The relay can watch configured chain/message filters, decode matching logs/messages, and invoke callbacks. Bridge-message finality verification and UTXO-system messaging are handled outside this relay path through RPC-based verification.~~
@@ -223,7 +233,7 @@ Remaining work:
 - Update command examples to use `--chain-peers-json` for peer cache input and a separate explicit option for discovery seed input if/when that option exists.
 - Document `chain_enodes.json.gz` as the pre-cache for startup peer candidates and discovery seeds.
 - Document the Gnosis/no-pre-cached-nodes path: load chain metadata and bootnodes, run discv4 discovery, then enqueue discovered peers.
-- Document EIP-1459 / ENR tree usage separately as a later enhancement, including example `enrtree://` source configuration, the expected discover-first flow, and the default strategy split: Ethereum/Polygon prefer EIP-1459, other chains prefer discv4.
+- Document EIP-1459 / ENR tree usage separately, including example `enrtree://` source configuration, the expected discover-first flow, and the default strategy split: Ethereum/Polygon prefer EIP-1459, other chains prefer discv4.
 - Document the discovery-to-dialer pipeline: discovery seeds produce discovered peer candidates, peer candidates enter a bounded dial queue, and RLPx/ETH sessions consume from that queue.
 - Document `examples/eth_watch/eth_watch.cpp` as an example CLI over the production `EthWatchService` APIs, not as the implementation home for relay behavior.
 
@@ -238,6 +248,6 @@ Remaining work:
 7. ~~Move reusable scheduler/discovery orchestration out of `examples/eth_watch/eth_watch.cpp` and into `EthWatchService` production code.~~
 8. ~~Add chain config support for both arrays without changing direct peer behavior.~~
 9. ~~Update `eth_watch` peer selection so direct mode, cache-first mode, bootnode discovery fallback, and hybrid mode are explicit through production service APIs. Cache-first and bootnode fallback now use production service APIs; direct mode remains an example-local manual helper.~~
-10. Add EIP-1459 / ENR tree source support and tests for discovery seed generation for chains that support it, with Ethereum/Polygon defaulting to ENR-tree discovery and other chains defaulting to discv4.
+10. ~~Add EIP-1459 / ENR tree source support and tests for discovery seed generation for chains that support it, with Ethereum/Polygon defaulting to ENR-tree discovery and other chains defaulting to discv4.~~
 11. Run focused discv4, discv5, eth, and eth_watch tests.
 12. Refresh docs and smoke-test commands.

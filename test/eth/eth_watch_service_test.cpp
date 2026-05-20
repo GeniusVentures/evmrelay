@@ -783,6 +783,90 @@ TEST(EthWatchServiceTest, Discv4FallbackDiscoveredPeerFeedsProductionDialQueue)
     EXPECT_EQ(queue->scheduler()->queue.size(), 1U);
 }
 
+TEST(EthWatchServiceTest, EnrTreeDiscoveryStartsDiscv5AndKeepsSeedsDiscoveryOnly)
+{
+    boost::asio::io_context io;
+
+    eth::EthWatchServiceConfig config{};
+    config.chains.push_back(make_chain_config("polygon-mainnet", {}, {}));
+    config.chains.back().enr_trees.push_back(
+        "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io");
+    config.dial_fn_factory = [](const discv4::ChainPeerConfig&) { return no_op_dial_fn(); };
+    config.enr_tree_resolver = [](
+        const discv4::ChainPeerConfig&,
+        const std::vector<std::string>& urls)
+    {
+        EXPECT_EQ(urls.size(), 1U);
+        return std::vector<std::string>{"enr:-resolved"};
+    };
+    config.discv5_enr_tree_starter = [](
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig& chain,
+        std::shared_ptr<eth::EthPeerQueue> queue,
+        const std::vector<std::string>& bootstrap_enrs)
+    {
+        return chain.canonical_name == "polygon-mainnet"
+            && queue
+            && queue->cached_peer_count() == 0U
+            && queue->discovery_bootnodes().empty()
+            && bootstrap_enrs.size() == 1U
+            && bootstrap_enrs.front() == "enr:-resolved";
+    };
+    config.discv4_fallback_starter = [](
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig&,
+        std::shared_ptr<eth::EthPeerQueue>)
+    {
+        return false;
+    };
+
+    eth::EthWatchService svc;
+    ASSERT_TRUE(svc.initialize(std::move(config), [](const eth::WatchEventNotification&) {}));
+    svc.run(io);
+
+    auto queue = svc.peer_queue("polygon-mainnet");
+    ASSERT_NE(queue, nullptr);
+    EXPECT_EQ(svc.discv4_fallback_count(), 0U);
+    EXPECT_EQ(queue->cached_peer_count(), 0U);
+    EXPECT_TRUE(queue->discovery_bootnodes().empty());
+}
+
+TEST(EthWatchServiceTest, EnrTreeDiscoveryFallsBackToDiscv4BootnodesWhenResolutionIsEmpty)
+{
+    boost::asio::io_context io;
+
+    eth::EthWatchServiceConfig config{};
+    config.chains.push_back(make_chain_config(
+        "polygon-mainnet",
+        {},
+        {make_validated_peer(0x44)}));
+    config.chains.back().enr_trees.push_back(
+        "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io");
+    config.dial_fn_factory = [](const discv4::ChainPeerConfig&) { return no_op_dial_fn(); };
+    config.enr_tree_resolver = [](
+        const discv4::ChainPeerConfig&,
+        const std::vector<std::string>&)
+    {
+        return std::vector<std::string>{};
+    };
+    config.discv4_fallback_starter = [](
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig&,
+        std::shared_ptr<eth::EthPeerQueue> queue)
+    {
+        return queue && queue->needs_discovery() && queue->discovery_bootnodes().size() == 1U;
+    };
+
+    eth::EthWatchService svc;
+    ASSERT_TRUE(svc.initialize(std::move(config), [](const eth::WatchEventNotification&) {}));
+    svc.run(io);
+
+    auto queue = svc.peer_queue("polygon-mainnet");
+    ASSERT_NE(queue, nullptr);
+    EXPECT_EQ(svc.discv4_fallback_count(), 1U);
+    EXPECT_EQ(queue->discovery_bootnodes().size(), 1U);
+}
+
 TEST(EthWatchServiceTest, DiscoveryPeersQueueWhileDialSlotIsSaturatedAndDrainOnRelease)
 {
     boost::asio::io_context io;

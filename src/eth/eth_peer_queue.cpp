@@ -62,6 +62,30 @@ bool EthPeerQueue::enqueue_discovered_peer(const discv4::DiscoveredPeer& peer) n
     return true;
 }
 
+bool EthPeerQueue::enqueue_validated_discovery_peer(const discovery::ValidatedPeer& peer) noexcept
+{
+    discv4::ValidatedPeer candidate{};
+    candidate.peer.node_id = peer.node_id;
+    candidate.peer.ip = peer.ip;
+    candidate.peer.udp_port = peer.udp_port;
+    candidate.peer.tcp_port = peer.tcp_port;
+    candidate.peer.last_seen = peer.last_seen;
+    if (peer.eth_fork_id.has_value())
+    {
+        discv4::ForkId fork_id{};
+        fork_id.hash = peer.eth_fork_id->hash;
+        fork_id.next = peer.eth_fork_id->next;
+        candidate.peer.eth_fork_id = fork_id;
+    }
+    std::copy(peer.node_id.begin(), peer.node_id.end(), candidate.pubkey.begin());
+    if (!enqueue_candidate(std::move(candidate), false))
+    {
+        return false;
+    }
+    ++discovered_peer_count_;
+    return true;
+}
+
 bool EthPeerQueue::report_peer_disconnected(const EthPeerDisconnectFeedback& feedback) noexcept
 {
     if (!is_requeueable_disconnect(feedback))

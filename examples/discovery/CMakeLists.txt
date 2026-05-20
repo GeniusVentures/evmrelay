@@ -57,19 +57,25 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(test_discv5_connect PRIVATE -fno-sanitize=address)
 endif()
 
-# Copy chains.json from examples/ alongside both discovery binaries at build time.
-# Update examples/chains.json (no recompile needed) when fork hashes change.
+# Copy chains_config.json from examples/ alongside both discovery binaries at build time.
+# Update examples/chains_config.json (no recompile needed) when ENR-tree roots change.
 add_custom_command(TARGET test_discovery POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_CURRENT_SOURCE_DIR}/../chains.json
-        $<TARGET_FILE_DIR:test_discovery>/chains.json
-    COMMENT "Copying chains.json to discovery binary directory"
+        ${CMAKE_CURRENT_SOURCE_DIR}/../chains_config.json
+        $<TARGET_FILE_DIR:test_discovery>/chains_config.json
+    COMMENT "Copying chains_config.json to discovery binary directory"
 )
 
 add_custom_command(TARGET test_discv5_connect POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_CURRENT_SOURCE_DIR}/../chains.json
-        $<TARGET_FILE_DIR:test_discv5_connect>/chains.json
-    COMMENT "Copying chains.json to discv5 connect binary directory"
+        ${CMAKE_CURRENT_SOURCE_DIR}/../chains_config.json
+        $<TARGET_FILE_DIR:test_discv5_connect>/chains_config.json
+    COMMENT "Copying chains_config.json to discv5 connect binary directory"
 )
 
+add_custom_command(TARGET test_enr_survey POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/../chains_config.json
+        $<TARGET_FILE_DIR:test_enr_survey>/chains_config.json
+    COMMENT "Copying chains_config.json to ENR survey binary directory"
+)

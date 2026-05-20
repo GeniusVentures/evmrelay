@@ -6,6 +6,7 @@
 
 #include <discv4/chain_peers.hpp>
 #include <discv4/dial_scheduler.hpp>
+#include <discovery/discovered_peer.hpp>
 #include <rlpx/rlpx_types.hpp>
 
 #include <memory>
@@ -58,6 +59,9 @@ public:
 
     /// @brief Enqueue a live peer produced by discovery.
     [[nodiscard]] bool enqueue_discovered_peer(const discv4::DiscoveredPeer& peer) noexcept;
+
+    /// @brief Enqueue a validated live peer produced by ENR/discv5 discovery.
+    [[nodiscard]] bool enqueue_validated_discovery_peer(const discovery::ValidatedPeer& peer) noexcept;
 
     /// @brief Requeue eligible disconnected peers without letting flaky nodes cycle forever.
     [[nodiscard]] bool report_peer_disconnected(const EthPeerDisconnectFeedback& feedback) noexcept;

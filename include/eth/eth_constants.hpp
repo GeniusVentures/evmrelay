@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_ETH_ETH_CONSTANTS_HPP
+#define EVMRELAY_INCLUDE_ETH_ETH_CONSTANTS_HPP
 
 #include <cstddef>
 #include <cstdint>
@@ -28,3 +29,5 @@ static constexpr size_t  kKeccak256Size           = 32;
 
 } // namespace eth
 
+
+#endif // EVMRELAY_INCLUDE_ETH_ETH_CONSTANTS_HPP

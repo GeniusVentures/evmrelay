@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_DISCV5_DISCV5_ERROR_HPP
+#define EVMRELAY_INCLUDE_DISCV5_DISCV5_ERROR_HPP
 
 #include <boost/outcome/result.hpp>
 #include <boost/outcome/try.hpp>
@@ -70,3 +71,5 @@ using VoidResult = outcome::result<void, discv5Error, outcome::policy::all_narro
 const char* to_string(discv5Error error) noexcept;
 
 } // namespace discv5
+
+#endif // EVMRELAY_INCLUDE_DISCV5_DISCV5_ERROR_HPP

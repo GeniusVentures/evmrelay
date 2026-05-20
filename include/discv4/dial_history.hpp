@@ -1,4 +1,5 @@
-#pragma once
+#ifndef EVMRELAY_INCLUDE_DISCV4_DIAL_HISTORY_HPP
+#define EVMRELAY_INCLUDE_DISCV4_DIAL_HISTORY_HPP
 
 #include <array>
 #include <chrono>
@@ -74,3 +75,5 @@ private:
 };
 
 } // namespace discv4
+
+#endif // EVMRELAY_INCLUDE_DISCV4_DIAL_HISTORY_HPP

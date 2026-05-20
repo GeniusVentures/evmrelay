@@ -58,6 +58,10 @@ inline constexpr std::string_view kChainPeerCacheJsonFilename = "chain_enodes.js
 inline constexpr std::string_view kChainPeerCacheJsonGzipFilename = "chain_enodes.json.gz";
 inline constexpr std::string_view kChainPeerNodesFieldName = "nodes";
 inline constexpr std::string_view kChainPeerBootnodesFieldName = "bootnodes";
+inline constexpr std::string_view kChainPeerEnrTreesFieldName = "enrTrees";
+inline constexpr std::string_view kChainPeerEnrTreeFieldName = "enrTree";
+inline constexpr std::string_view kChainPeerSourceUrlFieldName = "sourceUrl";
+inline constexpr std::string_view kEnrTreeUrlPrefix = "enrtree://";
 inline constexpr std::string_view kSignatureFieldName = "signature";
 inline constexpr std::string_view kSignerAddressFieldName = "signerAddress";
 inline constexpr std::string_view kTrustedChainPeerCacheSignerAddress = "0x7c91841f3594cb02dba5aae5909ceaaf2211d454";
@@ -168,6 +172,50 @@ std::optional<eth::Hash256> parse_hash256(std::string_view value)
         return std::nullopt;
     }
     return hash;
+}
+
+void append_string_field(
+    const boost::json::object& chain_object,
+    std::string_view           field_name,
+    std::vector<std::string>&  out)
+{
+    const auto* value = chain_object.if_contains(std::string(field_name));
+    if (value == nullptr || !value->is_string())
+    {
+        return;
+    }
+    const auto& string_value = value->as_string();
+    std::string entry(string_value.data(), string_value.size());
+    if (entry.compare(0U, kEnrTreeUrlPrefix.size(), kEnrTreeUrlPrefix.data(), kEnrTreeUrlPrefix.size()) == 0)
+    {
+        out.push_back(std::move(entry));
+    }
+}
+
+std::vector<std::string> parse_enr_tree_urls(const boost::json::object& chain_object)
+{
+    std::vector<std::string> out;
+    append_string_field(chain_object, kChainPeerEnrTreeFieldName, out);
+    append_string_field(chain_object, kChainPeerSourceUrlFieldName, out);
+
+    const auto* trees = chain_object.if_contains(std::string(kChainPeerEnrTreesFieldName));
+    if (trees != nullptr && trees->is_array())
+    {
+        for (const auto& value : trees->as_array())
+        {
+            if (!value.is_string())
+            {
+                continue;
+            }
+            const auto& string_value = value.as_string();
+            std::string entry(string_value.data(), string_value.size());
+            if (entry.compare(0U, kEnrTreeUrlPrefix.size(), kEnrTreeUrlPrefix.data(), kEnrTreeUrlPrefix.size()) == 0)
+            {
+                out.push_back(std::move(entry));
+            }
+        }
+    }
+    return out;
 }
 
 std::optional<uint64_t> parse_fork_next_value(const boost::json::value& value)
@@ -553,6 +601,7 @@ std::optional<discv4::ChainPeerConfig> parse_chain_peer_config_from_json_value(
     config.genesis_hash = *genesis_hash;
     config.nodes = parse_chain_peers_from_json_value(parsed, chain_name, kChainPeerNodesFieldName);
     config.bootnodes = parse_chain_peers_from_json_value(parsed, chain_name, kChainPeerBootnodesFieldName);
+    config.enr_trees = parse_enr_tree_urls(*chain_object);
 
     if (const auto* fork_id_value = chain_object->if_contains("forkId");
         fork_id_value != nullptr && fork_id_value->is_string())

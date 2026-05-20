@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_ETH_ETH_WATCH_SERVICE_HPP
+#define EVMRELAY_INCLUDE_ETH_ETH_WATCH_SERVICE_HPP
 
 #include <eth/abi_decoder.hpp>
 #include <eth/chain_tracker.hpp>
@@ -11,6 +12,8 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/spawn.hpp>
 #include <discv4/discv4_client.hpp>
+#include <discv5/discv5_client.hpp>
+#include <discv5/enr_tree.hpp>
 #include <functional>
 #include <map>
 #include <memory>
@@ -94,7 +97,9 @@ struct EthWatchServiceConfig
     std::vector<EthWatchEventSpec>         watches;
     EthWatchDiscoveryMode                  discovery_mode = EthWatchDiscoveryMode::kDiscoverIfNeeded;
     bool                                   enable_discv4_fallback = true;
+    bool                                   enable_enr_tree_discovery = true;
     discv4::discv4Config                  discovery{};
+    discv5::discv5Config                  discv5_discovery{};
 
     /// @brief Optional test seam for replacing live RLPx dialing.
     std::function<discv4::DialFn(const discv4::ChainPeerConfig&)> dial_fn_factory{};
@@ -104,11 +109,28 @@ struct EthWatchServiceConfig
         boost::asio::io_context&,
         const discv4::discv4Config&)> discovery_client_factory{};
 
+    /// @brief Optional test seam for replacing live discv5 client construction/startup.
+    std::function<std::shared_ptr<discv5::discv5_client>(
+        boost::asio::io_context&,
+        const discv5::discv5Config&)> discv5_client_factory{};
+
+    /// @brief Optional test seam for resolving configured ENR trees to ENR URI seeds.
+    std::function<std::vector<std::string>(
+        const discv4::ChainPeerConfig&,
+        const std::vector<std::string>&)> enr_tree_resolver{};
+
     /// @brief Optional test seam for replacing live discv4 fallback startup.
     std::function<bool(
         boost::asio::io_context&,
         const discv4::ChainPeerConfig&,
         std::shared_ptr<EthPeerQueue>)> discv4_fallback_starter{};
+
+    /// @brief Optional test seam for replacing live discv5 ENR-tree startup.
+    std::function<bool(
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig&,
+        std::shared_ptr<EthPeerQueue>,
+        const std::vector<std::string>&)> discv5_enr_tree_starter{};
 };
 
 /// @brief Callback used by EthWatchService to send an outgoing eth message.
@@ -299,12 +321,17 @@ private:
         std::shared_ptr<discv4::DialScheduler>  scheduler;
         std::shared_ptr<EthPeerQueue>           peer_queue;
         std::shared_ptr<discv4::discv4_client>  discovery_client;
+        std::shared_ptr<discv5::discv5_client>  discv5_client;
         bool                                    discv4_fallback_started = false;
+        bool                                    discv5_enr_tree_started = false;
     };
 
     [[nodiscard]] discv4::DialFn make_default_dial_fn(
         const discv4::ChainPeerConfig& chain_config) noexcept;
     void start_discv4_fallback(
+        boost::asio::io_context& io,
+        RuntimeChain&            runtime) noexcept;
+    bool start_enr_tree_discovery(
         boost::asio::io_context& io,
         RuntimeChain&            runtime) noexcept;
 
@@ -317,3 +344,5 @@ private:
 };
 
 } // namespace eth
+
+#endif // EVMRELAY_INCLUDE_ETH_ETH_WATCH_SERVICE_HPP

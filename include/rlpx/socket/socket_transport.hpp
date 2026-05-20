@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_RLPX_SOCKET_SOCKET_TRANSPORT_HPP
+#define EVMRELAY_INCLUDE_RLPX_SOCKET_SOCKET_TRANSPORT_HPP
 
 #include "../rlpx_types.hpp"
 #include "../rlpx_error.hpp"
@@ -78,3 +79,5 @@ connect_with_timeout(
 ) noexcept;
 
 } // namespace rlpx::socket
+
+#endif // EVMRELAY_INCLUDE_RLPX_SOCKET_SOCKET_TRANSPORT_HPP

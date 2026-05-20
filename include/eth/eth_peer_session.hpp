@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_ETH_ETH_PEER_SESSION_HPP
+#define EVMRELAY_INCLUDE_ETH_ETH_PEER_SESSION_HPP
 
 #include <eth/messages.hpp>
 #include <eth/eth_session_channel.hpp>
@@ -64,3 +65,5 @@ struct EthStatusHandshakeResult
 
 } // namespace eth
 
+
+#endif // EVMRELAY_INCLUDE_ETH_ETH_PEER_SESSION_HPP

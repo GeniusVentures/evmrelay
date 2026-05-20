@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_ETH_ETH_SESSION_CHANNEL_HPP
+#define EVMRELAY_INCLUDE_ETH_ETH_SESSION_CHANNEL_HPP
 
 #include <rlpx/rlpx_session.hpp>
 
@@ -48,3 +49,5 @@ private:
 
 } // namespace eth
 
+
+#endif // EVMRELAY_INCLUDE_ETH_ETH_SESSION_CHANNEL_HPP

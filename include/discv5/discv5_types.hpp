@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_DISCV5_DISCV5_TYPES_HPP
+#define EVMRELAY_INCLUDE_DISCV5_DISCV5_TYPES_HPP
 
 #include <array>
 #include <chrono>
@@ -147,3 +148,5 @@ using PeerDiscoveredCallback = std::function<void(const ValidatedPeer&)>;
 using ErrorCallback = std::function<void(const std::string&)>;
 
 } // namespace discv5
+
+#endif // EVMRELAY_INCLUDE_DISCV5_DISCV5_TYPES_HPP

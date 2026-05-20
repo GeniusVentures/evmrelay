@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_ETH_ABI_DECODER_HPP
+#define EVMRELAY_INCLUDE_ETH_ABI_DECODER_HPP
 
 #include <eth/objects.hpp>
 #include <rlp/result.hpp>
@@ -131,3 +132,5 @@ struct AbiParam
 
 } // namespace eth::abi
 
+
+#endif // EVMRELAY_INCLUDE_ETH_ABI_DECODER_HPP

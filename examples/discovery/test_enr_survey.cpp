@@ -203,10 +203,10 @@ int main( int argc, char** argv )
 
     // ── Report ────────────────────────────────────────────────────────────────
 
-    // Load expected Sepolia hash from chains.json; fall back to compiled-in value.
+    // Load expected Sepolia hash from chain_enodes.json(.gz); fall back to compiled-in value.
     static const std::array<uint8_t, 4U> kSepoliaHashFallback{ 0x26, 0x89, 0x56, 0xb6 };
     const std::array<uint8_t, 4U> kSepoliaHash =
-        load_fork_hash( "sepolia", argv[0] ).value_or( kSepoliaHashFallback );
+        load_fork_hash( "ethereum-sepolia", argv[0] ).value_or( kSepoliaHashFallback );
 
     const int total   = peers_total.load();
     const int with_id = peers_with_fork_id.load();
@@ -257,4 +257,3 @@ int main( int argc, char** argv )
     std::cout.flush();
     std::exit( 0 );
 }
-

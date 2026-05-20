@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_DISCV4_DISCV4_CONSTANTS_HPP
+#define EVMRELAY_INCLUDE_DISCV4_DISCV4_CONSTANTS_HPP
 
 #include <chrono>
 #include <cstddef>
@@ -52,3 +53,5 @@ static constexpr size_t kEnrSeqSize              = 6;
 
 } // namespace discv4
 
+
+#endif // EVMRELAY_INCLUDE_DISCV4_DISCV4_CONSTANTS_HPP

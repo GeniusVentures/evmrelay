@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_DISCV5_DISCV5_CONSTANTS_HPP
+#define EVMRELAY_INCLUDE_DISCV5_DISCV5_CONSTANTS_HPP
 
 #include <cassert>
 #include <cstddef>
@@ -403,3 +404,5 @@ static constexpr uint8_t  kMsgTalkResp    = 0x06U;
 static constexpr uint16_t kProtocolVersion = 1U;
 
 } // namespace discv5
+
+#endif // EVMRELAY_INCLUDE_DISCV5_DISCV5_CONSTANTS_HPP

@@ -85,7 +85,7 @@ static eth::Hash256 sepolia_genesis()
     return h;
 }
 
-// Sepolia post-BPO2 fallback hash — used only when chains.json is not found.
+// Sepolia post-BPO2 fallback hash — used only when chain_enodes.json(.gz) is not found.
 static const std::array<uint8_t, 4U> kSepoliaForkHashFallback{ 0x26, 0x89, 0x56, 0xb6 };
 
 struct DialStats
@@ -460,10 +460,10 @@ int main(int argc, char** argv)
         }
     }
 
-    const auto loaded_hash = load_fork_hash("sepolia", argv[0]);
+    const auto loaded_hash = load_fork_hash("ethereum-sepolia", argv[0]);
     if (!loaded_hash)
     {
-        std::cout << "[  WARN    ] chains.json not found or missing 'sepolia' key — using compiled-in fallback hash.\n";
+        std::cout << "[  WARN    ] chain_enodes.json(.gz) not found or missing 'ethereum-sepolia' forkId — using compiled-in fallback hash.\n";
     }
 
     const std::array<uint8_t, 4U> sepolia_hash = loaded_hash.value_or(kSepoliaForkHashFallback);
@@ -842,4 +842,3 @@ int main(int argc, char** argv)
     std::cout.flush();
     std::exit(1);
 }
-

@@ -51,6 +51,7 @@ target_link_libraries(evmrelay PUBLIC
     ZLIB::ZLIB
     spdlog::spdlog
     fmt::fmt
+    resolv
 )
 
 # Install the core library and attach it to the export set consumed by
@@ -61,4 +62,3 @@ install(TARGETS evmrelay
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-

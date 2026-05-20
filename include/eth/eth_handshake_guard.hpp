@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_ETH_ETH_HANDSHAKE_GUARD_HPP
+#define EVMRELAY_INCLUDE_ETH_ETH_HANDSHAKE_GUARD_HPP
 
 #include <eth/eth_peer_session.hpp>
 #include <rlpx/rlpx_session.hpp>
@@ -64,3 +65,5 @@ DecodeValidatedStatusMessage(
 
 } // namespace eth
 
+
+#endif // EVMRELAY_INCLUDE_ETH_ETH_HANDSHAKE_GUARD_HPP

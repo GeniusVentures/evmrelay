@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_ETH_CHAIN_TRACKER_HPP
+#define EVMRELAY_INCLUDE_ETH_CHAIN_TRACKER_HPP
 
 #include <eth/objects.hpp>
 #include <cstdint>
@@ -85,3 +86,5 @@ private:
 
 } // namespace eth
 
+
+#endif // EVMRELAY_INCLUDE_ETH_CHAIN_TRACKER_HPP

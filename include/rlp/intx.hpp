@@ -2,7 +2,8 @@
 // Copyright 2019 Pawel Bylica.
 // Licensed under the Apache License, Version 2.0.
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_RLP_INTX_HPP
+#define EVMRELAY_INCLUDE_RLP_INTX_HPP
 
 #include <algorithm>
 #include <cassert>
@@ -2122,3 +2123,5 @@ inline void store(uint8_t* dst, const intx::uint<N>& x) noexcept
 }  // namespace be
 
 }  // namespace intx
+
+#endif // EVMRELAY_INCLUDE_RLP_INTX_HPP

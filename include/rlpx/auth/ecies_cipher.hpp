@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_RLPX_AUTH_ECIES_CIPHER_HPP
+#define EVMRELAY_INCLUDE_RLPX_AUTH_ECIES_CIPHER_HPP
 
 #include "../rlpx_types.hpp"
 #include "../rlpx_error.hpp"
@@ -54,3 +55,5 @@ private:
 };
 
 } // namespace rlpx::auth
+
+#endif // EVMRELAY_INCLUDE_RLPX_AUTH_ECIES_CIPHER_HPP

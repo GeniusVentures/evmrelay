@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_RLPX_RLPX_TYPES_HPP
+#define EVMRELAY_INCLUDE_RLPX_RLPX_TYPES_HPP
 
 #include <array>
 #include <chrono>
@@ -161,3 +162,5 @@ namespace detail {
 }
 
 } // namespace rlpx
+
+#endif // EVMRELAY_INCLUDE_RLPX_RLPX_TYPES_HPP

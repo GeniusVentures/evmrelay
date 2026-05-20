@@ -1,7 +1,8 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#ifndef EVMRELAY_INCLUDE_RLPX_RLPX_ERROR_HPP
+#define EVMRELAY_INCLUDE_RLPX_RLPX_ERROR_HPP
 
 #include <boost/outcome/result.hpp>
 #include <boost/outcome/try.hpp>
@@ -90,3 +91,5 @@ const char* to_string(FramingError error) noexcept;
 const char* to_string(CryptoError error) noexcept;
 
 } // namespace rlpx
+
+#endif // EVMRELAY_INCLUDE_RLPX_RLPX_ERROR_HPP

@@ -209,6 +209,28 @@ TEST_F(EnrParserTest, GoEthereumENRToValidatedPeer)
     EXPECT_EQ(peer.tcp_port, kDefaultTcpPort);  // TCP port falls back to default
 }
 
+TEST_F(EnrParserTest, ProductionPolygonEnrParses)
+{
+    static const std::string kPolygonEnr =
+        "enr:-K-4QO1cBKJmnPYYbyR-8wT2mEdABxF0tgXv8xhQOX6QpqUkEdcmWCzEtyoEsa"
+        "K76qjGQ9b88AfgzSca9nw_lT-LkkaGAZk5qodbg2V0aMfGhCLVI7KAgmlkgnY0gmlwh"
+        "NkWmb2Jc2VjcDI1NmsxoQM-EiKysajrqxAN1KOP7TLmwbOFTEXkCzkdb8qb1uwBKoRz"
+        "bmFwwIN0Y3CCeTKDdWRwgnkyg3dpdMfGhCLVI7KA";
+
+    const auto record_result = EnrParser::parse(kPolygonEnr);
+    ASSERT_TRUE(record_result.has_value())
+        << "Expected successful parse of Polygon ENR; error: "
+        << to_string(record_result.error());
+
+    const auto peer_result = EnrParser::to_validated_peer(record_result.value());
+    ASSERT_TRUE(peer_result.has_value())
+        << "to_validated_peer failed: " << to_string(peer_result.error());
+
+    EXPECT_EQ(peer_result.value().ip, "217.22.153.189");
+    EXPECT_EQ(peer_result.value().udp_port, 31026U);
+    EXPECT_EQ(peer_result.value().tcp_port, 31026U);
+}
+
 // ---------------------------------------------------------------------------
 // Invalid signature test vector
 // (from go-ethereum parseNodeTests — malformed short signature field)

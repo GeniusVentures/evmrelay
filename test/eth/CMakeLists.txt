@@ -73,6 +73,14 @@ target_link_libraries(eth_watch_service_test
     evmrelay
 )
 
+# Live ENR-tree discovery to empty EthPeerQueue.
+addtest(eth_enr_tree_peer_cache_live_test
+    eth_enr_tree_peer_cache_live_test.cpp
+)
+target_link_libraries(eth_enr_tree_peer_cache_live_test
+    evmrelay
+)
+
 # Transport-neutral receipt source tests
 addtest(eth_receipt_source_test
     eth_receipt_source_test.cpp

@@ -68,6 +68,48 @@ curl -L https://enodes.gnus.ai/chain_enodes.json.gz -o chain_enodes.json.gz
 ./examples/eth_watch/eth_watch --chain ethereum-sepolia --max-peers-per-chain 3 --max-peers-total 24 --watch-event 'Transfer(address,address,uint256)'
 ```
 
+Ethereum and Polygon chains can also load ENR-tree roots from
+`examples/chains_config.json` when that file is next to the executable or in the
+current working directory. `chains_config.json` uses canonical chain keys and
+only carries discovery roots:
+
+```json
+{
+  "ethereum-mainnet": {
+    "enrTree": "enrtree://...@all.mainnet.ethdisco.net"
+  },
+  "polygon-mainnet": {
+    "enrTree": "enrtree://...@pos.polygon-peers.io"
+  }
+}
+```
+
+Resolved ENRs, cache `bootnodes`, and ENR-tree roots are discovery-only. They
+seed discv4/discv5 discovery; only discovered peers or cache `nodes` enter the
+RLPx/ETH dial path. Fork hashes still come from `chain_enodes.json(.gz)`.
+
+### Live ENR-tree peer queue test
+```bash
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/build/OSX/Debug
+
+env EVMRELAY_RUN_LIVE_ENR_TREE_TEST=1 \
+    EVMRELAY_LIVE_ENR_TREE_CHAIN=ethereum-mainnet \
+    EVMRELAY_LIVE_ENR_TREE_SECONDS=5 \
+    ./test_bin/eth_enr_tree_peer_cache_live_test
+
+env EVMRELAY_RUN_LIVE_ENR_TREE_TEST=1 \
+    EVMRELAY_LIVE_ENR_TREE_CHAIN=polygon-mainnet \
+    EVMRELAY_LIVE_ENR_TREE_SECONDS=5 \
+    ./test_bin/eth_enr_tree_peer_cache_live_test
+```
+
+Optional controls:
+
+- `EVMRELAY_LIVE_ENR_TREE_CHAIN`: `ethereum-mainnet`, `ethereum-sepolia`,
+  `ethereum-holesky`, `ethereum-hoodi`, `polygon-mainnet`, or `polygon-amoy`.
+- `EVMRELAY_LIVE_ENR_TREE_SECONDS`: runtime in seconds; default `5`.
+- `EVMRELAY_LIVE_ENR_TREE_MIN_PEERS`: minimum accepted peer count; default `1`.
+
 ### Local geth direct-mode repro
 ```bash
 cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/go-ethereum

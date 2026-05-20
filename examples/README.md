@@ -79,6 +79,33 @@ eth_watch <host> <port> <peer_pubkey_hex> [eth_offset]
 `eth_watch` matches `--chain` directly against top-level `chain_enodes.json(.gz)`
 keys. Use the canonical keys in the table above.
 
+### ENR-tree discovery config
+
+Ethereum and Polygon chains can load EIP-1459 DNS discovery roots from
+`chains_config.json`. The example looks for this file next to the executable and
+in the current working directory. It uses the same canonical top-level chain keys
+as `chain_enodes.json(.gz)`:
+
+```json
+{
+  "ethereum-mainnet": {
+    "enrTree": "enrtree://...@all.mainnet.ethdisco.net"
+  },
+  "polygon-mainnet": {
+    "enrTree": "enrtree://...@pos.polygon-peers.io"
+  }
+}
+```
+
+`chains_config.json` is discovery-root configuration only. `eth_watch` still
+loads fork IDs, network IDs, cached `nodes`, and discv4 `bootnodes` from
+`chain_enodes.json(.gz)`.
+
+Resolved ENR-tree records are not direct RLPx/ETH peers. They seed discv5
+discovery, and only peers discovered through discv5 enter the shared dial queue.
+If ENR-tree resolution produces no usable ENRs and valid cache `bootnodes` are
+available, `EthWatchService` falls back to discv4 discovery.
+
 ### Optional local chain peer cache file
 
 `eth_watch` can load chain metadata from a local JSON cache. The `nodes` array is
@@ -254,6 +281,23 @@ spawning `eth_watch`, scraping logs, or depending on public peer reachability:
 1. **CachedChainMetadata** — loads chain metadata with `nodes` and `bootnodes`, builds GNUS watch specs, and starts `EthWatchService`.
 2. **GnosisDiscoveryFallback** — loads Gnosis-style metadata with empty `nodes` and valid `bootnodes`, then verifies discv4 fallback is started.
 3. **AllChainsConfig** — builds the multi-chain service config used by the example wrapper.
+
+`eth_enr_tree_peer_cache_live_test` is a separate opt-in live test. It performs
+real DNS and discv5 discovery, starts from an empty `EthPeerQueue`, and verifies
+that discovered peers are accepted into the queue:
+
+```bash
+cd build/OSX/Debug
+env EVMRELAY_RUN_LIVE_ENR_TREE_TEST=1 \
+    EVMRELAY_LIVE_ENR_TREE_CHAIN=ethereum-mainnet \
+    EVMRELAY_LIVE_ENR_TREE_SECONDS=5 \
+    ./test_bin/eth_enr_tree_peer_cache_live_test
+```
+
+Supported `EVMRELAY_LIVE_ENR_TREE_CHAIN` values are `ethereum-mainnet`,
+`ethereum-sepolia`, `ethereum-holesky`, `ethereum-hoodi`, `polygon-mainnet`, and
+`polygon-amoy`. `EVMRELAY_LIVE_ENR_TREE_MIN_PEERS` can raise the default minimum
+accepted peer count of `1`.
 
 ### Run
 

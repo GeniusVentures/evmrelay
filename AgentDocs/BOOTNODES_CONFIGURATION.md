@@ -9,6 +9,8 @@ To receive block data (NewBlockHashes, NewBlock messages, etc.), you must:
 2. Or: Connect directly to a full peer node
 
 These configurations enable the `eth_watch` example to discover and connect to various blockchain networks.
+Ethereum and Polygon chains also have EIP-1459 ENR-tree roots in
+`examples/chains_config.json`; those roots are discovery-only seeds for discv5.
 
 ## Important: Bootstrap Nodes vs Real Peers
 
@@ -17,6 +19,12 @@ These configurations enable the `eth_watch` example to discover and connect to v
 - **Purpose**: Help you find other peer nodes
 - **Data**: Don't send block/transaction data
 - **What you do**: Send PING → Receive PONG + NEIGHBOURS list
+
+### ENR Trees (Discovery Only)
+- **Protocol**: EIP-1459 DNS discovery plus discv5 (UDP-based)
+- **Purpose**: Resolve current ENR bootnodes, then discover real peers
+- **Data**: Don't send block/transaction data
+- **What you do**: Resolve `enrtree://` roots -> start discv5 -> enqueue discovered peers
 
 ### Real Peer Nodes (Block Data)
 - **Protocol**: RLPx + ETH protocol (TCP-based)
@@ -97,6 +105,25 @@ Within each chain entry, `nodes` are RLPx/ETH peer candidates and `bootnodes`
 are discovery-only seeds. Bootnodes are not direct event-watching peers.
 Use canonical chain keys such as `ethereum-sepolia` or `ethereum-mainnet`.
 
+For Ethereum and Polygon chains, `eth_watch` also loads the matching `enrTree`
+entry from `examples/chains_config.json` when present next to the executable or
+in the current working directory. The top-level keys in that file must be the
+same canonical chain keys:
+
+```json
+{
+  "ethereum-mainnet": {
+    "enrTree": "enrtree://...@all.mainnet.ethdisco.net"
+  },
+  "polygon-mainnet": {
+    "enrTree": "enrtree://...@pos.polygon-peers.io"
+  }
+}
+```
+
+`chains_config.json` is only for ENR-tree roots. Fork hashes and network metadata
+continue to come from generated `chain_enodes.json(.gz)`.
+
 If no local cache exists, `eth_watch` attempts to refresh from:
 `https://enodes.gnus.ai/chain_enodes.json.gz`.
 
@@ -111,6 +138,11 @@ curl -L https://enodes.gnus.ai/chain_enodes.json.gz -o chain_enodes.json.gz
 input for RLPx/ETH message watching. If cached `nodes` is empty but `bootnodes`
 is valid, `EthWatchService` starts discv4 fallback and enqueues discovered peers
 into the dial queue.
+When an ENR tree is configured, `EthWatchService` resolves it into ENR bootnodes,
+starts discv5 from those ENRs, and enqueues only discovered peers. Resolved ENRs
+and bootnodes are not treated as direct RLPx/ETH peer candidates. If ENR-tree
+resolution returns no usable ENRs and valid discv4 `bootnodes` exist, the service
+falls back to discv4 discovery.
 If you connect directly to a bootstrap node, most likely you'll see:
 ```
 Connected. Waiting for messages...
@@ -190,6 +222,37 @@ ctest -R eth_watch_example_test --output-on-failure
 service config, and Gnosis empty-`nodes` discovery fallback without shell
 wrappers or live peer reachability assumptions.
 
+## Live ENR-Tree Validation
+
+The ENR-tree peer queue test is opt-in because it performs live DNS and UDP
+discv5 discovery. By default CTest skips it.
+
+```bash
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/build/OSX/Debug
+env EVMRELAY_RUN_LIVE_ENR_TREE_TEST=1 \
+    EVMRELAY_LIVE_ENR_TREE_CHAIN=ethereum-mainnet \
+    EVMRELAY_LIVE_ENR_TREE_SECONDS=5 \
+    ./test_bin/eth_enr_tree_peer_cache_live_test
+
+env EVMRELAY_RUN_LIVE_ENR_TREE_TEST=1 \
+    EVMRELAY_LIVE_ENR_TREE_CHAIN=polygon-mainnet \
+    EVMRELAY_LIVE_ENR_TREE_SECONDS=5 \
+    ./test_bin/eth_enr_tree_peer_cache_live_test
+```
+
+Environment variables:
+
+- `EVMRELAY_RUN_LIVE_ENR_TREE_TEST=1` enables the live test.
+- `EVMRELAY_LIVE_ENR_TREE_CHAIN` selects the chain. Supported values are
+  `ethereum-mainnet`, `ethereum-sepolia`, `ethereum-holesky`, `ethereum-hoodi`,
+  `polygon-mainnet`, and `polygon-amoy`.
+- `EVMRELAY_LIVE_ENR_TREE_SECONDS` controls runtime; default is `5`.
+- `EVMRELAY_LIVE_ENR_TREE_MIN_PEERS` controls the minimum accepted peer count;
+  default is `1`.
+
+The test starts with an empty `EthPeerQueue`, resolves the selected ENR tree,
+starts discv5, and asserts that discovered peers enter the queue.
+
 ## Connection Status
 
 The current implementation can load cache-backed chain metadata and start the
@@ -202,6 +265,8 @@ Last local deterministic validation on May 19, 2026:
 - `eth_watch_example_test` passed.
 - The Gnosis fixture had empty `nodes` and valid `bootnodes`, matching the
   discovery-fallback path.
+- Opt-in live ENR-tree validation accepted peers from empty queues on
+  `polygon-mainnet` and `ethereum-mainnet`.
 - Live connection success remains a manual/network-environment validation.
 - Base Sepolia (requires OP Stack discovery setup)
 
@@ -239,9 +304,8 @@ To update bootnodes:
 ## Future Enhancements
 
 1. **OP Stack Discovery** - Add support for Base and other Optimism-based chains
-2. **Dynamic Discovery** - Implement discv4 protocol for dynamic node discovery
-3. **Configuration Files** - Support JSON config files for custom bootnode lists
-4. **Health Checks** - Periodic bootnode availability verification
+2. **Operator Discovery Overrides** - Add explicit runtime controls for choosing ENR-tree, discv4, cache-only, or hybrid discovery per chain
+3. **Health Checks** - Periodic bootnode and ENR-tree availability verification
 
 ## References
 

@@ -1,0 +1,1130 @@
+Can I use evm rpc calls to get a header of a block and use the bloom filter to see if my contract was updated and possibly if that block header has my contract and certain call in it?
+
+I’ll ground this in both the EVM mechanics and, where possible, your relay/code context, because the practical answer depends on whether you mean “contract emitted an event” versus “contract storage/code changed.”
+
+Thought for 30s
+Yes — but only for logs/events, not for arbitrary “contract was updated” state changes.
+
+What the block header bloom can tell you
+eth_getBlockByNumber or eth_getBlockByHash returns a block object that includes logsBloom, a 256-byte bloom filter for the logs emitted in that block. Ethereum’s RPC docs explicitly list logsBloom as “the bloom filter for the logs of the block,” and eth_getBlockByNumber returns the same block object format as eth_getBlockByHash.
+
+So you can check the bloom for:
+
+Your contract address
+Meaning: “Did any log in this block originate from this contract?”
+
+A specific event topic
+Meaning: “Did any log in this block possibly include this event signature?”
+
+That gives you a fast prefilter:
+
+block header logsBloom
+    contains contract address?
+    contains event signature topic?
+        yes -> fetch logs / receipts and verify exactly
+        no  -> skip block
+This lines up with the existing evmrelay architecture notes: filter block/header bloom first, then fetch receipts/logs only when the bloom matches; final verification checks log.address == contract and topics[0] == event_signature.
+
+
+What it cannot tell you
+The bloom does not tell you that contract storage changed, code changed, or that a function was called unless the contract emitted a log/event for that action.
+
+A contract call like:
+
+setBridgeAddress(address newBridge)
+will not appear in logsBloom unless the function emits something like:
+
+event BridgeAddressUpdated(address indexed oldBridge, address indexed newBridge);
+Then the bloom can catch:
+
+contract address
+topic0 = keccak256("BridgeAddressUpdated(address,address)")
+possibly indexed parameter topics
+But bloom filters have false positives, so a match only means “possibly present.” You must still fetch logs with eth_getLogs or receipts and check the actual log fields. Ethereum’s eth_getLogs supports filtering by block range/hash, contract address, and ordered topics, which is the precise verification step.
+
+What about “certain call in it”?
+There are two different cases:
+
+Event-based detection:
+Yes. If the function emits a unique event, check the block logsBloom for:
+
+contract address
+topic0 = keccak256("EventName(type1,type2,...)")
+optional indexed topics
+Then call eth_getLogs for that block.
+
+Function-call detection:
+Not from the bloom. For that, you need to inspect transactions in the block. Call eth_getBlockByNumber(block, true) so full transaction objects are returned, then scan:
+
+tx.to == yourContract
+tx.input[0:4] == functionSelector
+The JSON-RPC docs show that full transaction objects include to and input, where input is the method selector plus ABI-encoded parameters.
+
+Best architecture
+For your watcher, I’d use this layered approach:
+
+1. Get block header / block object.
+2. Check logsBloom for contract address + event signature.
+3. If bloom misses, skip receipt/log fetching.
+4. If bloom matches, call eth_getLogs for that exact block:
+   - address: your contract
+   - topics[0]: event signature
+5. If you also care about direct function calls:
+   - get full block transactions
+   - scan tx.to and tx.input selector
+6. Treat logs/events as authoritative for “contract updated.”
+The important distinction is:
+
+logsBloom = fast event/log prefilter
+transactions/input = function-call detection
+state diff/storage proof = actual state-change detection
+So yes, this is a good optimization for your relay, especially for avoiding unnecessary receipt requests. Just design the contracts to emit explicit events for every state update you care about.
+
+
+same for Polygon, BSC and Base ?
+
+Thought for 9s
+Yes. Same general logic works on Polygon, BSC / BNB Smart Chain, and Base because they are EVM-compatible chains and expose the same basic Ethereum-style block, receipt, log, topic, and bloom concepts.
+
+For your watcher, the distinction remains the same on all four:
+
+block header logsBloom  -> event/log prefilter
+transaction input       -> function-call selector detection
+receipts/logs           -> exact event confirmation
+state/storage           -> not proven by bloom alone
+Your evmrelay docs already frame the system as cross-chain for Ethereum, Polygon, Base, and BSC, with the same pattern: monitor transactions/logs, filter transactions by to or function signature, filter logs by address and topic[0], and use bloom filters to reduce unnecessary receipt fetching.
+
+
+The chain IDs in your docs are:
+
+Chain	Chain ID
+Ethereum	1
+Polygon	137
+Base	8453
+BSC / BNB Smart Chain	56
+Your example docs also list presets for Polygon, Polygon Amoy, BSC, BSC testnet, Base, and Base Sepolia, so the watcher is already intended to cover these networks.
+
+
+The main difference is not the bloom/event logic. It is canonicality / finality / chain verification:
+
+Chain	Bloom/log filtering	Extra concern
+Ethereum	Same	PoS finality / reorg handling
+Polygon	Same	Polygon PoS / Heimdall checkpoint assumptions
+BSC	Same	PoSA validator-set behavior, shorter block times, possible reorgs
+Base	Same	L2 sequencing plus L1 settlement/finality assumptions
+Your architecture notes call this out directly: Polygon, Base, and BSC need chain-specific consensus or verification rules even though the transaction/log filtering layer is shared.
+
+
+So the practical answer is:
+
+Yes:
+  Polygon  -> yes
+  BSC      -> yes
+  Base     -> yes
+
+But:
+  logsBloom only helps detect emitted events/logs.
+  It does not directly prove a storage update or arbitrary contract call.
+For your bridge/contracts, the cleanest design is to emit explicit events for every state transition you care about, for example:
+
+event BridgeSourceBurned(
+    address indexed sender,
+    uint256 id,
+    uint256 amount,
+    uint256 srcChainID,
+    uint256 destChainID
+);
+Then your watcher can do:
+
+1. Read block header.
+2. Check logsBloom for contract address.
+3. Check logsBloom for topic0 = keccak256(event signature).
+4. If possible match, fetch receipts/logs.
+5. Confirm:
+   log.address == watchedContract
+   log.topics[0] == watchedEventSignature
+6. Decode event fields.
+For detecting a specific function call, scan transactions instead:
+
+tx.to == watchedContract
+tx.input[0:4] == keccak256("functionName(types)") first 4 bytes
+But for bridge security, I would treat events in receipts as the authoritative signal, not just transaction input, because a transaction can call the function and still revert. The receipt/log exists only if the call succeeded and the event was emitted.
+
+
+So, I really don't need rlp, I could just monitor every X seconds or maybe the RLP code in evmrelay can just grab a block when finalized, not sure if I can check the block myself instead of waiting for more confirmations and yes it's just looking for a logged message in particular, but when first starting up, a node may want to use RPC to find those blocks with a bloom filter match and is that possible?
+
+I’ll check your current evmrelay references so I can answer in terms of what that code is likely doing, not just generic EVM behavior.
+
+Thought for 26s
+Yes — for your case, where you only care about a particular emitted log/message, you probably do not need RLP for the RPC path.
+
+The clean split is:
+
+RPC mode:
+  JSON-RPC gives you block JSON with logsBloom already decoded as hex.
+  No RLP needed.
+
+P2P / light-client mode:
+  eth/66, RLPx, GetBlockHeaders, GetReceipts, NewBlock, Receipts.
+  RLP needed.
+Your current evmrelay architecture is aimed at the second mode: P2P/RLPx light-client monitoring, where it decodes blocks/headers, checks header bloom, sends GetReceipts, and then confirms log.address and topics[0]. The docs explicitly describe checking bloom on the block, fetching receipts only if bloom matches, and then filtering logs by address and topic.
+
+ Your repo also already has RLP message support for new blocks, receipts, pooled transactions, etc., which makes sense for decentralized peer monitoring rather than centralized RPC polling.
+
+
+Startup catch-up with RPC
+Yes, a starting node can use RPC to find missed blocks with bloom matches.
+
+The basic catch-up algorithm would be:
+
+lastProcessedBlock = local checkpoint + 1
+safeHead/finalizedHead = ask RPC
+
+for blockNumber in [lastProcessedBlock ... targetHead]:
+    block = eth_getBlockByNumber(blockNumber, false)
+    if block.logsBloom possibly contains watched contract + event topic:
+        logs = eth_getLogs({
+            fromBlock: blockNumber,
+            toBlock: blockNumber,
+            address: watchedContract,
+            topics: [watchedEventTopic]
+        })
+        process exact logs
+eth_getBlockByNumber accepts an integer block number or tags like "latest", "safe", and "finalized", and returns a block object that includes logsBloom.
+ eth_getLogs can then filter by fromBlock, toBlock, address, topics, or blockHash, with topics being order-dependent.
+
+So yes, you can do a header-bloom pre-scan over block numbers through RPC.
+
+But there is an even simpler RPC catch-up
+For RPC, you often do not need to manually scan every block’s bloom. You can just call:
+
+{
+  "method": "eth_getLogs",
+  "params": [{
+    "fromBlock": "0xSTART",
+    "toBlock": "0xEND",
+    "address": "0xYourContract",
+    "topics": ["0xYourEventTopic0"]
+  }]
+}
+Internally, the node uses its indexes / bloom filtering to avoid brute-force receipt scans. That is usually simpler and faster than fetching every block yourself.
+
+The reason to manually fetch each block and check logsBloom first is mainly if you want:
+
+- exact control over per-block processing
+- lower eth_getLogs range size
+- rate-limit friendliness
+- deterministic checkpointing
+- compatibility with providers that limit eth_getLogs ranges
+- parity with your P2P/light-client path
+A good hybrid is:
+
+1. Split catch-up into ranges, e.g. 500 / 1000 / 5000 blocks.
+2. Use eth_getLogs for each range.
+3. Store last processed finalized/safe block.
+4. If provider limits ranges or logs are too heavy, fall back to block-by-block logsBloom prefilter.
+About waiting for confirmations vs finalized
+For Ethereum mainnet, RPC supports "safe" and "finalized" block tags. "latest" is the newest proposed block, "safe" is the latest safe head, and "finalized" is the latest finalized block according to the JSON-RPC block parameter docs.
+
+So if the RPC provider supports it, you can do:
+
+eth_getBlockByNumber("finalized", false)
+Then use that block number as your catch-up target. That avoids guessing “N confirmations” on Ethereum.
+
+For Polygon, BSC, and Base, support and semantics of "safe" / "finalized" can vary by provider and chain. I would implement this strategy:
+
+1. Try "finalized".
+2. If unsupported, try "safe".
+3. If unsupported, use latest - chainConfirmations.
+Suggested defaults:
+
+Ethereum: prefer finalized; otherwise latest - 64
+Base: prefer finalized/safe if provider supports it; otherwise latest - conservative delay
+Polygon: use latest - N confirmations unless you separately verify checkpoints
+BSC: use latest - N confirmations, probably a small but nonzero depth
+For a bridge-style system, I would not process latest as final. It is fine for early detection, but not for releasing value.
+
+What I would do in evmrelay
+I would keep RLP, but not as the first operational path.
+
+Phase 1: RPC watcher
+  - Poll every X seconds.
+  - Use eth_getLogs for finalized/safe ranges.
+  - Store last processed block per chain.
+  - Verify exact event logs.
+  - No RLP required.
+
+Phase 2: RPC bloom optimization
+  - Optional.
+  - Fetch block headers/blocks and check logsBloom before eth_getLogs.
+  - Useful if RPC range queries are restricted or expensive.
+
+Phase 3: decentralized P2P watcher
+  - Use RLPx / eth protocol.
+  - Decode NewBlock / headers / receipts.
+  - Check bloom locally.
+  - Fetch receipts only on bloom match.
+  - This is where RLP matters.
+Your architecture already matches Phase 3: sync headers from a trusted checkpoint, listen for new blocks/transactions, use bloom filters to skip irrelevant receipts, verify headers/canonical chain, and process matched logs.
+
+
+Important bloom detail
+The block bloom can only say:
+
+possibly contains:
+  - this emitting contract address
+  - this event topic
+It can never say “definitely contains.” Bloom filters can have false positives. So the correct test is:
+
+if bloom_maybe(contractAddress) && bloom_maybe(eventTopic0):
+    fetch logs/receipts
+    verify exact log.address and topics[0]
+else:
+    skip
+For your use case — “just looking for a logged message in particular” — that is ideal.
+
+Practical recommendation
+I would make RPC the default bootstrap/catch-up path:
+
+On startup:
+  1. Load lastProcessedBlock.
+  2. Ask RPC for finalized/safe/latest-confirmed head.
+  3. Run eth_getLogs in bounded ranges:
+       address = watched contract
+       topics[0] = watched event
+  4. Process logs.
+  5. Save checkpoint.
+
+Live:
+  1. Poll every X seconds.
+  2. Only advance up to finalized/safe/confirmed head.
+  3. Process logs by range.
+Then keep the RLP/RLPx code as the decentralized fallback / future no-RPC light-client mode. That gives you something robust and simple now, without throwing away the more decentralized architecture.
+
+
+Well if i remove rlpX and just to a scanner, I can avoid rlp eth68 - eth71 protocol things and simplify the bridge much easier.  What I really want is a very, very lightweight EthWatch() without using centralized servers which are not free.
+
+That makes sense: you’re trying to remove the heavy devp2p/RLPx surface area while still avoiding paid centralized RPC. I’ll separate what can be made truly lightweight from what still requires some source of chain data.
+
+Thought for 21s
+Yes — removing RLPx/eth/68–71 and making a simple scanner would simplify the bridge dramatically, but there is one unavoidable tradeoff:
+
+To detect EVM logs, EthWatch needs block/receipt/log data from somewhere.
+That “somewhere” can only be one of these:
+
+1. Your own node
+2. Someone else’s RPC node
+3. Native Ethereum P2P / RLPx
+4. A GNUS-owned decentralized relay/cache layer
+So if the goal is:
+
+Very, very lightweight EthWatch()
+No RLPx
+No eth/68-eth/71 protocol handling
+No paid centralized RPC dependency
+then the best architecture is probably not a pure Ethereum light client. It is a GNUS event-oracle / watcher network.
+
+My recommendation
+I would split the system into two modes:
+
+Mode A: Heavy Watcher Node
+  Runs on server / desktop / GNUS infrastructure / partner node
+  Talks to EVM chains through full node, archive node, or RPC
+  Scans logs
+  Publishes signed event observations
+
+Mode B: Lightweight EthWatch()
+  Runs in app/game/mobile/client
+  Does not speak RLPx
+  Does not decode eth/68+
+  Does not poll centralized RPC
+  Subscribes to GNUS/IPFS/libp2p/pubsub event messages
+  Verifies signatures/quorum/proofs
+That keeps the user-facing/client-side library tiny.
+
+Your current repo is built around the full native P2P approach: discovery finds peers, RLPx creates the encrypted session, eth/66+ receives NewBlockHashes, requests receipts, filters events, ABI-decodes, and calls typed callbacks.
+
+ The docs also explicitly note that bootstrap nodes are only for discovery and that actual block data comes from discovered peers, which is exactly the part you want to avoid in a lightweight client.
+
+
+What the lightweight EthWatch() should do
+Instead of this:
+
+EthWatch()
+  discv4/discv5
+  RLPx handshake
+  eth protocol negotiation
+  NewBlockHashes
+  GetReceipts
+  Receipts
+  RLP decode
+  filter logs
+  ABI decode
+make it this:
+
+EthWatch()
+  subscribe(chainId, contract, eventTopic0)
+  receive SignedEventObservation
+  verify observer signature(s)
+  verify block depth/finality policy
+  dedupe by chainId + txHash + logIndex
+  callback(decodedEvent)
+The client-side object could be as simple as:
+
+class EthWatch
+{
+public:
+    void watchEvent(
+        uint64_t chainId,
+        const Address& contract,
+        const Hash256& eventTopic0,
+        EventCallback callback);
+
+    void processObservation(const SignedEventObservation& observation);
+};
+No RLPx. No Ethereum peer protocol. No eth/68, eth/69, eth/70, eth/71 compatibility headaches.
+
+The missing piece: who scans?
+You still need at least one scanner somewhere.
+
+That scanner can be much simpler than your current RLPx stack:
+
+Scanner node:
+  for each chain:
+    poll finalized/safe/latest-confirmed block range
+    eth_getLogs(contract + topic)
+    build security decision
+This scanner can use:
+
+- your own full node
+- free public RPC as fallback
+- paid RPC only for higher reliability
+- multiple RPCs for cross-checking
+- chain-native nodes hosted by GNUS
+The key is: only the scanner pays the complexity/cost, not every app/game/client.
+
+Why this is probably better for the bridge
+For a bridge, I would not want every game client to independently determine finality. I would want a small set of watcher nodes to say:
+
+I observed event X on chain Y.
+It is in block B.
+Block B is at least N confirmations / finalized.
+Here is my signature.
+Then the bridge side accepts only when it has enough independent attestations:
+
+2-of-3 watchers
+3-of-5 watchers
+weighted reputation threshold
+GNUS validator/reputation nodes
+That fits better with your GNUS architecture than trying to make every app a mini Ethereum P2P node.
+
+What about bloom filters?
+Bloom filters are still useful, but mostly inside the scanner, not the lightweight client.
+
+Scanner options:
+
+Simple path:
+  eth_getLogs(fromBlock, toBlock, address, topic0)
+
+Optimized path:
+  eth_getBlockByNumber(block, false)
+  check logsBloom for contract + topic0
+  only then call eth_getLogs or fetch receipts
+For startup/backfill, the scanner can do range scans:
+
+from lastProcessedBlock to finalizedHead:
+  eth_getLogs({
+    fromBlock,
+    toBlock,
+    address: watchedContract,
+    topics: [watchedEventTopic0]
+  })
+Most nodes already use bloom/indexes internally for eth_getLogs, so manually checking block blooms is optional. It is useful if providers rate-limit large eth_getLogs ranges or if you want deterministic per-block checkpointing.
+
+What I would remove from lightweight mode
+For the tiny EthWatch() client, I would remove or isolate:
+
+Remove from client:
+  RLPx
+  discv4/discv5
+  eth status handshake
+  eth protocol version negotiation
+  GetReceipts
+  block header sync
+  raw receipt RLP decoding
+
+Keep in scanner/server module:
+  RPC polling
+  optional bloom filtering
+  log verification
+  ABI decode or raw-log publish
+  finality/confirmation policy
+  signing
+Your repo already has an EthWatchRunner layered above RLPx and EthWatchService, plus a minimal session seam called IEthSessionChannel.
+
+ That seam is useful: you could keep EthWatchService / EventFilter / ABI decoding, but add a second transport adapter that feeds it RPC logs or signed GNUS observations instead of RLPx messages.
+
+Proposed architecture
+evmrelay/
+  core/
+    Address
+    Hash256
+    Bloom
+    EventFilter
+    AbiDecoder
+    MatchedEvent
+    EventDeduper
+
+  scanner_rpc/
+    JsonRpcClient
+    ChainPoller
+    FinalityPolicy
+    LogScanner
+    SecurityDecisionBuilder
+
+  watcher_light/
+    EthWatch
+    SecurityDecisionVerifier
+    PubSubSubscriber
+    QuorumPolicy
+
+  p2p_legacy_optional/
+    RLP
+    RLPx
+    discv4
+    discv5
+    eth_protocol
+Then CMake can build:
+
+evmrelay_core
+evmrelay_rpc_scanner
+evmrelay_light_watch
+evmrelay_p2p_eth_optional
+That lets you keep the RLPx work without forcing it into the bridge MVP.
+
+The honest answer on “without centralized servers”
+A purely lightweight client with no RLPx and no RPC cannot independently discover Ethereum logs. It needs someone to send it data.
+
+So the real choices are:
+
+1. Use centralized RPC directly
+   Simple, but not free/reliable/decentralized.
+
+2. Run your own full nodes
+   Decentralized from third-party RPC, but not lightweight operationally.
+
+3. Keep RLPx
+   Decentralized, but complex.
+
+4. Use GNUS watcher nodes
+   Lightweight clients, decentralized enough if multiple independent watchers sign observations.
+For GNUS, I think option 4 is the best product architecture.
+
+Very lightweight EthWatch() model
+The client API could look like:
+
+EthWatch watch;
+
+watch.addObserverKey(observerPublicKey1);
+watch.addObserverKey(observerPublicKey2);
+watch.addObserverKey(observerPublicKey3);
+
+watch.setQuorumPolicy(QuorumPolicy::RequireMOfN(2, 3));
+
+watch.watchEvent(
+    137,
+    polygonContract,
+    eventSignatureHash("BridgeSourceBurned(address,uint256,uint256,uint256,uint256)"),
+    [](const DecodedEvent& event)
+    {
+        // release / mint / notify / update local app state
+    });
+The signed message from scanner nodes:
+
+struct EventObservation
+{
+    uint64_t chainId;
+    uint64_t blockNumber;
+    Hash256  blockHash;
+    Hash256  txHash;
+    uint32_t logIndex;
+
+    Address contractAddress;
+    Hash256 topic0;
+    std::vector<Hash256> topics;
+    std::vector<uint8_t> data;
+
+    uint64_t observedAt;
+    uint64_t finalizedDepth;
+};
+Signed envelope:
+
+struct SignedEventObservation
+{
+    EventObservation observation;
+    Address observerAddress;
+    Signature signature;
+};
+Dedupe key:
+
+chainId + txHash + logIndex
+That is enough for bridge event detection.
+
+Final call
+I would not make RLPx the required bridge path.
+
+I would do this:
+
+1. Keep the existing RLPx/native P2P code as optional “decentralized expert mode.”
+2. Build the bridge MVP around RPC scanner nodes.
+3. Have scanner nodes publish signed event observations over GNUS/libp2p/IPFS pubsub.
+4. Make client-side EthWatch() only verify validator consensus evidence and invoke callbacks.
+5. Later, if needed, let advanced GNUS nodes run the RLPx scanner instead of RPC.
+That gives you the bridge simplification you want while preserving the long-term decentralized story.
+
+In one sentence:
+
+Yes, remove RLPx from the normal bridge path; make EthWatch() a tiny signed-event verifier, and move EVM scanning into GNUS watcher nodes that can use RPC, full nodes, or optional RLPx behind the scenes.
+
+
+Ok, well really if I use any of the centralized RPC services they give some free rpc calls, and If I only have like the top 256 reputation nodes get an API key to be able to use ETHWatch over those non-free RPC providers and only get websocket call-back when event matches and then they vote to propose that message and send it to consensus for the whole network which can verify using free RPC getTransaction
+
+Thought for 18s
+Yes — that is a much better bridge architecture.
+
+What you’re describing is basically:
+
+Top reputation nodes run ETHWatch using RPC/WebSocket providers.
+Only they need provider API keys.
+They subscribe to specific contract events.
+When an event fires, they propose a bridge event evidence.
+Other reputation nodes vote/attest.
+Consensus accepts the message.
+The broader network can cheaply verify the tx/log using public/free RPC if needed.
+That removes the need for every node to run RLPx / eth protocol support while still avoiding a single centralized RPC dependency.
+
+Your current evmrelay code already has the right conceptual pieces: eth_watch watches specific contract/event pairs across Ethereum, Polygon, BSC, and Base, and supports GNUS bridge events like BridgeSourceBurned(address,uint256,uint256,uint256,uint256).
+
+ The existing EthWatchRunner is currently layered above RLPx and EthWatchService, but the important part is that EthWatchService already models the event subscription/decoded callback layer separately.
+
+ That means you can replace the transport underneath it with RPC/WebSocket without throwing away the event filtering and decoding model.
+
+I would design it like this:
+
+Reputation ETHWatch Node
+  - Has API keys for Alchemy / Infura / QuickNode / Ankr / etc.
+  - Opens WebSocket subscription:
+      eth_subscribe logs
+      address = GNUS bridge contract
+      topics[0] = BridgeSourceBurned(...)
+  - Receives event callback.
+  - Waits for finality / N confirmations.
+  - Verifies receipt status == success.
+  - Builds SecurityDecision.
+  - Signs it.
+  - Broadcasts to GNUS consensus/reputation layer.
+Then consensus receives:
+
+struct SecurityDecision
+{
+    uint64_t srcChainId;
+    uint64_t destChainId;
+
+    uint64_t blockNumber;
+    Hash256  blockHash;
+    Hash256  txHash;
+    uint32_t logIndex;
+
+    Address  contractAddress;
+    Hash256  eventTopic0;
+    std::vector<Hash256> topics;
+    ByteBuffer data;
+
+    Address sender;
+    uint256 id;
+    uint256 amount;
+
+    uint64_t observedAt;
+    uint64_t finalityDepth;
+};
+Each top reputation node signs:
+
+hash(
+  srcChainId,
+  blockHash,
+  txHash,
+  logIndex,
+  contractAddress,
+  topic0,
+  topics,
+  data,
+  destChainId
+)
+The dedupe key should be:
+
+srcChainId + txHash + logIndex
+That prevents duplicate mint/release proposals.
+
+The voting rule can be something like:
+
+Accept bridge proposal when:
+  - M-of-N top reputation nodes signed the same observation, or
+  - weighted reputation score >= threshold, and
+  - txHash + logIndex has not already been consumed
+For example:
+
+Top 256 reputation nodes:
+  quorum = 67%, or
+  minimum 128 signatures, or
+  weighted threshold based on reputation
+I would not require all 256. You want fault tolerance and liveness. Something like ⅔ weighted quorum is usually cleaner than a fixed count.
+
+The broader network does not need paid WebSocket access. It can verify only when a proposal appears:
+
+Given proposal:
+  chainId
+  txHash
+  blockNumber
+  blockHash
+  logIndex
+  contract
+  topic0
+  data
+
+Verifier:
+  eth_getTransactionReceipt(txHash)
+  check receipt.status == 1
+  check receipt.blockHash == proposed blockHash
+  check logs[logIndex].address == contract
+  check logs[logIndex].topics[0] == eventTopic0
+  decode event data
+  check decoded src/dest/amount/id/sender match proposal
+That is cheap because verification happens only for proposed bridge events, not for every block.
+
+One correction: I would use eth_getTransactionReceipt, not just eth_getTransaction. The transaction alone tells you that a function was called, but it does not prove the call succeeded or that the event was emitted. The receipt contains status, logs, blockHash, and logIndex, which are the authoritative fields for your bridge event.
+
+So the final bridge flow becomes:
+
+1. User calls bridgeOut(...) on Ethereum / Polygon / BSC / Base.
+2. Contract emits BridgeSourceBurned(...).
+3. Top reputation ETHWatch nodes receive WebSocket log callback.
+4. Each waits for finality / confirmation policy.
+5. Each verifies receipt/log.
+6. Each validator verifies the normalized event evidence through local RPC quorum and votes if policy accepts.
+7. GNUS consensus accepts once quorum is reached.
+8. Destination chain/network mints or releases equivalent asset.
+9. Mark srcChainId + txHash + logIndex as consumed.
+This is much lighter than RLPx:
+
+No devp2p discovery
+No RLPx handshake
+No eth/68-eth/71 negotiation
+No GetReceipts wire protocol
+No direct peer management
+No every-node RPC polling
+And it is still decentralized enough because the trust is not in one RPC provider. The trust is in:
+
+multiple high-reputation GNUS nodes
+using independent RPC providers
+signing the same event
+subject to consensus verification
+I’d add two important rules:
+
+1. Require provider diversity.
+   Do not let all top nodes use the same RPC provider.
+
+2. Require finality policy per chain.
+   Ethereum/Base: finalized or safe if available.
+   Polygon/BSC: N confirmations/checkpoint-aware policy.
+The implementation split I’d use:
+
+evmrelay_core
+  EventFilter
+  AbiDecoder
+  MatchedEvent
+  SecurityDecision
+  Deduper
+
+evmrelay_rpc_watch
+  JsonRpcClient
+  WebSocketLogSubscriber
+  ReceiptVerifier
+  FinalityPolicy
+
+evmrelay_consensus_adapter
+  SecurityDecisionBuilder
+  SecurityDecisionVerifier
+  ReputationQuorumPolicy
+  ConsensusProposalPublisher
+
+evmrelay_rlpx_optional
+  legacy/native P2P mode
+Your existing tests already show EthWatchService can process receipts, match the right contract/event, ignore wrong contracts, decode logs, and emit callbacks.
+
+ That is the piece worth preserving. I would just feed it RPC/WebSocket logs or receipts instead of eth-wire RLP messages.
+
+So yes: top 256 reputation nodes with provider API keys + WebSocket event subscriptions + validator RPC quorum plus reputation consensus + free-RPC receipt verification is probably the cleanest version of ETHWatch for GNUS. It makes the bridge much easier while keeping the decentralized security model at the GNUS consensus/reputation layer.
+
+
+Yea, still thinking the rlp stuff could be a better way for some sort of edge based code to have ethWatch functionality without using RPC and have the light node use an API call to get the ethTransaction signed by all edge nodes that will grab the ethTransactionReceipt from free RPC and then use our consensus certificate system to certify the transaction and then on the Mint function
+
+Thought for 14s
+Yes — that is the right hybrid model, and it gives you a much cleaner story:
+
+RLPx edge watchers = decentralized detection
+Free/public RPC    = cheap spot verification
+GNUS consensus cert = network-level truth
+Mint function      = accepts the certified observation
+I would not throw away the RLPx work. I would move it into an edge watcher role, not the entire bridge path.
+
+Your current evmrelay architecture already describes exactly this lower-level path: native DevP2P/RLPx, eth/66+, NewBlockHashes → GetReceipts → Receipts, then EthWatchService → EventFilter → ABI decode → typed callback.
+
+ The repo also has a clean seam now: EthWatchRunner is layered above an IEthSessionChannel, and the service can register watch events and emit enriched notifications.
+
+ That means you can keep RLPx as one transport and later add RPC/WebSocket or GNUS pubsub as another transport.
+
+The architecture I’d use:
+
+1. Edge ETHWatch nodes
+   - Run RLPx/devp2p where possible.
+   - Optionally use RPC/WebSocket fallback.
+   - Watch only GNUS bridge event logs.
+   - Produce validator vote evidence.
+
+2. Proposal layer
+   - Edge node sees BridgeSourceBurned / BridgeMessage event.
+   - It builds a canonical observation:
+       chainId
+       blockHash
+       blockNumber
+       txHash
+       logIndex
+       contract
+       topic0
+       topics[]
+       data
+       decoded fields
+   - It signs the observation.
+
+3. Verification layer
+   - Other edge/reputation nodes receive the proposed txHash/logIndex.
+   - They can independently fetch eth_getTransactionReceipt from free RPC.
+   - They verify:
+       receipt.status == 1
+       receipt.blockHash == proposed blockHash
+       receipt.logs[logIndex].address == contract
+       receipt.logs[logIndex].topics[0] == expected event
+       decoded event fields match proposal
+
+4. Consensus certificate
+   - GNUS consensus aggregates signatures/votes.
+   - Certificate says: “This source-chain event is accepted.”
+   - Dedupe key:
+       srcChainId + txHash + logIndex
+
+5. Mint / release function
+   - Destination mint function accepts the certified message.
+   - It verifies the GNUS certificate.
+   - It checks the event has not already been consumed.
+   - It mints/releases.
+One important correction in the wording: the light node should not just get the ethTransaction. It should get the transaction receipt or at least a normalized event proof derived from the receipt. The transaction proves “someone called something.” The receipt proves “the call succeeded and emitted this log.” For a bridge, the receipt/log is the security object.
+
+So the signed object should be something like:
+
+struct BridgeEventClaim
+{
+    uint64_t srcChainId;
+    uint64_t destChainId;
+
+    uint64_t blockNumber;
+    Hash256  blockHash;
+    Hash256  txHash;
+    uint32_t logIndex;
+
+    Address  bridgeContract;
+    Hash256  eventTopic0;
+    std::vector<Hash256> topics;
+    ByteBuffer data;
+
+    Address  sender;
+    uint256  tokenIdOrNonce;
+    uint256  amount;
+
+    Address  recipient;
+    uint64_t observedAt;
+    uint64_t finalityDepth;
+};
+Then sign:
+
+hash(domainSeparator, BridgeEventClaim)
+Where the domain separator includes:
+
+GNUS_BRIDGE_EVENT_V1
+srcChainId
+destChainId
+bridgeContract
+For the destination mint() function, I would not pass 256 individual node signatures unless you really need to. You probably want an aggregated certificate:
+
+function mintWithCertificate(
+    BridgeMintMessage calldata message,
+    ConsensusCertificate calldata certificate
+) external
+Internally:
+
+verifyCertificate(messageHash, certificate)
+require(!consumed[srcChainId][txHash][logIndex])
+consumed[srcChainId][txHash][logIndex] = true
+_mint(message.recipient, message.amount)
+The certificate could represent:
+
+- M-of-N top reputation nodes
+- weighted reputation threshold
+- BLS aggregate signature
+- GNUS chain finality certificate
+- zk/recursive proof later, if you want to compress it
+This is better than making the Ethereum receipt proof directly verifiable on-chain, because EVM receipt proofs are painful and chain-specific. Instead, the destination chain trusts the GNUS consensus certificate, and GNUS consensus is responsible for verifying the source event.
+
+I’d think of it as two security tiers:
+
+Tier 1: Detection
+  RLPx edge ETHWatch sees events without centralized RPC.
+
+Tier 2: Confirmation
+  Multiple reputation nodes verify the receipt through independent sources,
+  including free RPC, paid RPC, own nodes, or RLPx receipts.
+
+Tier 3: Certification
+  GNUS consensus signs/finalizes the normalized event.
+
+Tier 4: Execution
+  Destination mint contract verifies the GNUS certificate.
+That lets you use RLPx where it is valuable — decentralized edge observation — without forcing every validator or every client to implement the full Ethereum wire protocol.
+
+Your existing code already has the right internal split: EthWatchService owns event registration and receipt processing, and it can directly process a batch of receipts for a known block.
+
+ The architecture doc also notes that EthWatchService wires together the event filter, ABI decoder, chain tracker, and send callback, and that incoming messages automatically result in GetReceipts, receipt correlation, and decoded callbacks.
+
+ That is exactly the component to preserve.
+
+The only thing I would change in the design is to make the watcher transport-neutral:
+
+class IEthReceiptSource
+{
+public:
+    virtual void watchEvent(const EventFilter& filter, EventCallback cb) = 0;
+    virtual ReceiptResult getReceipt(const Hash256& txHash) = 0;
+};
+Implementations:
+
+RlpxReceiptSource
+  - NewBlockHashes
+  - GetReceipts
+  - Receipts
+
+RpcReceiptSource
+  - eth_subscribe logs
+  - eth_getTransactionReceipt
+
+GnusCertifiedReceiptSource
+  - receives already-certified bridge events from GNUS consensus
+Then ETHWatch becomes:
+
+ETHWatch = EventFilter + AbiDecoder + ReceiptVerifier + CertificatePublisher
+not:
+
+ETHWatch = RLPx
+That gives you the best of both worlds.
+
+My final recommendation:
+
+Keep RLPx.
+Do not make RLPx mandatory for bridge minting.
+Use RLPx as one edge detection backend.
+Use free RPC as verification fallback.
+Use GNUS consensus certificates as the only thing the Mint function trusts.
+That is probably the cleanest GNUS-native bridge model.
+
+
+Then those edge watcher(s) then can be upgraded when ethereum eth/72 comes out, but still probably need to be able to go to the new forks and think about best way to transition.
+
+Thought for 8s
+Yes — that is exactly why I’d keep the RLPx/ETH protocol code isolated behind an upgradeable edge-watcher module, not embedded into bridge consensus or minting logic.
+
+The right mental model is:
+
+Edge watcher transport can change.
+Bridge event format should not change.
+Consensus certificate format should change rarely.
+Mint verification should change almost never.
+Ethereum wire protocol versions and fork rules will keep changing. The official devp2p spec currently describes eth as running over RLPx and, in the version I found, says the current protocol version is eth/70; it also notes that after The Merge, block propagation is no longer handled by the eth protocol and that NewBlock/NewBlockHashes style propagation is legacy/defunct for PoS Ethereum.
+ So yes: if you depend directly on eth/68, eth/69, eth/70, future eth/71/eth/72, etc., you need a transition strategy.
+
+The way to avoid painful transitions is to make the RLPx part a pluggable data-source adapter.
+
+class IEthWatchSource
+{
+public:
+    virtual void start() = 0;
+    virtual void stop() = 0;
+
+    virtual void watchLog(const EventFilter& filter) = 0;
+
+    virtual std::optional<ReceiptBundle> getReceipt(
+        uint64_t chainId,
+        const Hash256& txHash) = 0;
+};
+Then implementations can be swapped:
+
+RlpxEth70WatchSource
+RlpxEth71WatchSource
+RlpxEth72WatchSource
+RpcWebSocketWatchSource
+FreeRpcReceiptVerifier
+GnusCertifiedEventSource
+The rest of the system should only receive a normalized event:
+
+struct NormalizedBridgeEvent
+{
+    uint64_t srcChainId;
+    uint64_t destChainId;
+
+    uint64_t blockNumber;
+    Hash256  blockHash;
+    Hash256  txHash;
+    uint32_t logIndex;
+
+    Address  contractAddress;
+    Hash256  topic0;
+    std::vector<Hash256> topics;
+    ByteBuffer data;
+
+    Address  sender;
+    Address  recipient;
+    uint256  amount;
+    uint256  nonceOrTokenId;
+};
+Then the signer signs this, not “whatever eth/70 sent me.”
+
+edge watcher transport -> receipt/log -> normalized bridge event -> validator RPC quorum -> reputation consensus -> mint
+That gives you fork/protocol insulation.
+
+Best transition strategy
+I would version the system in three different places.
+
+1. Transport adapter version
+This is where eth/68, eth/69, eth/70, future eth/72, Polygon quirks, BSC quirks, and Base quirks live.
+
+TransportVersion:
+  ETH_RLPX_70
+  ETH_RLPX_71
+  ETH_RLPX_72
+  RPC_LOGS_V1
+This version should never appear in the mint contract. It is purely an implementation detail for watcher nodes.
+
+2. Bridge event schema version
+This is the canonical object GNUS signs.
+
+GNUS_BRIDGE_EVENT_V1
+GNUS_BRIDGE_EVENT_V2
+This changes only if you change the bridge message fields.
+
+3. Consensus certificate version
+This is the thing the destination chain verifies.
+
+GNUS_CONSENSUS_CERT_V1
+GNUS_CONSENSUS_CERT_V2
+This changes when you change quorum rules, signature aggregation, BLS keys, validator set commitments, or reputation weighting.
+
+Fork handling
+Ethereum block headers already evolve with forks. The devp2p spec shows this directly: headers include fields such as basefee-per-gas, withdrawals-root, blob-gas-used, excess-blob-gas, parent-beacon-root, and requests-hash, with presence/absence depending on London, Shanghai, Cancun, and Prague-era forks.
+
+So your RLP header decoder should not be a single hardcoded struct forever. I’d make it fork-aware:
+
+class IEvmForkRules
+{
+public:
+    virtual bool hasBaseFee(uint64_t blockNumber, uint64_t timestamp) const = 0;
+    virtual bool hasWithdrawalsRoot(uint64_t blockNumber, uint64_t timestamp) const = 0;
+    virtual bool hasBlobGasFields(uint64_t blockNumber, uint64_t timestamp) const = 0;
+    virtual bool hasParentBeaconRoot(uint64_t blockNumber, uint64_t timestamp) const = 0;
+    virtual bool hasRequestsHash(uint64_t blockNumber, uint64_t timestamp) const = 0;
+};
+Per chain:
+
+EthereumMainnetForkRules
+PolygonForkRules
+BscForkRules
+BaseForkRules
+And per network config:
+
+{
+  "chainId": 1,
+  "name": "ethereum",
+  "watchContract": "0x...",
+  "eventTopic0": "0x...",
+  "preferredSources": ["rlpx", "rpc"],
+  "finalityPolicy": "finalized",
+  "minConfirmationsFallback": 64,
+  "supportedEthProtocols": [70, 71, 72]
+}
+Dual-run upgrades
+When Ethereum moves to a new wire protocol or a major fork, don’t do a hard cutover. Run both watchers in parallel for a while:
+
+Old watcher: eth/70
+New watcher: eth/72
+
+Both observe the same bridge event.
+Both normalize to GNUS_BRIDGE_EVENT_V1.
+Consensus only cares that the normalized claim matches.
+During transition:
+
+1. Deploy new watcher adapter.
+2. Run old and new adapters side by side.
+3. Compare observed txHash/logIndex/event data.
+4. Mark new adapter healthy after enough matching events.
+5. Move reputation weighting to new adapter.
+6. Deprecate old adapter later.
+The key is that consensus should not vote on “eth/72 says this.” It should vote on:
+
+srcChainId + txHash + logIndex + decoded bridge event
+The transport is just evidence collection.
+
+Fallback model
+I’d always keep at least two evidence paths:
+
+Primary:
+  RLPx edge watcher detects event.
+
+Fallback:
+  RPC/WebSocket detects event or verifies receipt.
+
+Final:
+  GNUS consensus certificate certifies event.
+If eth/72 changes something or peers become unreliable, the system can temporarily rely more on RPC-backed watchers without changing the mint contract.
+
+Mint function should stay stable
+The destination mint should not know or care whether the event was discovered through RLPx, RPC, a full node, or a future Ethereum protocol.
+
+function mintWithCertificate(
+    BridgeMintMessage calldata message,
+    ConsensusCertificate calldata certificate
+) external {
+    bytes32 messageHash = hashBridgeMintMessage(message);
+
+    require(verifyConsensusCertificate(messageHash, certificate), "bad cert");
+    require(!consumed[message.srcChainId][message.txHash][message.logIndex], "used");
+
+    consumed[message.srcChainId][message.txHash][message.logIndex] = true;
+
+    _mint(message.recipient, message.amount);
+}
+That is the correct abstraction boundary.
+
+My recommendation
+Keep RLPx, but treat it as an edge watcher plugin:
+
+Do not make bridge consensus depend on eth/70/71/72.
+Do not make mint contracts depend on Ethereum wire protocol.
+Use normalized receipt/log evidence as the bridge consensus subject.
+Do use consensus certificates as the stable bridge proof.
+That way, when Ethereum upgrades, Polygon diverges, BSC behaves differently, or Base changes its indexing/finality assumptions, you upgrade only the watcher adapter and chain config — not the whole bridge.

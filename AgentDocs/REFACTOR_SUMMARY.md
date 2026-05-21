@@ -4,15 +4,15 @@ Source: `AgentDocs/Refactor_chat.txt`
 
 ## Core Decision
 
-Refactor `evmrelay` so `EthWatch` is no longer tightly coupled to RLPx or the Ethereum `eth/*` wire protocol. The bridge should treat RLPx as one optional event-source backend, while the stable bridge path consumes normalized, signed event claims that can be verified by GNUS consensus.
+Refactor `evmrelay` so `EthWatch` is no longer tightly coupled to RLPx or the Ethereum `eth/*` wire protocol. The bridge should treat RLPx as one optional event-source backend, while the stable bridge path consumes normalized receipt/log evidence that validators independently verify before voting in SuperGenius consensus.
 
 The target abstraction is:
 
 ```text
-edge watcher transport -> receipt/log -> normalized bridge event -> signed observation -> consensus certificate -> mint/release
+edge watcher transport -> receipt/log -> normalized bridge event -> validator RPC quorum -> reputation-weighted consensus -> mint / exit review
 ```
 
-The mint/release side should never depend on DevP2P, RLPx, `eth/68` through future `eth/*` versions, or raw RLP objects.
+The mint/exit side is driven by normalized event evidence, validator RPC quorum, SuperGenius bridge consensus, and EVM exit review controls.
 
 ## What Bloom Filters Are For
 
@@ -49,7 +49,7 @@ evmrelay_core
   EventFilter
   AbiDecoder
   MatchedEvent
-  BridgeEventClaim / BridgeEventObservation
+  BridgeEventClaim / BridgeEventEvidence
   EventDeduper
   ReceiptVerifier
 
@@ -59,17 +59,17 @@ evmrelay_rpc_watch
   ChainPoller
   FinalityPolicy
   ReceiptVerifier
-  ObservationSigner
+  SecurityDecisionBuilder
 
 evmrelay_light_watch
   EthWatch
-  ObservationVerifier
+  ValidatorVotePolicy
   QuorumPolicy
   PubSubSubscriber
 
 evmrelay_consensus_adapter
-  ObservationSigner
-  ObservationVerifier
+  ValidatorVotePolicy
+  SecurityDecisionVerifier
   ReputationQuorumPolicy
   ConsensusProposalPublisher
 
@@ -97,27 +97,29 @@ Expected implementations:
 
 - `RlpxReceiptSource`: native DevP2P/RLPx detection and receipt fetching
 - `RpcReceiptSource`: `eth_subscribe logs`, `eth_getLogs`, and `eth_getTransactionReceipt`
-- `GnusCertifiedReceiptSource`: already-certified GNUS bridge events
+- `GnusCertifiedReceiptSource`: already-certified SuperGenius bridge events
 
 ## Bridge Flow
 
-The bridge MVP should use top reputation nodes as watcher/signers rather than making every node or client run Ethereum P2P.
+The bridge MVP should use top reputation validators as independent watchers/voters rather than making every node or client run Ethereum P2P.
 
 1. User calls the source-chain bridge contract.
 2. Contract emits a specific bridge event, such as `BridgeSourceBurned(...)`.
 3. Top reputation ETHWatch nodes observe the event through RPC/WebSocket, own nodes, or optional RLPx.
 4. Watchers wait for the chain-specific finality policy.
 5. Watchers verify the transaction receipt and exact log.
-6. Each watcher signs a normalized event claim.
-7. GNUS consensus accepts the event after quorum or weighted reputation threshold.
-8. Destination mint/release function verifies the GNUS consensus certificate.
-9. The event is marked consumed by `srcChainId + txHash + logIndex`.
+6. Each validator independently verifies the same event through its configured RPC quorum.
+7. Each validator votes only if local policy accepts the event evidence.
+8. SuperGenius bridge consensus accepts the event after the bridge-specific weighted reputation threshold, minimum validator count, and trust-domain diversity are satisfied.
+9. EVM-to-SuperGenius minting credits the destination UTXO account.
+10. SuperGenius-to-EVM exits use the EVM exit contract review/throttle window before external liquidity is released.
+11. The event is marked consumed by `srcChainId + txHash + logIndex`.
 
 The wider network can verify only proposed events through free/public RPC calls such as `eth_getTransactionReceipt(txHash)`, which is much cheaper than scanning every block.
 
-## Normalized Event Claim
+## Normalized Event Evidence
 
-The signed bridge claim should be independent of how the event was discovered.
+The normalized bridge event should be independent of how the event was discovered. It is the subject validators verify and vote on.
 
 ```cpp
 struct BridgeEventClaim
@@ -145,7 +147,7 @@ struct BridgeEventClaim
 };
 ```
 
-Sign `hash(domainSeparator, BridgeEventClaim)`.
+Use `hash(domainSeparator, BridgeEventClaim)` as the consensus subject / payload identity when needed.
 
 The domain separator should include at least:
 
@@ -160,9 +162,9 @@ The dedupe/consumption key should be:
 srcChainId + txHash + logIndex
 ```
 
-## Consensus Certificate
+## Bridge Consensus
 
-The destination mint function should verify a GNUS certificate, not raw Ethereum receipt proofs or hundreds of individual watcher signatures.
+The inbound mint path should verify SuperGenius bridge consensus over the normalized event evidence.
 
 ```solidity
 function mintWithCertificate(
@@ -180,15 +182,50 @@ function mintWithCertificate(
 }
 ```
 
-The certificate can represent one of:
+The certificate or consensus result can represent one of:
 
-- M-of-N top reputation watcher signatures
 - weighted reputation threshold
-- BLS aggregate signature
 - GNUS finality certificate
 - future compressed or recursive proof
 
-The chat suggested top 256 reputation nodes as the watcher set, with a quorum such as 2/3 weighted reputation or another liveness-friendly threshold. Do not require all 256 nodes.
+Bridge minting should use a stricter policy than normal network consensus:
+
+```text
+effective bridge voting weight >= 90% initially
+minimum independent validator count >= 3 initially
+minimum operator / RPC trust-domain diversity required
+genesis node cannot satisfy threshold alone
+high-value or anomalous mints require about 95% effective bridge weight
+```
+
+Use an effective bridge-weight cap, such as 33% to 40% per validator, so a high-reputation genesis node remains important without becoming a bridge single point of failure.
+
+## Outbound Rollout
+
+SuperGenius-to-EVM exits should start conservatively while the exit path hardens:
+
+```text
+Stage 0:
+  EVM exits target testnets only.
+  Mainnet exits are handled manually.
+
+Stage 1:
+  Manual review for all SuperGenius-to-EVM exits.
+
+Stage 2:
+  Automatic exits for <= $100.
+  Manual review for > $100.
+
+Stage 3:
+  Automatic exits for <= $250.
+  Manual review for > $250.
+
+Stage 4:
+  Automatic exits with the cool-off / review window enabled.
+  Higher-value or anomalous exits continue to require elevated review.
+```
+
+Each rollout stage should be an explicit config/governance change with alerts, rollback, per-token/per-chain 24-hour outflow caps, and operator visibility into pending exit review.
 
 ## RPC Path
 
@@ -210,8 +247,8 @@ Live operation:
 poll every X seconds or use eth_subscribe logs
 advance only to finalized/safe/confirmed head
 verify receipt/log
-sign normalized observation
-publish to GNUS consensus
+build security decision
+publish validator vote to SuperGenius consensus when local policy accepts
 ```
 
 For range backfill, prefer `eth_getLogs` with address and topic filters. Nodes already use bloom/indexes internally. Manual block-by-block `logsBloom` checks are optional and mainly useful for deterministic checkpoints, provider range limits, or parity with the RLPx path.
@@ -267,9 +304,9 @@ BridgeEventSchemaVersion
   GNUS_BRIDGE_EVENT_V1
   GNUS_BRIDGE_EVENT_V2
 
-ConsensusCertificateVersion
-  GNUS_CONSENSUS_CERT_V1
-  GNUS_CONSENSUS_CERT_V2
+BridgeConsensusVersion
+  GNUS_BRIDGE_CONSENSUS_V1
+  GNUS_BRIDGE_CONSENSUS_V2
 ```
 
 Transport versions must not appear in the mint contract.
@@ -285,17 +322,17 @@ Use dual-run upgrades for protocol transitions:
 5. Shift reputation weight to the new adapter.
 6. Deprecate the old adapter later.
 
-Consensus should vote on the normalized event, not on which transport found it.
+Consensus should vote on the normalized event evidence, not on which transport found it.
 
 ## Refactor Priorities
 
 1. Preserve `EthWatchService` event filtering, receipt processing, ABI decoding, and callback behavior.
 2. Define a transport-neutral receipt/event source interface.
 3. Add an RPC/WebSocket source that can feed the same event-processing path.
-4. Add normalized `BridgeEventClaim` / `BridgeEventObservation` types.
-5. Add signer/verifier and dedupe logic using `srcChainId + txHash + logIndex`.
+4. Add normalized `BridgeEventClaim` / `SecurityDecision` evidence types.
+5. Add validator vote policy, local RPC quorum checks, and dedupe logic using `srcChainId + txHash + logIndex`.
 6. Keep RLPx in an optional edge watcher module.
-7. Keep mint/release logic dependent only on GNUS consensus certificates.
+7. Keep mint/exit logic dependent only on SuperGenius bridge consensus and exit review controls.
 8. Add chain-specific finality policy config.
 9. Add fork-aware RLP header rules only inside the RLPx adapter.
 
@@ -304,9 +341,9 @@ Consensus should vote on the normalized event, not on which transport found it.
 - Do not make every client run DevP2P/RLPx.
 - Do not make every node poll paid RPC providers.
 - Do not verify raw Ethereum receipt proofs directly in the destination mint contract for the MVP.
-- Do not sign raw RLP wire objects as the bridge message.
+- Authorize bridge minting through SuperGenius bridge consensus over normalized event evidence.
 - Do not couple GNUS consensus to `eth/68`, `eth/69`, `eth/70`, `eth/71`, or future wire protocol versions.
 
 ## One-Line Summary
 
-Make `EthWatch` transport-neutral: preserve RLPx as an optional edge watcher, build the bridge around normalized receipt/log claims, and let GNUS consensus certificates be the only proof consumed by mint/release logic.
+Make `EthWatch` transport-neutral: preserve RLPx as an optional edge watcher, build the bridge around normalized receipt/log evidence, and let SuperGenius bridge consensus plus EVM exit review controls drive mint/exit logic.

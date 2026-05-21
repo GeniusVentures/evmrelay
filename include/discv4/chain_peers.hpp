@@ -22,6 +22,12 @@ enum class ChainDiscoveryDefault
     kEnrTree
 };
 
+enum class DiscoveryForkFilter
+{
+    kRequire,
+    kDisabled
+};
+
 /**
  * @brief Result of refreshing the local chain peer cache from a remote URL.
  */
@@ -45,6 +51,7 @@ struct ChainPeerConfig
     std::vector<std::string>   discv5_bootnodes;
     std::vector<std::string>   enr_trees;
     ChainDiscoveryDefault      discovery_default = ChainDiscoveryDefault::kAuto;
+    DiscoveryForkFilter        discovery_fork_filter = DiscoveryForkFilter::kRequire;
     std::optional<eth::ForkId> fork_id;
     std::string                signature;
     std::string                signer_address;

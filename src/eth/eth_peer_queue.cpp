@@ -240,11 +240,6 @@ std::shared_ptr<discv4::DialScheduler> EthPeerQueue::scheduler() const noexcept
 
 bool EthPeerQueue::enqueue_candidate(discv4::ValidatedPeer peer, bool allow_known_peer) noexcept
 {
-    if (!scheduler_)
-    {
-        return false;
-    }
-
     const auto key = node_key(peer.peer.node_id);
     const auto now = std::chrono::steady_clock::now();
     if (const auto backoff = backoff_until_.find(key);
@@ -263,6 +258,11 @@ bool EthPeerQueue::enqueue_candidate(discv4::ValidatedPeer peer, bool allow_know
     {
         ++duplicate_peer_drop_count_;
         return false;
+    }
+
+    if (!scheduler_)
+    {
+        return true;
     }
 
     const bool can_start_immediately =

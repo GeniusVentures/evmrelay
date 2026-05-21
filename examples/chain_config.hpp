@@ -41,6 +41,20 @@ parse_chain_discovery_default( const std::string_view value ) noexcept
     return std::nullopt;
 }
 
+[[nodiscard]] inline std::optional<discv4::DiscoveryForkFilter>
+parse_discovery_fork_filter( const std::string_view value ) noexcept
+{
+    if ( value == "require" )
+    {
+        return discv4::DiscoveryForkFilter::kRequire;
+    }
+    if ( value == "disabled" )
+    {
+        return discv4::DiscoveryForkFilter::kDisabled;
+    }
+    return std::nullopt;
+}
+
 [[nodiscard]] inline std::optional<boost::json::object>
 load_chain_config_root( const std::string& argv0 ) noexcept
 {
@@ -263,6 +277,18 @@ inline void apply_chain_discovery_config(
         if ( !trees.empty() )
         {
             chain_peer_config.enr_trees = std::move( trees );
+        }
+    }
+
+    const auto* discovery_fork_filter = entry->if_contains( "discoveryForkFilter" );
+    if ( discovery_fork_filter != nullptr && discovery_fork_filter->is_string() )
+    {
+        const auto& value = discovery_fork_filter->as_string();
+        if ( const auto parsed_filter = parse_discovery_fork_filter(
+                 std::string_view( value.data(), value.size() ) );
+             parsed_filter.has_value() )
+        {
+            chain_peer_config.discovery_fork_filter = *parsed_filter;
         }
     }
 }

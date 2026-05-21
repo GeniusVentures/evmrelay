@@ -401,6 +401,7 @@ void print_usage(const char* exe)
               << "  --max-pending-peers <count>       Max queued peer candidates per chain while discovery outpaces dialing.\n"
               << "  --discv5-port <udp-port>          UDP bind port for discv5 discovery (default 9000).\n"
               << "  --peer-selection <mode>           cache-only, discover-if-needed, discover-first, or hybrid.\n"
+              << "  --discover-only                   Run discovery and peer queueing without RLPx/ETH dialing.\n"
               << "  --run-seconds <count>             Stop automatically after count seconds (default: run until signal).\n"
               << "\nExamples:\n"
               << "  " << exe << " --chain ethereum-sepolia --watch-event Transfer(address,address,uint256)\n"
@@ -409,6 +410,7 @@ void print_usage(const char* exe)
               << "  " << exe << " --chain ethereum-sepolia --direct-enode enode://<pubkey>@<host>:<port> --watch-event Transfer(address,address,uint256)\n"
               << "  " << exe << " 127.0.0.1 30303 <pubkey> --network-id 1337 --genesis-hash 0xfa742c20043b1d8a13ea6421d85e9678429f9f50c2e25b2814c61f7444504fec --log-level debug\n"
               << "  " << exe << " --chain ethereum-mainnet --watch-contract 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 --watch-event Transfer(address,address,uint256)\n"
+              << "  " << exe << " --all-chains --peer-selection discover-first --discover-only --run-seconds 10\n"
               << "\nAvailable chains:\n"
               << "  ethereum-mainnet, ethereum-sepolia, ethereum-holesky\n"
               << "  polygon-mainnet, polygon-amoy\n"
@@ -783,6 +785,7 @@ int main(int argc, char** argv) {
         eth::EthPeerQueueConfig peer_queue_config{};
         eth::EthWatchDiscoveryMode discovery_mode = eth::EthWatchDiscoveryMode::kDiscoverIfNeeded;
         std::optional<uint16_t> discv5_bind_port;
+        bool discover_only = false;
 
         for (int i = 1; i < argc; ++i)
         {
@@ -1072,6 +1075,9 @@ int main(int argc, char** argv) {
                 }
                 discovery_mode = *parsed_mode;
                 next_arg += 2;
+            } else if (arg == "--discover-only") {
+                discover_only = true;
+                next_arg += 1;
             } else if (arg == "--network-id") {
                 if (next_arg + 1 >= argc) {
                     std::cout << "--network-id requires an integer argument.\n";
@@ -1207,6 +1213,10 @@ int main(int argc, char** argv) {
                 std::move(service_chains),
                 discovery_mode);
             service_config.peer_queue = peer_queue_config;
+            if (discover_only)
+            {
+                service_config.attach_peer_dialer = false;
+            }
             if (discv5_bind_port.has_value())
             {
                 service_config.discv5_discovery.bind_port = *discv5_bind_port;
@@ -1246,6 +1256,10 @@ int main(int argc, char** argv) {
                 {config->chain_peer_config},
                 discovery_mode);
             service_config.peer_queue = peer_queue_config;
+            if (discover_only)
+            {
+                service_config.attach_peer_dialer = false;
+            }
             if (discv5_bind_port.has_value())
             {
                 service_config.discv5_discovery.bind_port = *discv5_bind_port;
@@ -1273,6 +1287,12 @@ int main(int argc, char** argv) {
         }
         else
         {
+            if (discover_only)
+            {
+                std::cout << "--discover-only requires --chain, --chains, or --all-chains.\n";
+                return 1;
+            }
+
             // Explicit host/port/pubkey mode — connect directly
             rlpx::PublicKey peer_pubkey{};
             if (!rlp::base::parse::hex_array(config->peer_pubkey_hex, peer_pubkey))

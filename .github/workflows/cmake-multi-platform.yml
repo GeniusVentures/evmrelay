@@ -121,12 +121,12 @@ jobs:
     env:
       GRPC_BUILD_ENABLE_CCACHE: "ON"
       GH_TOKEN: ${{ secrets.GNUS_TOKEN_1 }}
-      REPO_NAME: ${{ endsWith(github.repository, '/') && 'error' || replace(github.repository, github.repository_owner + '/', '') }}
+      REPO_NAME: ${{ github.event.repository.name }}
 
     runs-on: ${{ matrix.runner }}
     container:
       image: ${{ matrix.container }}
-      options: ${{ '--cap-add=IPC_LOCK' }}
+      options: --cap-add=IPC_LOCK
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GNUS_TOKEN_1 }}
@@ -159,7 +159,7 @@ jobs:
         run: |
           echo "=== PRE-CLEANUP DEBUG ==="
           echo "Current working directory: $(pwd)"
-          echo "Runner workspace: ${{ runner.workspace }}"
+          echo "Runner workspace: ${RUNNER_WORKSPACE}"
           echo "GitHub workspace: ${{ github.workspace }}"
 
           echo "=== CLEANUP ARTIFACTS ==="
@@ -171,11 +171,11 @@ jobs:
             SUDO="sudo"
           fi
 
-          # Clean contents of ${{ REPO_NAME }} directory but keep the directory itself
-          if [ -d "${{ REPO_NAME }}" ]; then
+          # Clean contents of ${REPO_NAME} directory but keep the directory itself
+          if [ -d "${REPO_NAME}" ]; then
             echo "Cleaning √ directory contents..."
-            $SUDO rm -rf ${{ REPO_NAME }}/* ${{ REPO_NAME }}/.* 2>/dev/null || true
-            echo "${{ REPO_NAME }} directory cleaned (kept the directory)"
+            $SUDO rm -rf ${REPO_NAME}/* ${REPO_NAME}/.* 2>/dev/null || true
+            echo "${REPO_NAME} directory cleaned (kept the directory)"
           fi
           
           # Delete sibling dependency directories completely
@@ -189,16 +189,19 @@ jobs:
           echo "=== POST-CLEANUP DEBUG ==="
           echo "Runner workspace contents:"
           ls -la
-          if [ -d "${{ REPO_NAME }}" ]; then
-            echo "${{ REPO_NAME }} directory exists and contains:"
-            ls -la ${{ REPO_NAME }}/ 2>/dev/null || echo "  (empty)"
+          if [ -d "${REPO_NAME}" ]; then
+            echo "${REPO_NAME} directory exists and contains:"
+            ls -la ${REPO_NAME}/ 2>/dev/null || echo "  (empty)"
           fi
+        env:
+          RUNNER_WORKSPACE: ${{ runner.workspace }}
 
-      - name: Checkout ${{ REPO_NAME }} repository
-        uses: actions/checkout@v6
+      - name: Checkout ${{ env.REPO_NAME }} repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          path: "${{ REPO_NAME }}"
+          path: "${{ env.REPO_NAME }}"
           submodules: "recursive"
+          persist-credentials: true
 
       - name: Set build directory
         shell: bash
@@ -213,11 +216,11 @@ jobs:
       - name: Resolve branch/tag
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ github.event.inputs.tag }}" ]; then
-            CURRENT_BRANCH="${{ github.event.inputs.tag }}"
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${GITHUB_EVENT_INPUTS_TAG}" ]; then
+            CURRENT_BRANCH="${GITHUB_EVENT_INPUTS_TAG}"
             IS_TAG=true
           elif ${{ github.event_name == 'pull_request' }}; then
-            CURRENT_BRANCH=${{ github.event.pull_request.head.ref }}
+            CURRENT_BRANCH=${GITHUB_EVENT_PULL_REQUEST_HEAD_REF}
             IS_TAG=false
           else
             CURRENT_BRANCH=$GITHUB_REF_NAME
@@ -242,6 +245,9 @@ jobs:
             FILE_NAME=${{ matrix.target }}-${{ matrix.build-type }}.tar.gz
           fi
           echo "FILE_NAME=${FILE_NAME}" >> $GITHUB_ENV
+        env:
+          GITHUB_EVENT_INPUTS_TAG: ${{ github.event.inputs.tag }}
+          GITHUB_EVENT_PULL_REQUEST_HEAD_REF: ${{ github.event.pull_request.head.ref }}
 
       - name: Download thirdparty release
         working-directory: ${{ github.workspace }}
@@ -399,38 +405,38 @@ jobs:
 
       - name: Configure CMake for Android
         if: ${{ matrix.target == 'Android'}}
-        working-directory: ${{github.workspace}}/${{ REPO_NAME }}
+        working-directory: ${{github.workspace}}/${{ env.REPO_NAME }}
         run: cmake -S build/${{matrix.target}} -B $BUILD_DIRECTORY -DCMAKE_BUILD_TYPE=${{matrix.build-type}} -DANDROID_ABI=${{matrix.abi}} -DTHIRDPARTY_BUILD_DIR=${{env.THIRDPARTY_BUILD_DIR}} -DZKLLVM_BUILD_DIR=${{env.ZKLLVM_BUILD_DIR}}
 
       - name: Configure CMake for Mac
         if: ${{ matrix.target == 'OSX'}}
-        working-directory: ${{github.workspace}}/${{ REPO_NAME }}
+        working-directory: ${{github.workspace}}/${{ env.REPO_NAME }}
         run: cmake -S build/${{matrix.target}} -B $BUILD_DIRECTORY -DCMAKE_BUILD_TYPE=${{matrix.build-type}} -DPLATFORM=MAC_UNIVERSAL -DTHIRDPARTY_BUILD_DIR=${{env.THIRDPARTY_BUILD_DIR}} -DZKLLVM_BUILD_DIR=${{env.ZKLLVM_BUILD_DIR}}
 
       - name: Configure CMake for iOS
         if: ${{ matrix.target == 'iOS'}}
-        working-directory: ${{github.workspace}}/${{ REPO_NAME }}
+        working-directory: ${{github.workspace}}/${{ env.REPO_NAME }}
         run: cmake -S build/${{matrix.target}} -B $BUILD_DIRECTORY -DCMAKE_BUILD_TYPE=${{matrix.build-type}} -DPLATFORM=OS64 -DTHIRDPARTY_BUILD_DIR=${{env.THIRDPARTY_BUILD_DIR}} -DZKLLVM_BUILD_DIR=${{env.ZKLLVM_BUILD_DIR}}
 
       - name: Configure CMake for Linux
         if: ${{matrix.target == 'Linux'}}
-        working-directory: ${{ github.workspace }}/${{ REPO_NAME }}
+        working-directory: ${{ github.workspace }}/${{ env.REPO_NAME }}
         run: cmake -S build/${{matrix.target}} -B $BUILD_DIRECTORY -DCMAKE_BUILD_TYPE=${{matrix.build-type}} -DTHIRDPARTY_BUILD_DIR=${{env.THIRDPARTY_BUILD_DIR}} -DZKLLVM_BUILD_DIR=${{env.ZKLLVM_BUILD_DIR}} -DSGNS_PRINT_LOGS=ON
 
       - name: Configure CMake for Windows
         if: ${{matrix.target == 'Windows'}}
-        working-directory: ${{github.workspace}}/${{ REPO_NAME }}
+        working-directory: ${{github.workspace}}/${{ env.REPO_NAME }}
         run: cmake -S build/${{matrix.target}} -B $env:BUILD_DIRECTORY -DCMAKE_BUILD_TYPE=${{matrix.build-type}} -DTHIRDPARTY_BUILD_DIR=${{env.THIRDPARTY_BUILD_DIR}} -DZKLLVM_BUILD_DIR=${{env.ZKLLVM_BUILD_DIR}}
 
-      - name: Build ${{ REPO_NAME }}
-        working-directory: ${{ github.workspace }}/${{ REPO_NAME }}/${{ env.BUILD_DIRECTORY }}
+      - name: Build ${{ env.REPO_NAME }}
+        working-directory: ${{ github.workspace }}/${{ env.REPO_NAME }}/${{ env.BUILD_DIRECTORY }}
         run: cmake --build . --config ${{ matrix.build-type }} -j
 
-      - name: Test ${{ REPO_NAME }} (non-mobile)
+      - name: Test ${{ env.REPO_NAME }} (non-mobile)
         if: ${{ matrix.target != 'Android' && matrix.target != 'iOS' }}
-        working-directory: ${{ github.workspace }}/${{ REPO_NAME }}/${{ env.BUILD_DIRECTORY }}
+        working-directory: ${{ github.workspace }}/${{ env.REPO_NAME }}/${{ env.BUILD_DIRECTORY }}
         run: ctest . -C ${{ matrix.build-type }} --output-on-failure -V
 
-      - name: Install ${{ REPO_NAME }}
-        working-directory: ${{ github.workspace }}/${{ REPO_NAME }}/${{ env.BUILD_DIRECTORY }}
+      - name: Install ${{ env.REPO_NAME }}
+        working-directory: ${{ github.workspace }}/${{ env.REPO_NAME }}/${{ env.BUILD_DIRECTORY }}
         run: cmake --install . --config ${{ matrix.build-type }}

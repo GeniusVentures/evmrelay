@@ -9,6 +9,10 @@ on:
         default: '300'
         type: string
 
+permissions:
+  contents: write
+  packages: read
+
 jobs:
   fuzz-short:
     name: Fuzz Testing (Short - ${{ matrix.target }})
@@ -21,9 +25,10 @@ jobs:
         target: [fuzz_rlp_decoder, fuzz_rlp_encoder]
     
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
         submodules: recursive
+        persist-credentials: true
     
     - name: Install Clang
       run: |
@@ -63,7 +68,7 @@ jobs:
     
     - name: Upload crashes if found
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: fuzz-crashes-${{ matrix.target }}
         path: build/Linux/fuzz/crashes_${{ matrix.target }}/
@@ -71,7 +76,7 @@ jobs:
     
     - name: Upload corpus
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: fuzz-corpus-${{ matrix.target }}
         path: build/Linux/fuzz/corpus_${{ matrix.target }}/
@@ -90,9 +95,10 @@ jobs:
         target: [fuzz_rlp_decoder, fuzz_rlp_encoder]
     
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
         submodules: recursive
+        persist-credentials: true
     
     - name: Install Clang
       run: |
@@ -114,7 +120,7 @@ jobs:
       run: cmake --build build/Linux/fuzz --target ${{ matrix.target }}
     
     - name: Restore corpus from cache
-      uses: actions/cache@v4
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
       with:
         path: build/Linux/fuzz/corpus_${{ matrix.target }}
         key: fuzz-corpus-${{ matrix.target }}-${{ github.sha }}
@@ -142,14 +148,14 @@ jobs:
     
     - name: Save corpus to cache
       if: always()
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae
       with:
         path: build/Linux/fuzz/corpus_${{ matrix.target }}
         key: fuzz-corpus-${{ matrix.target }}-${{ github.sha }}
     
     - name: Upload crashes if found
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: fuzz-crashes-long-${{ matrix.target }}
         path: build/Linux/fuzz/crashes_${{ matrix.target }}/
@@ -157,7 +163,7 @@ jobs:
     
     - name: Upload corpus
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: fuzz-corpus-long-${{ matrix.target }}
         path: build/Linux/fuzz/corpus_${{ matrix.target }}/

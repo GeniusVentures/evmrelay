@@ -7,10 +7,7 @@
 //   discv5_crawl [options]
 //
 // Options:
-//   --chain <name>         Chain to discover on.  Supported names:
-//                            ethereum (default), sepolia, holesky,
-//                            polygon, amoy, bsc, bsc-testnet,
-//                            base, base-sepolia
+//   --chain <name>         Canonical chain key from chain_enodes.json(.gz).
 //   --bootnode-enr <uri>   Add an extra bootstrap ENR ("enr:…") or
 //                          enode ("enode://…") URI.  May be repeated.
 //   --port <udp-port>      Local UDP bind port.  Default: 9000.
@@ -18,9 +15,9 @@
 //   --log-level <level>    spdlog level (trace/debug/info/warn/error).
 //                          Default: info.
 //
-// The binary starts a discv5_client, seeds it from the selected chain's
-// bootnode registry plus any explicit --bootnode-enr flags, and runs until
-// the timeout expires.  It reports the final CrawlerStats to stdout.
+// The binary starts a discv5_client, seeds it from data files plus any explicit
+// --bootnode-enr flags, and runs until the timeout expires.  It reports the
+// final CrawlerStats to stdout.
 //
 // This is an opt-in live test — it requires network access and is NOT
 // wired into the CTest suite.
@@ -35,13 +32,14 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
+#include "../chain_config.hpp"
+#include <discv5/enr_tree.hpp>
 #include <discv5/discv5_client.hpp>
-#include <discv5/discv5_bootnodes.hpp>
 #include <discv5/discv5_constants.hpp>
 #include <rlpx/crypto/ecdh.hpp>
 #include <base/rlp-logger.hpp>
@@ -53,21 +51,7 @@
 namespace
 {
 
-/// @brief Map of CLI chain name strings → ChainId enum values.
-///        Defined once here (M011 — no if/else string chains).
-static const std::unordered_map<std::string, discv5::ChainId> kChainNameMap =
-{
-    { "ethereum",    discv5::ChainId::kEthereumMainnet },
-    { "mainnet",     discv5::ChainId::kEthereumMainnet },
-    { "sepolia",     discv5::ChainId::kEthereumSepolia },
-    { "holesky",     discv5::ChainId::kEthereumHolesky },
-    { "polygon",     discv5::ChainId::kPolygonMainnet  },
-    { "amoy",        discv5::ChainId::kPolygonAmoy     },
-    { "bsc",         discv5::ChainId::kBscMainnet      },
-    { "bsc-testnet", discv5::ChainId::kBscTestnet      },
-    { "base",        discv5::ChainId::kBaseMainnet     },
-    { "base-sepolia",discv5::ChainId::kBaseSepolia     },
-};
+inline constexpr const char* kDefaultChainPeersUrl = "https://enodes.gnus.ai/chain_enodes.json.gz";
 
 // ---------------------------------------------------------------------------
 // CLI parsing
@@ -75,7 +59,10 @@ static const std::unordered_map<std::string, discv5::ChainId> kChainNameMap =
 
 struct CliArgs
 {
-    discv5::ChainId       chain            = discv5::ChainId::kEthereumMainnet;
+    std::string           chain            = "ethereum-mainnet";
+    std::string           chain_peers_json_path;
+    std::string           chain_peers_url  = kDefaultChainPeersUrl;
+    bool                  chain_peers_url_enabled = true;
     std::vector<std::string> extra_enrs{};
     uint16_t              bind_port        = discv5::kDefaultUdpPort;
     uint32_t              timeout_sec      = 60U;
@@ -87,7 +74,10 @@ void print_usage(const char* argv0)
     std::cerr
         << "Usage: " << argv0 << " [options]\n"
         << "\nOptions:\n"
-        << "  --chain <name>         ethereum|sepolia|holesky|polygon|amoy|bsc|bsc-testnet|base|base-sepolia\n"
+        << "  --chain <name>         Canonical chain key (default: ethereum-mainnet)\n"
+        << "  --chain-peers-json <path> Load chain metadata from a local cache\n"
+        << "  --chain-peers-url <url>   Override remote chain metadata cache URL\n"
+        << "  --no-chain-peers-url      Disable remote metadata cache refresh\n"
         << "  --bootnode-enr <uri>   Add extra ENR or enode URI (may repeat)\n"
         << "  --port <udp-port>      Local UDP bind port (default: " << discv5::kDefaultUdpPort << ")\n"
         << "  --timeout <secs>       Stop after N seconds (default: 60)\n"
@@ -124,14 +114,24 @@ std::optional<CliArgs> parse_args(int argc, char** argv)
         {
             const char* val = require_next("--chain");
             if (!val) { return std::nullopt; }
-            const auto it = kChainNameMap.find(std::string(val));
-            if (it == kChainNameMap.end())
-            {
-                std::cerr << "Error: unknown chain '" << val << "'\n";
-                print_usage(argv[0]);
-                return std::nullopt;
-            }
-            args.chain = it->second;
+            args.chain = val;
+        }
+        else if (flag == "--chain-peers-json" || flag == "--bootstrap-peers-json")
+        {
+            const char* val = require_next(flag);
+            if (!val) { return std::nullopt; }
+            args.chain_peers_json_path = val;
+        }
+        else if (flag == "--chain-peers-url" || flag == "--bootstrap-peers-url")
+        {
+            const char* val = require_next(flag);
+            if (!val) { return std::nullopt; }
+            args.chain_peers_url = val;
+            args.chain_peers_url_enabled = true;
+        }
+        else if (flag == "--no-chain-peers-url" || flag == "--no-bootstrap-peers-url")
+        {
+            args.chain_peers_url_enabled = false;
         }
         else if (flag == "--bootnode-enr")
         {
@@ -371,16 +371,41 @@ int main(int argc, char** argv)
     size_t chain_seed_count = 0U;
     size_t extra_seed_count = args.extra_enrs.size();
 
-    // Load seeds from the chain registry.
-    auto chain_source = discv5::ChainBootnodeRegistry::for_chain(args.chain);
-    if (chain_source)
+    auto chain_config = load_chain_peer_config(
+        args.chain,
+        argv[0],
+        args.chain_peers_json_path,
+        args.chain_peers_url,
+        args.chain_peers_url_enabled);
+    if (chain_config.has_value())
     {
-        const auto seeds = chain_source->fetch();
-        chain_seed_count = seeds.size();
-        cfg.bootstrap_enrs.insert(cfg.bootstrap_enrs.end(), seeds.begin(), seeds.end());
-        logger->info("Chain: {}  seed count: {}",
-                     discv5::ChainBootnodeRegistry::chain_name(args.chain),
-                     seeds.size());
+        apply_chain_discovery_config(*chain_config, argv[0]);
+        cfg.bootstrap_enrs.insert(
+            cfg.bootstrap_enrs.end(),
+            chain_config->discv5_bootnodes.begin(),
+            chain_config->discv5_bootnodes.end());
+        chain_seed_count = chain_config->discv5_bootnodes.size();
+
+        if (!chain_config->enr_trees.empty())
+        {
+            const auto tree_seeds = discv5::EnrTreeResolver{}.resolve(chain_config->enr_trees);
+            cfg.bootstrap_enrs.insert(cfg.bootstrap_enrs.end(), tree_seeds.begin(), tree_seeds.end());
+            chain_seed_count += tree_seeds.size();
+            logger->info("Chain: {}  cache ENR seeds: {}  ENR-tree seeds: {}",
+                         args.chain,
+                         chain_config->discv5_bootnodes.size(),
+                         tree_seeds.size());
+        }
+        else
+        {
+            logger->info("Chain: {}  cache ENR seeds: {}",
+                         args.chain,
+                         chain_config->discv5_bootnodes.size());
+        }
+    }
+    else
+    {
+        logger->warn("No chain metadata found for {}; using only explicit bootnodes", args.chain);
     }
 
     // Append any manually specified bootstrap URIs.
@@ -392,7 +417,7 @@ int main(int argc, char** argv)
 
     if (cfg.bootstrap_enrs.empty())
     {
-        logger->error("No bootstrap nodes available.  Use --bootnode-enr or --chain.");
+        logger->error("No bootstrap nodes available. Use --bootnode-enr or provide chain metadata.");
         return EXIT_FAILURE;
     }
 
@@ -514,7 +539,7 @@ int main(int argc, char** argv)
     const bool show_trace_diagnostics = (spdlog::get_level() <= spdlog::level::trace);
 
     std::cout << "\n=== discv5_crawl results ===\n"
-              << "  chain                  : " << discv5::ChainBootnodeRegistry::chain_name(args.chain) << "\n"
+              << "  chain                  : " << args.chain                                  << "\n"
               << "  udp port               : " << actual_bound_port                       << "\n"
               << "  stop reason            : " << to_string(stop_reason)                 << "\n"
               << "  run status             : " << to_string(run_status)                  << "\n"

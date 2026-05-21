@@ -28,6 +28,13 @@ target_link_libraries(eth_watch_example_test
     evmrelay
 )
 
+add_custom_command(TARGET eth_watch POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/../chains_config.json
+        $<TARGET_FILE_DIR:eth_watch>/chains_config.json
+    COMMENT "Copying chains_config.json to eth_watch binary directory"
+)
+
 if(BUILD_TESTS)
     add_test(NAME eth_watch_example_test COMMAND eth_watch_example_test)
 endif()

@@ -323,31 +323,4 @@ void EnrTreeResolver::resolve_entry(
     }
 }
 
-std::vector<std::string> default_enr_tree_urls_for_chain(
-    const std::string& canonical_name,
-    uint64_t           network_id) noexcept
-{
-    static constexpr std::string_view kEthereumDnsPrefix =
-        "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@";
-
-    if (canonical_name == "ethereum-mainnet" || network_id == 1U)
-    {
-        return {std::string(kEthereumDnsPrefix) + "all.mainnet.ethdisco.net"};
-    }
-    if (canonical_name == "ethereum-sepolia" || network_id == 11155111U)
-    {
-        return {std::string(kEthereumDnsPrefix) + "all.sepolia.ethdisco.net"};
-    }
-    if (canonical_name == "ethereum-holesky" || network_id == 17000U)
-    {
-        return {std::string(kEthereumDnsPrefix) + "all.holesky.ethdisco.net"};
-    }
-    if (canonical_name == "ethereum-hoodi" || network_id == 560048U)
-    {
-        return {std::string(kEthereumDnsPrefix) + "all.hoodi.ethdisco.net"};
-    }
-
-    return {};
-}
-
 } // namespace discv5

@@ -22,9 +22,11 @@
 #include <chrono>
 #include <cstdint>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 #include <openssl/sha.h>
@@ -485,6 +487,45 @@ std::vector<discv4::ValidatedPeer> parse_chain_peers_from_json_value(
     return peers;
 }
 
+std::vector<std::string> parse_enr_uris_from_json_value(
+    const boost::json::value& parsed,
+    const std::string&        chain_name,
+    std::string_view          field_name)
+{
+    std::vector<std::string> enr_uris;
+    std::unordered_set<std::string> seen;
+
+    const auto* arr = find_chain_peer_cache_chain_peer_array(parsed, chain_name, field_name);
+    if (arr == nullptr)
+    {
+        return enr_uris;
+    }
+
+    for (const auto& item : *arr)
+    {
+        const auto* obj = item.if_object();
+        if (obj == nullptr)
+        {
+            continue;
+        }
+
+        const auto* enr = obj->if_contains("enr");
+        if (enr == nullptr || !enr->is_string())
+        {
+            continue;
+        }
+
+        const auto& enr_str = enr->as_string();
+        std::string uri(enr_str.data(), enr_str.size());
+        if (seen.insert(uri).second)
+        {
+            enr_uris.push_back(std::move(uri));
+        }
+    }
+
+    return enr_uris;
+}
+
 void apply_chain_fork_id_to_peers(
     std::vector<discv4::ValidatedPeer>& peers,
     const eth::ForkId&                  chain_fork_id)
@@ -618,6 +659,12 @@ std::optional<discv4::ChainPeerConfig> parse_chain_peer_config_from_json_value(
     config.genesis_hash = *genesis_hash;
     config.nodes = parse_chain_peers_from_json_value(parsed, chain_name, kChainPeerNodesFieldName);
     config.bootnodes = parse_chain_peers_from_json_value(parsed, chain_name, kChainPeerBootnodesFieldName);
+    config.discv5_bootnodes = parse_enr_uris_from_json_value(parsed, chain_name, kChainPeerBootnodesFieldName);
+    auto node_enrs = parse_enr_uris_from_json_value(parsed, chain_name, kChainPeerNodesFieldName);
+    config.discv5_bootnodes.insert(
+        config.discv5_bootnodes.end(),
+        std::make_move_iterator(node_enrs.begin()),
+        std::make_move_iterator(node_enrs.end()));
     config.enr_trees = parse_enr_tree_urls(*chain_object);
 
     if (const auto* fork_id_value = chain_object->if_contains("forkId");

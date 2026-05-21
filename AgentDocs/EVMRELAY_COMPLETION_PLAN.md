@@ -45,7 +45,7 @@ Build/test commands verified for the current local changes:
 cd evmrelay/build/OSX/Debug
 ninja
 ctest -R 'eth_watch_runner_test|discv4_chain_peers_test|discv4_dial_scheduler_test' --output-on-failure
-ctest -R 'discv5_enr_test|discv5_enr_tree_test|discv5_bootnodes_test|eth_enr_tree_peer_cache_live_test|eth_watch_service_test|eth_watch_example_test|eth_watch_cli_test|eth_watch_runner_test|discv4_chain_peers_test|discv4_dial_scheduler_test' --output-on-failure
+ctest -R 'discv5_enr_test|discv5_enr_tree_test|eth_enr_tree_peer_cache_live_test|eth_watch_service_test|eth_watch_example_test|eth_watch_cli_test|eth_watch_runner_test|discv4_chain_peers_test|discv4_dial_scheduler_test' --output-on-failure
 git diff --check
 ```
 

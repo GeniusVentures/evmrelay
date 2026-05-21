@@ -1,7 +1,6 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <array>
 #include <atomic>
 #include <functional>
 #include <boost/asio/spawn.hpp>
@@ -10,11 +9,11 @@
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <chrono>
-#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -28,6 +27,7 @@
 #include <eth/eth_watch_runner.hpp>
 #include <eth/eth_watch_service.hpp>
 #include <eth/eth_watch_cli.hpp>
+#include "../chain_config.hpp"
 #include <discv4/chain_peers.hpp>
 #include <discv4/dial_scheduler.hpp>
 #include <rlpx/crypto/ecdh.hpp>
@@ -43,13 +43,6 @@ namespace {
 inline constexpr const char* kDefaultChainPeersUrl = "https://enodes.gnus.ai/chain_enodes.json.gz";
 inline constexpr auto kWatchStatsInterval = std::chrono::seconds(4);
 inline constexpr uint64_t kDefaultDetailedEventLimit = 2;
-
-const std::array<std::string_view, 4> kDefaultMainnetChains{
-    "ethereum-mainnet",
-    "polygon-mainnet",
-    "bnb-smart-chain",
-    "base-mainnet",
-};
 
 struct Config {
     std::string host;
@@ -74,7 +67,35 @@ struct WatchOutputState
     uint64_t detailed_event_limit = kDefaultDetailedEventLimit;
     uint64_t run_seconds = 0;
     std::unordered_map<std::string, uint64_t> events_by_chain;
+    std::vector<std::string> service_chain_names;
 };
+
+std::vector<std::string> parse_chain_name_list(std::string_view value)
+{
+    std::vector<std::string> names;
+    std::set<std::string> seen;
+    size_t start = 0;
+    while (start <= value.size())
+    {
+        const auto comma = value.find(',', start);
+        const auto end = comma == std::string_view::npos ? value.size() : comma;
+        const auto part = value.substr(start, end - start);
+        if (!part.empty())
+        {
+            std::string name(part);
+            if (seen.insert(name).second)
+            {
+                names.push_back(std::move(name));
+            }
+        }
+        if (comma == std::string_view::npos)
+        {
+            break;
+        }
+        start = comma + 1;
+    }
+    return names;
+}
 
 std::optional<eth::Hash256> parse_hash256(std::string_view value)
 {
@@ -276,7 +297,9 @@ void schedule_service_stats(
     });
 }
 
-void log_service_summary(eth::EthWatchService& service)
+void log_service_summary(
+    eth::EthWatchService& service,
+    const std::shared_ptr<WatchOutputState>& output_state)
 {
     if (!service.initialized())
     {
@@ -309,6 +332,30 @@ void log_service_summary(eth::EthWatchService& service)
                        traffic.matched_logs,
                        traffic.logs_seen,
                        traffic.decode_failures);
+    for (const auto& chain_name : output_state->service_chain_names)
+    {
+        auto queue = service.peer_queue(chain_name);
+        if (!queue)
+        {
+            continue;
+        }
+        const auto queue_stats = queue->stats();
+        SPDLOG_LOGGER_INFO(log,
+                           "Final chain discovery summary: chain={} cached_peers={} discovered_peers={} "
+                           "disconnect_feedback={} before_eth_status_accept={} "
+                           "after_eth_status_accept={} transport_connect_failures={} timeouts={} "
+                           "subprotocol_errors={} backoff_drops={}",
+                           chain_name,
+                           queue_stats.cached_peer_count,
+                           queue_stats.discovered_peer_count,
+                           queue_stats.disconnect_feedback_count,
+                           queue_stats.disconnected_before_connected_count,
+                           queue_stats.disconnected_after_connected_count,
+                           queue_stats.tcp_failure_count,
+                           queue_stats.timeout_count,
+                           queue_stats.subprotocol_error_count,
+                           queue_stats.backoff_drop_count);
+    }
     SPDLOG_LOGGER_INFO(log,
                        "Final disconnect summary: feedback={} before_eth_status_accept={} after_eth_status_accept={} "
                        "peer_disconnect_before_hello={} too_many_peers_before_peer_hello={} "
@@ -328,38 +375,12 @@ void log_service_summary(eth::EthWatchService& service)
                        connection.peer_queue.flaky_peer_drop_count);
 }
 
-std::optional<discv4::ChainPeerConfig> load_chain_peer_config(
-    const std::string&                   chain_name,
-    const std::string&                   argv0,
-    const std::string&                   chain_peers_json_path,
-    const std::string&                   chain_peers_url,
-    bool                                 chain_peers_url_enabled)
-{
-    std::optional<discv4::ChainPeerCacheRefreshResult> refresh_result;
-    if (chain_peers_json_path.empty() && chain_peers_url_enabled)
-    {
-        refresh_result = discv4::refresh_chain_peer_cache_json(
-            discv4::chain_peer_cache_json_path(argv0),
-            chain_peers_url);
-    }
-
-    const auto chain_peers_json_file = discv4::find_chain_peer_cache_json_path(argv0, chain_peers_json_path);
-    if (chain_peers_json_file.has_value())
-    {
-        return discv4::load_chain_peer_config_from_json(chain_name, *chain_peers_json_file);
-    }
-    if (refresh_result.has_value() && refresh_result->cache_available)
-    {
-        return discv4::load_chain_peer_config_from_json(chain_name, refresh_result->cache_path);
-    }
-    return std::nullopt;
-}
-
 void print_usage(const char* exe)
 {
     std::cout << "Usage:\n"
               << "  " << exe << " <host> <port> <peer_pubkey_hex>\n"
               << "  " << exe << " --chain <chain_name>\n"
+              << "  " << exe << " --chains <chain1,chain2,...>\n"
               << "  " << exe << " --all-chains\n"
               << "  " << exe << " --chain <chain_name> --chain-peers-json <path>\n"
               << "  " << exe << " --chain <chain_name> --chain-peers-url <url>\n"
@@ -377,10 +398,13 @@ void print_usage(const char* exe)
               << "  --max-peers-per-chain <count>     Active dial/watch slots per chain (default 3).\n"
               << "  --max-peers-total <count>         Active dial/watch slots across all chains (default 24).\n"
               << "  --cache-peer-start-offset <count> Rotate cached peers by count before spreading across dial slots.\n"
+              << "  --max-pending-peers <count>       Max queued peer candidates per chain while discovery outpaces dialing.\n"
+              << "  --discv5-port <udp-port>          UDP bind port for discv5 discovery (default 9000).\n"
               << "  --peer-selection <mode>           cache-only, discover-if-needed, discover-first, or hybrid.\n"
               << "  --run-seconds <count>             Stop automatically after count seconds (default: run until signal).\n"
               << "\nExamples:\n"
               << "  " << exe << " --chain ethereum-sepolia --watch-event Transfer(address,address,uint256)\n"
+              << "  " << exe << " --chains ethereum-mainnet,ethereum-sepolia --watch-event Transfer(address,address,uint256)\n"
               << "  " << exe << " --all-chains --watch-event Transfer(address,address,uint256)\n"
               << "  " << exe << " --chain ethereum-sepolia --direct-enode enode://<pubkey>@<host>:<port> --watch-event Transfer(address,address,uint256)\n"
               << "  " << exe << " 127.0.0.1 30303 <pubkey> --network-id 1337 --genesis-hash 0xfa742c20043b1d8a13ea6421d85e9678429f9f50c2e25b2814c61f7444504fec --log-level debug\n"
@@ -758,6 +782,7 @@ int main(int argc, char** argv) {
         eth::EthWatchConnectionConfig watch_connection_config{};
         eth::EthPeerQueueConfig peer_queue_config{};
         eth::EthWatchDiscoveryMode discovery_mode = eth::EthWatchDiscoveryMode::kDiscoverIfNeeded;
+        std::optional<uint16_t> discv5_bind_port;
 
         for (int i = 1; i < argc; ++i)
         {
@@ -785,7 +810,7 @@ int main(int argc, char** argv) {
             const std::string selected_chain_name = argv[next_arg + 1];
             next_arg += 2;
 
-            const auto chain_peer_config = load_chain_peer_config(
+            auto chain_peer_config = load_chain_peer_config(
                 selected_chain_name,
                 argv[0],
                 chain_peers_json_path,
@@ -798,16 +823,27 @@ int main(int argc, char** argv) {
                 return 1;
             }
 
+            apply_chain_discovery_config(*chain_peer_config, argv[0]);
             Config cfg{};
             apply_chain_peer_config(cfg, *chain_peer_config);
             config = std::move(cfg);
             chain_name = config->canonical_chain_name;
-        } else if (std::string_view(argv[next_arg]) == "--all-chains") {
-            ++next_arg;
-            for (const auto selected_chain_name : kDefaultMainnetChains)
+        } else if (std::string_view(argv[next_arg]) == "--chains") {
+            if (next_arg + 1 >= argc) {
+                std::cout << "--chains requires a comma-separated chain list.\n";
+                return 1;
+            }
+            const auto selected_chain_names = parse_chain_name_list(argv[next_arg + 1]);
+            next_arg += 2;
+            if (selected_chain_names.empty())
             {
-                const auto chain_peer_config = load_chain_peer_config(
-                    std::string(selected_chain_name),
+                std::cout << "--chains did not include any chain names.\n";
+                return 1;
+            }
+            for (const auto& selected_chain_name : selected_chain_names)
+            {
+                auto chain_peer_config = load_chain_peer_config(
+                    selected_chain_name,
                     argv[0],
                     chain_peers_json_path,
                     chain_peers_url,
@@ -819,6 +855,37 @@ int main(int argc, char** argv) {
                     return 1;
                 }
 
+                apply_chain_discovery_config(*chain_peer_config, argv[0]);
+                Config cfg{};
+                apply_chain_peer_config(cfg, *chain_peer_config);
+                multi_chain_configs.push_back(std::move(cfg));
+            }
+            config = multi_chain_configs.front();
+            chain_name = "multi-chain";
+        } else if (std::string_view(argv[next_arg]) == "--all-chains") {
+            ++next_arg;
+            const auto default_chain_names = load_default_all_chains(argv[0]);
+            if (default_chain_names.empty())
+            {
+                std::cout << "--all-chains requires _defaultAllChains in chains_config.json.\n";
+                return 1;
+            }
+            for (const auto& selected_chain_name : default_chain_names)
+            {
+                auto chain_peer_config = load_chain_peer_config(
+                    selected_chain_name,
+                    argv[0],
+                    chain_peers_json_path,
+                    chain_peers_url,
+                    chain_peers_url_enabled);
+                if (!chain_peer_config.has_value())
+                {
+                    std::cout << "Unknown or unconfigured chain: " << selected_chain_name << "\n"
+                              << "Expected chain metadata in chain peer cache/file.\n";
+                    return 1;
+                }
+
+                apply_chain_discovery_config(*chain_peer_config, argv[0]);
                 Config cfg{};
                 apply_chain_peer_config(cfg, *chain_peer_config);
                 multi_chain_configs.push_back(std::move(cfg));
@@ -969,6 +1036,30 @@ int main(int argc, char** argv) {
                 }
                 peer_queue_config.cache_peer_start_offset = static_cast<size_t>(*offset);
                 next_arg += 2;
+            } else if (arg == "--max-pending-peers") {
+                if (next_arg + 1 >= argc) {
+                    std::cout << "--max-pending-peers requires an integer argument.\n";
+                    return 1;
+                }
+                const auto max_pending_peers = rlp::base::parse::uint64_decimal(argv[next_arg + 1]);
+                if (!max_pending_peers || *max_pending_peers == 0) {
+                    std::cout << "Invalid --max-pending-peers value.\n";
+                    return 1;
+                }
+                peer_queue_config.max_pending_peers = static_cast<size_t>(*max_pending_peers);
+                next_arg += 2;
+            } else if (arg == "--discv5-port") {
+                if (next_arg + 1 >= argc) {
+                    std::cout << "--discv5-port requires a UDP port argument.\n";
+                    return 1;
+                }
+                const auto port = rlp::base::parse::uint16_decimal(argv[next_arg + 1]);
+                if (!port || *port == 0) {
+                    std::cout << "Invalid --discv5-port value.\n";
+                    return 1;
+                }
+                discv5_bind_port = *port;
+                next_arg += 2;
             } else if (arg == "--peer-selection") {
                 if (next_arg + 1 >= argc) {
                     std::cout << "--peer-selection requires a mode argument.\n";
@@ -1067,12 +1158,14 @@ int main(int argc, char** argv) {
         {
             if (config->prefer_direct_enode)
             {
-                std::cout << "--direct-enode cannot be combined with --all-chains.\n";
+                std::cout << "--direct-enode cannot be combined with multi-chain mode.\n";
                 return 1;
             }
+            output_state->service_chain_names.clear();
             for (auto& chain_config : multi_chain_configs)
             {
                 chain_config.watch_specs = config->watch_specs;
+                output_state->service_chain_names.push_back(chain_config.canonical_chain_name);
             }
         }
 
@@ -1114,6 +1207,15 @@ int main(int argc, char** argv) {
                 std::move(service_chains),
                 discovery_mode);
             service_config.peer_queue = peer_queue_config;
+            if (discv5_bind_port.has_value())
+            {
+                service_config.discv5_discovery.bind_port = *discv5_bind_port;
+            }
+            else if (multi_chain_configs.size() > 1U)
+            {
+                service_config.discovery.bind_port = 0U;
+                service_config.discv5_discovery.bind_port = 0U;
+            }
 
             if (!service.initialize(
                     std::move(service_config),
@@ -1126,7 +1228,7 @@ int main(int argc, char** argv) {
                 return 1;
             }
             service.run(io);
-            std::cout << "Starting eth watch service for Ethereum, Polygon, BNB Smart Chain, and Base...\n";
+            std::cout << "Starting eth watch service for " << multi_chain_configs.size() << " chains...\n";
         }
         else if (config->use_chain_peer_cache && !config->prefer_direct_enode)
         {
@@ -1144,6 +1246,11 @@ int main(int argc, char** argv) {
                 {config->chain_peer_config},
                 discovery_mode);
             service_config.peer_queue = peer_queue_config;
+            if (discv5_bind_port.has_value())
+            {
+                service_config.discv5_discovery.bind_port = *discv5_bind_port;
+            }
+            output_state->service_chain_names = {config->canonical_chain_name};
 
             SPDLOG_LOGGER_INFO(log,
                                "Starting eth watch service for chain '{}' with {} cached peer(s) and {} bootnode(s)",
@@ -1208,7 +1315,7 @@ int main(int argc, char** argv) {
         {
             run_limit_timer = std::make_shared<boost::asio::steady_timer>(io);
             run_limit_timer->expires_after(std::chrono::seconds(output_state->run_seconds));
-            run_limit_timer->async_wait([&service, service_stats_timer](const boost::system::error_code& ec)
+            run_limit_timer->async_wait([&service, service_stats_timer, output_state](const boost::system::error_code& ec)
             {
                 if (ec)
                 {
@@ -1216,7 +1323,7 @@ int main(int argc, char** argv) {
                 }
                 static auto log = rlp::base::createLogger("eth_watch");
                 SPDLOG_LOGGER_INFO(log, "Run limit reached; stopping eth_watch.");
-                log_service_summary(service);
+                log_service_summary(service, output_state);
                 if (service_stats_timer)
                 {
                     service_stats_timer->cancel();
@@ -1228,7 +1335,7 @@ int main(int argc, char** argv) {
         }
 
         io.run();
-        log_service_summary(service);
+        log_service_summary(service, output_state);
         return 0;
     } catch (const std::exception& ex) {
         std::cout << "Unhandled exception: " << ex.what() << "\n";

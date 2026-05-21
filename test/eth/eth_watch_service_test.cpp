@@ -753,7 +753,8 @@ TEST(EthWatchServiceTest, LoadedGnosisConfigWithNoCachedNodesStartsDiscoveryFall
 TEST(EthWatchServiceTest, Discv4FallbackDiscoveredPeerFeedsProductionDialQueue)
 {
     boost::asio::io_context io;
-    const auto discovered_peer = make_validated_peer(0x28);
+    auto discovered_peer = make_validated_peer(0x28);
+    discovered_peer.peer.eth_fork_id.reset();
 
     eth::EthWatchServiceConfig config{};
     config.connection.max_total_connections = 0;
@@ -829,6 +830,91 @@ TEST(EthWatchServiceTest, EnrTreeDiscoveryStartsDiscv5AndKeepsSeedsDiscoveryOnly
     EXPECT_EQ(svc.discv4_fallback_count(), 0U);
     EXPECT_EQ(queue->cached_peer_count(), 0U);
     EXPECT_TRUE(queue->discovery_bootnodes().empty());
+}
+
+TEST(EthWatchServiceTest, DiscoverFirstStartsDiscv5FromCacheEnrsWithoutPreloadingNodes)
+{
+    boost::asio::io_context io;
+    const auto cached_peer = make_validated_peer(0x51);
+    bool discv5_started = false;
+
+    eth::EthWatchServiceConfig config{};
+    config.discovery_mode = eth::EthWatchDiscoveryMode::kDiscoverFirst;
+    config.chains.push_back(make_chain_config("base-mainnet", {cached_peer}, {}));
+    config.chains.back().discv5_bootnodes.push_back("enr:-cache-seed");
+    config.dial_fn_factory = [](const discv4::ChainPeerConfig&) { return no_op_dial_fn(); };
+    config.discv5_enr_tree_starter = [&discv5_started](
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig& chain,
+        std::shared_ptr<eth::EthPeerQueue> queue,
+        const std::vector<std::string>& bootstrap_enrs)
+    {
+        discv5_started = true;
+        return chain.canonical_name == "base-mainnet"
+            && queue
+            && queue->cached_peer_count() == 0U
+            && bootstrap_enrs.size() == 1U
+            && bootstrap_enrs.front() == "enr:-cache-seed";
+    };
+    config.discv4_fallback_starter = [](
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig&,
+        std::shared_ptr<eth::EthPeerQueue>)
+    {
+        return false;
+    };
+
+    eth::EthWatchService svc;
+    ASSERT_TRUE(svc.initialize(std::move(config), [](const eth::WatchEventNotification&) {}));
+    svc.run(io);
+
+    auto queue = svc.peer_queue("base-mainnet");
+    ASSERT_NE(queue, nullptr);
+    EXPECT_TRUE(discv5_started);
+    EXPECT_EQ(svc.discv4_fallback_count(), 0U);
+    EXPECT_EQ(queue->cached_peer_count(), 0U);
+}
+
+TEST(EthWatchServiceTest, DiscoverFirstUsesDiscv4WhenCacheEnrDiscv5Disabled)
+{
+    boost::asio::io_context io;
+    const auto bootnode = make_validated_peer(0x52);
+    bool discv5_started = false;
+    bool discv4_started = false;
+
+    eth::EthWatchServiceConfig config{};
+    config.discovery_mode = eth::EthWatchDiscoveryMode::kDiscoverFirst;
+    config.chains.push_back(make_chain_config("bnb-smart-chain", {}, {bootnode}));
+    config.chains.back().discv5_bootnodes.push_back("enr:-cache-seed");
+    config.chains.back().discovery_default = discv4::ChainDiscoveryDefault::kDiscv4;
+    config.dial_fn_factory = [](const discv4::ChainPeerConfig&) { return no_op_dial_fn(); };
+    config.discv5_enr_tree_starter = [&discv5_started](
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig&,
+        std::shared_ptr<eth::EthPeerQueue>,
+        const std::vector<std::string>&)
+    {
+        discv5_started = true;
+        return true;
+    };
+    config.discv4_fallback_starter = [&discv4_started](
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig& chain,
+        std::shared_ptr<eth::EthPeerQueue> queue)
+    {
+        discv4_started = true;
+        return chain.canonical_name == "bnb-smart-chain"
+            && queue
+            && queue->discovery_bootnodes().size() == 1U;
+    };
+
+    eth::EthWatchService svc;
+    ASSERT_TRUE(svc.initialize(std::move(config), [](const eth::WatchEventNotification&) {}));
+    svc.run(io);
+
+    EXPECT_FALSE(discv5_started);
+    EXPECT_TRUE(discv4_started);
+    EXPECT_EQ(svc.discv4_fallback_count(), 1U);
 }
 
 TEST(EthWatchServiceTest, EnrTreeDiscoveryFallsBackToDiscv4BootnodesWhenResolutionIsEmpty)

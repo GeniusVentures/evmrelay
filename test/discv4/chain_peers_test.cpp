@@ -494,6 +494,15 @@ TEST_F(ChainPeersTest, LoadChainPeersPrefersEnrWhenGeneratedNodeContainsEnrAndEn
     EXPECT_EQ(peers[0].peer.ip, "172.255.253.244");
     EXPECT_EQ(peers[0].peer.tcp_port, 11006U);
     EXPECT_EQ(peers[0].peer.udp_port, 11006U);
+
+    const auto config = discv4::load_chain_peer_config_from_json_text(
+        "base-mainnet",
+        json_text);
+    ASSERT_TRUE(config.has_value());
+    ASSERT_EQ(config->discv5_bootnodes.size(), 1U);
+    EXPECT_EQ(
+        config->discv5_bootnodes.front(),
+        "enr:-KO4QHJrtDxt4o49eYS5xk-xD8BT6vz8COvE2EbmqThyUWIVMnN2AfSzOVNiWxw6WrqNZo7Irl5T5beXJFgsiiWtI_2GAZ39TVawg2V0aMfGhAfJRi6AgmlkgnY0gmlwhKz__fSJc2VjcDI1NmsxoQLB8g0y6hCJLW6I5eLIKl3GS_IWOyR12ATJLAFAe-QP1oRzbmFwwIN0Y3CCKv6DdWRwgir-");
 }
 
 TEST_F(ChainPeersTest, LoadChainPeerConfigFallsBackToNodeForkIdWhenTopLevelForkIdMissing)

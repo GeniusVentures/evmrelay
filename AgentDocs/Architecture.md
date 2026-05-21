@@ -375,21 +375,18 @@ include/
     discv5_error.hpp          — discv5Error enum
     discv5_types.hpp          — EnrRecord, discv5Config, callbacks
     discv5_enr.hpp            — EnrParser (decode, verify, to_validated_peer)
-    discv5_bootnodes.hpp      — IBootnodeSource, ChainBootnodeRegistry
     discv5_crawler.hpp        — peer queue state machine
     discv5_client.hpp         — UDP socket + async loops
 
 src/discv5/
   discv5_error.cpp
   discv5_enr.cpp              — base64url, RLP, secp256k1 signature verify
-  discv5_bootnodes.cpp        — per-chain seed lists (Ethereum/Polygon/BSC/Base)
   discv5_crawler.cpp          — enqueue/dedup/emit
   discv5_client.cpp           — Boost.Asio spawn/yield_context receive + crawler loops, FINDNODE send
   CMakeLists.txt
 
 test/discv5/
   discv5_enr_test.cpp         — go-ethereum test vectors
-  discv5_bootnodes_test.cpp   — registry and source tests
   discv5_crawler_test.cpp     — deterministic state machine tests
   CMakeLists.txt
 
@@ -421,13 +418,11 @@ All packet-size constants are derived from `sizeof(WireStruct)`, never bare lite
 | `CompressedPubKeyWire` | 33 B | `kCompressedKeyBytes` |
 | `UncompressedPubKeyWire` | 65 B | `kUncompressedKeyBytes` |
 
-### Supported chains (ChainBootnodeRegistry)
+### Supported Chains
 
-| Chain | ID | Source format |
-|---|---|---|
-| Ethereum mainnet | 1 | ENR (go-ethereum V5Bootnodes) |
-| Ethereum Sepolia | 11155111 | enode (go-ethereum SepoliaBootnodes) |
-| Ethereum Holesky | 17000 | enode (go-ethereum HoleskyBootnodes) |
+Supported chain metadata is data-driven. `chain_enodes.json(.gz)` carries
+network IDs, genesis hashes, fork IDs, nodes, and bootnodes. `chains_config.json`
+carries discovery defaults and ENR-tree roots.
 | Polygon mainnet | 137 | enode (docs.polygon.technology) |
 | Polygon Amoy | 80002 | enode (docs.polygon.technology) |
 | BSC mainnet | 56 | enode (bnb-chain/bsc params/config.go) |

@@ -13,18 +13,6 @@ target_include_directories(discv5_enr_test PRIVATE
     ${CMAKE_SOURCE_DIR}/include
 )
 
-addtest(discv5_bootnodes_test
-    ${CMAKE_CURRENT_LIST_DIR}/discv5_bootnodes_test.cpp
-)
-
-target_link_libraries(discv5_bootnodes_test
-    evmrelay
-)
-
-target_include_directories(discv5_bootnodes_test PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-)
-
 addtest(discv5_enr_tree_test
     ${CMAKE_CURRENT_LIST_DIR}/enr_tree_test.cpp
 )
@@ -60,4 +48,3 @@ target_link_libraries(discv5_client_test
 target_include_directories(discv5_client_test PRIVATE
     ${CMAKE_SOURCE_DIR}/include
 )
-

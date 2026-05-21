@@ -34,9 +34,7 @@
 #include <boost/asio/spawn.hpp>
 #include <boost/asio/steady_timer.hpp>
 
-#include <discv4/bootnodes_test.hpp>
 #include <discv4/dial_scheduler.hpp>
-#include <discv5/discv5_bootnodes.hpp>
 #include <discv5/discv5_client.hpp>
 #include <discv5/discv5_enr.hpp>
 #include <eth/eth_types.hpp>
@@ -499,17 +497,23 @@ int main(int argc, char** argv)
         keypair_result.value().public_key.end(),
         dv5_cfg.public_key.begin());
 
-    auto source = discv5::ChainBootnodeRegistry::for_chain(discv5::ChainId::kEthereumSepolia);
-    if (!source)
+    auto chain_config = load_chain_peer_config(
+        "ethereum-sepolia",
+        argv[0],
+        "",
+        "https://enodes.gnus.ai/chain_enodes.json.gz",
+        true);
+    if (!chain_config.has_value())
     {
-        std::cout << "Failed to load Sepolia discv5 bootnode source\n";
+        std::cout << "Failed to load ethereum-sepolia chain metadata\n";
         return 1;
     }
 
-    dv5_cfg.bootstrap_enrs = source->fetch();
+    apply_chain_discovery_config(*chain_config, argv[0]);
+    dv5_cfg.bootstrap_enrs = chain_config->discv5_bootnodes;
     if (dv5_cfg.bootstrap_enrs.empty())
     {
-        std::cout << "No discv5 Sepolia bootnodes configured\n";
+        std::cout << "No ethereum-sepolia ENR bootnodes configured in chain metadata\n";
         return 1;
     }
 
@@ -561,76 +565,12 @@ int main(int argc, char** argv)
         });
     *sched_ref = scheduler.get();
 
-    auto parse_enode = [](const std::string& enode)
-        -> std::optional<std::tuple<std::string, uint16_t, std::string>>
-    {
-        const std::string prefix = "enode://";
-        if (enode.substr(0, prefix.size()) != prefix)
-        {
-            return std::nullopt;
-        }
-        const auto at = enode.find('@', prefix.size());
-        if (at == std::string::npos)
-        {
-            return std::nullopt;
-        }
-        const auto colon = enode.rfind(':');
-        if (colon == std::string::npos || colon < at)
-        {
-            return std::nullopt;
-        }
-
-        std::string pubkey = enode.substr(prefix.size(), at - prefix.size());
-        std::string host = enode.substr(at + 1, colon - at - 1);
-        uint16_t port = static_cast<uint16_t>(std::stoi(enode.substr(colon + 1)));
-        return std::make_tuple(host, port, pubkey);
-    };
-
-    auto hex_to_nibble = [](char c) -> std::optional<uint8_t>
-    {
-        if (c >= '0' && c <= '9') { return static_cast<uint8_t>(c - '0'); }
-        if (c >= 'a' && c <= 'f') { return static_cast<uint8_t>(10 + c - 'a'); }
-        if (c >= 'A' && c <= 'F') { return static_cast<uint8_t>(10 + c - 'A'); }
-        return std::nullopt;
-    };
-
     if (enable_seeded)
     {
-        for (const auto& enode : ETHEREUM_SEPOLIA_BOOTNODES)
+        for (auto vp : chain_config->bootnodes)
         {
-            auto parsed = parse_enode(enode);
-            if (!parsed)
-            {
-                continue;
-            }
-
-            const auto& [host, port, pubkey_hex] = *parsed;
-            if (port != kSepoliaRlpxPort || pubkey_hex.size() != 128U)
-            {
-                continue;
-            }
-
-            discv4::ValidatedPeer vp;
-            vp.peer.ip = host;
-            vp.peer.udp_port = port;
-            vp.peer.tcp_port = port;
-            vp.peer.last_seen = std::chrono::steady_clock::now();
-
-            bool ok = true;
-            for (size_t i = 0; i < vp.pubkey.size() && ok; ++i)
-            {
-                auto hi = hex_to_nibble(pubkey_hex[i * 2U]);
-                auto lo = hex_to_nibble(pubkey_hex[i * 2U + 1U]);
-                if (!hi || !lo)
-                {
-                    ok = false;
-                    break;
-                }
-                vp.pubkey[i] = static_cast<uint8_t>((*hi << 4U) | *lo);
-                vp.peer.node_id[i] = vp.pubkey[i];
-            }
-
-            if (!ok || !rlpx::crypto::Ecdh::verify_public_key(vp.pubkey))
+            if (vp.peer.tcp_port != kSepoliaRlpxPort ||
+                !rlpx::crypto::Ecdh::verify_public_key(vp.pubkey))
             {
                 continue;
             }

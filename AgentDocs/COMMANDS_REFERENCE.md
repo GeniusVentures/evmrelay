@@ -68,21 +68,30 @@ curl -L https://enodes.gnus.ai/chain_enodes.json.gz -o chain_enodes.json.gz
 ./examples/eth_watch/eth_watch --chain ethereum-sepolia --max-peers-per-chain 3 --max-peers-total 24 --watch-event 'Transfer(address,address,uint256)'
 ```
 
-Ethereum and Polygon chains can also load ENR-tree roots from
-`examples/chains_config.json` when that file is next to the executable or in the
-current working directory. `chains_config.json` uses canonical chain keys and
-only carries discovery roots:
+Per-chain discovery defaults are loaded from `examples/chains_config.json` when
+that file is next to the executable or in the current working directory.
+`chains_config.json` uses canonical chain keys:
 
 ```json
 {
   "ethereum-mainnet": {
+    "discoveryDefault": "enr-tree",
     "enrTree": "enrtree://...@all.mainnet.ethdisco.net"
   },
   "polygon-mainnet": {
     "enrTree": "enrtree://...@pos.polygon-peers.io"
+  },
+  "bnb-smart-chain": {
+    "discoveryDefault": "discv4"
+  },
+  "base-mainnet": {
+    "discoveryDefault": "cache-enr-discv5"
   }
 }
 ```
+
+Supported `discoveryDefault` values are `auto`, `discv4`,
+`cache-enr-discv5`, and `enr-tree`.
 
 Resolved ENRs, cache `bootnodes`, and ENR-tree roots are discovery-only. They
 seed discv4/discv5 discovery; only discovered peers or cache `nodes` enter the

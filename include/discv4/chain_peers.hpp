@@ -14,6 +14,14 @@
 namespace discv4
 {
 
+enum class ChainDiscoveryDefault
+{
+    kAuto,
+    kDiscv4,
+    kCacheEnrDiscv5,
+    kEnrTree
+};
+
 /**
  * @brief Result of refreshing the local chain peer cache from a remote URL.
  */
@@ -34,7 +42,9 @@ struct ChainPeerConfig
     eth::Hash256               genesis_hash{};
     std::vector<ValidatedPeer> nodes;
     std::vector<ValidatedPeer> bootnodes;
+    std::vector<std::string>   discv5_bootnodes;
     std::vector<std::string>   enr_trees;
+    ChainDiscoveryDefault      discovery_default = ChainDiscoveryDefault::kAuto;
     std::optional<eth::ForkId> fork_id;
     std::string                signature;
     std::string                signer_address;

@@ -20,6 +20,25 @@ namespace eth {
 namespace
 {
 
+bool allows_enr_tree_discovery(const discv4::ChainPeerConfig& chain) noexcept
+{
+    return chain.discovery_default == discv4::ChainDiscoveryDefault::kAuto
+        || chain.discovery_default == discv4::ChainDiscoveryDefault::kEnrTree;
+}
+
+bool allows_cache_enr_discv5_discovery(const discv4::ChainPeerConfig& chain) noexcept
+{
+    return chain.discovery_default == discv4::ChainDiscoveryDefault::kAuto
+        || chain.discovery_default == discv4::ChainDiscoveryDefault::kCacheEnrDiscv5;
+}
+
+bool allows_discv4_discovery(const discv4::ChainPeerConfig& chain) noexcept
+{
+    return chain.discovery_default == discv4::ChainDiscoveryDefault::kAuto
+        || chain.discovery_default == discv4::ChainDiscoveryDefault::kDiscv4
+        || chain.discovery_default == discv4::ChainDiscoveryDefault::kEnrTree;
+}
+
 bool chain_config_matches_discovery_mode(
     const discv4::ChainPeerConfig& chain,
     EthWatchDiscoveryMode          mode,
@@ -29,9 +48,15 @@ bool chain_config_matches_discovery_mode(
     const bool has_cached_nodes = !chain.nodes.empty();
     const bool has_bootnodes = !chain.bootnodes.empty();
     const bool has_enr_tree = enable_enr_tree_discovery
-        && (!chain.enr_trees.empty()
-            || !discv5::default_enr_tree_urls_for_chain(chain.canonical_name, chain.network_id).empty());
-    const bool has_discovery_source = has_enr_tree || (enable_discv4_fallback && has_bootnodes);
+        && allows_enr_tree_discovery(chain)
+        && !chain.enr_trees.empty();
+    const bool has_discv5_bootnodes = enable_enr_tree_discovery
+        && allows_cache_enr_discv5_discovery(chain)
+        && !chain.discv5_bootnodes.empty();
+    const bool has_discovery_source =
+        has_enr_tree
+        || has_discv5_bootnodes
+        || (enable_discv4_fallback && allows_discv4_discovery(chain) && has_bootnodes);
 
     switch (mode)
     {
@@ -53,11 +78,14 @@ bool should_preload_cached_peers(EthWatchDiscoveryMode mode) noexcept
 }
 
 bool should_start_discv4_discovery(
-    const EthPeerQueue&      queue,
-    EthWatchDiscoveryMode    mode,
-    bool                     enable_discv4_fallback) noexcept
+    const EthPeerQueue&            queue,
+    const discv4::ChainPeerConfig& chain,
+    EthWatchDiscoveryMode          mode,
+    bool                           enable_discv4_fallback) noexcept
 {
-    if (!enable_discv4_fallback || queue.discovery_bootnodes().empty())
+    if (!enable_discv4_fallback ||
+        !allows_discv4_discovery(chain) ||
+        queue.discovery_bootnodes().empty())
     {
         return false;
     }
@@ -79,11 +107,7 @@ bool should_start_discv4_discovery(
 std::vector<std::string> configured_enr_tree_urls(
     const discv4::ChainPeerConfig& chain) noexcept
 {
-    if (!chain.enr_trees.empty())
-    {
-        return chain.enr_trees;
-    }
-    return discv5::default_enr_tree_urls_for_chain(chain.canonical_name, chain.network_id);
+    return chain.enr_trees;
 }
 
 bool should_start_enr_tree_discovery(
@@ -92,7 +116,9 @@ bool should_start_enr_tree_discovery(
     EthWatchDiscoveryMode          mode,
     bool                           enable_enr_tree_discovery) noexcept
 {
-    if (!enable_enr_tree_discovery || configured_enr_tree_urls(chain).empty())
+    if (!enable_enr_tree_discovery ||
+        !allows_enr_tree_discovery(chain) ||
+        configured_enr_tree_urls(chain).empty())
     {
         return false;
     }
@@ -109,6 +135,46 @@ bool should_start_enr_tree_discovery(
     }
 
     return false;
+}
+
+bool should_start_cache_enr_discovery(
+    const EthPeerQueue&            queue,
+    const discv4::ChainPeerConfig& chain,
+    EthWatchDiscoveryMode          mode,
+    bool                           enable_enr_tree_discovery) noexcept
+{
+    if (!enable_enr_tree_discovery ||
+        !allows_cache_enr_discv5_discovery(chain) ||
+        chain.discv5_bootnodes.empty())
+    {
+        return false;
+    }
+
+    switch (mode)
+    {
+    case EthWatchDiscoveryMode::kCacheOnly:
+        return false;
+    case EthWatchDiscoveryMode::kDiscoverIfNeeded:
+        return queue.cached_peer_count() == 0U;
+    case EthWatchDiscoveryMode::kDiscoverFirst:
+    case EthWatchDiscoveryMode::kHybrid:
+        return true;
+    }
+
+    return false;
+}
+
+discv4::FilterFn make_optional_fork_id_filter(
+    const std::array<uint8_t, 4U>& expected_hash) noexcept
+{
+    return [expected_hash](const discv4::DiscoveredPeer& peer) noexcept
+    {
+        if (!peer.eth_fork_id.has_value())
+        {
+            return true;
+        }
+        return peer.eth_fork_id->hash == expected_hash;
+    };
 }
 
 } // namespace
@@ -225,8 +291,8 @@ void EthWatchService::run(boost::asio::io_context& io) noexcept
 
         if (chain_config.fork_id.has_value())
         {
-            runtime.scheduler->filter_fn =
-                discv4::make_fork_id_filter(chain_config.fork_id->fork_hash);
+            runtime.scheduler->filter_fn = make_optional_fork_id_filter(
+                chain_config.fork_id->fork_hash);
         }
 
         runtime.peer_queue = make_eth_peer_queue(
@@ -247,8 +313,22 @@ void EthWatchService::run(boost::asio::io_context& io) noexcept
 
         if (runtime.peer_queue
             && !runtime.discv5_enr_tree_started
+            && should_start_cache_enr_discovery(
+                *runtime.peer_queue,
+                runtime.config,
+                orchestration_config_.discovery_mode,
+                orchestration_config_.enable_enr_tree_discovery))
+        {
+            runtime.discv5_cache_enr_started =
+                start_discv5_discovery(io, runtime, runtime.config.discv5_bootnodes);
+        }
+
+        if (runtime.peer_queue
+            && !runtime.discv5_enr_tree_started
+            && !runtime.discv5_cache_enr_started
             && should_start_discv4_discovery(
                 *runtime.peer_queue,
+                runtime.config,
                 orchestration_config_.discovery_mode,
                 orchestration_config_.enable_discv4_fallback))
         {
@@ -573,6 +653,19 @@ bool EthWatchService::start_enr_tree_discovery(
         bootstrap_enrs = discv5::EnrTreeResolver{}.resolve(urls);
     }
 
+    if (bootstrap_enrs.empty())
+    {
+        return false;
+    }
+
+    return start_discv5_discovery(io, runtime, bootstrap_enrs);
+}
+
+bool EthWatchService::start_discv5_discovery(
+    boost::asio::io_context&        io,
+    RuntimeChain&                   runtime,
+    const std::vector<std::string>& bootstrap_enrs) noexcept
+{
     if (bootstrap_enrs.empty())
     {
         return false;

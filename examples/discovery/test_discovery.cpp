@@ -14,7 +14,7 @@
 // Exit code 0 = chain peer cache loading checks pass, 1 = any chain peer cache loading check failed.
 //
 // Usage:
-//   ./test_discovery [--log-level debug] [--timeout 30] [--connections 1]
+//   ./test_discovery [--log-level debug] [--timeout 30] [--connections 1] [--stop-on-connection]
 
 #include <array>
 #include <atomic>
@@ -33,8 +33,6 @@
 #include <boost/asio/spawn.hpp>
 #include <boost/asio/steady_timer.hpp>
 
-#include <discv4/bootnodes.hpp>
-#include <discv4/bootnodes_test.hpp>
 #include <discv4/bootstrap_peers.hpp>
 #include <discv4/chain_peers.hpp>
 #include <discv4/dial_scheduler.hpp>
@@ -66,7 +64,6 @@ struct ChainTarget
     const char* chain_peer_cache_key;
     uint64_t network_id = 0;
     const char* genesis_hex;
-    const std::vector<std::string>* bootnodes = nullptr;
     std::optional<std::array<uint8_t, 4U>> fork_hash_fallback;
 };
 
@@ -102,9 +99,9 @@ static eth::Hash256 hash256_from_hex(const char* hex)
 static std::vector<ChainTarget> all_chain_targets()
 {
     return {
-        { "ethereum-mainnet", "ethereum-mainnet", 1, "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3", &ETHEREUM_MAINNET_BOOTNODES, std::array<uint8_t, 4U>{ 0x07, 0xc9, 0x46, 0x2e } },
-        { "ethereum-sepolia", "ethereum-sepolia", 11155111, "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9", &ETHEREUM_SEPOLIA_BOOTNODES, std::array<uint8_t, 4U>{ 0x26, 0x89, 0x56, 0xb6 } },
-        { "ethereum-holesky", "ethereum-holesky", 17000, "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4", &ETHEREUM_HOLESKY_BOOTNODES, std::array<uint8_t, 4U>{ 0x9b, 0xc6, 0xcb, 0x31 } }
+        { "ethereum-mainnet", "ethereum-mainnet", 1, "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3", std::array<uint8_t, 4U>{ 0x07, 0xc9, 0x46, 0x2e } },
+        { "ethereum-sepolia", "ethereum-sepolia", 11155111, "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9", std::array<uint8_t, 4U>{ 0x26, 0x89, 0x56, 0xb6 } },
+        { "ethereum-holesky", "ethereum-holesky", 17000, "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4", std::array<uint8_t, 4U>{ 0x9b, 0xc6, 0xcb, 0x31 } }
     };
 }
 
@@ -313,7 +310,7 @@ struct ChainRuntime
     std::shared_ptr<std::atomic<int>>          peers_count;
     std::shared_ptr<std::atomic<int>>          chain_peers_loaded;
     std::vector<discv4::ValidatedPeer>         bootstrap_peers;
-    std::shared_ptr<std::function<void()>>     maybe_finish;
+    std::shared_ptr<std::function<void()>>     on_connection_activity;
 };
 
 static std::optional<eth::ForkId> load_chain_fork_id(
@@ -406,28 +403,6 @@ static void seed_bootnodes(
         return;
     }
 
-    if (target.bootnodes == nullptr)
-    {
-        return;
-    }
-
-    for (const auto& enode : *target.bootnodes)
-    {
-        const auto bootnode_peer = discv4::make_validated_peer_from_enode(enode);
-        if (!bootnode_peer)
-        {
-            continue;
-        }
-
-        const std::string host_copy = bootnode_peer->peer.ip;
-        const uint16_t port_copy = bootnode_peer->peer.udp_port;
-        const discv4::NodeId bn_id = bootnode_peer->peer.node_id;
-        boost::asio::spawn(io,
-            [dv4, host_copy, port_copy, bn_id](boost::asio::yield_context yc)
-            {
-                (void)dv4->find_node(host_copy, port_copy, bn_id, yc);
-            });
-    }
 }
 
 static std::vector<discv4::ValidatedPeer> load_bootstrap_peers(
@@ -461,7 +436,8 @@ static std::optional<ChainRuntime> create_chain_runtime(
     const std::optional<discv4::ChainPeerCacheRefreshResult>& refresh_result,
     const rlpx::crypto::Ecdh::KeyPair&                   keypair,
     boost::asio::steady_timer&                           deadline,
-    const std::string&                                   argv0)
+    const std::string&                                   argv0,
+    bool                                                 stop_on_connection)
 {
     const auto fork_id = load_chain_fork_id(target, argv0);
     if (!fork_id)
@@ -478,7 +454,6 @@ static std::optional<ChainRuntime> create_chain_runtime(
     runtime.pool = std::make_shared<discv4::WatcherPool>(50, max_dials * 2);
     runtime.peers_count = std::make_shared<std::atomic<int>>(0);
     runtime.chain_peers_loaded = std::make_shared<std::atomic<int>>(0);
-    runtime.maybe_finish = std::make_shared<std::function<void()>>();
     runtime.bootstrap_peers = load_bootstrap_peers(target, chain_peers_json_file, refresh_result);
 
     discv4::discv4Config dv4_cfg;
@@ -488,32 +463,36 @@ static std::optional<ChainRuntime> create_chain_runtime(
     runtime.dv4 = std::make_shared<discv4::discv4_client>(io, dv4_cfg);
 
     auto sched_ref = std::make_shared<discv4::DialScheduler*>(nullptr);
+    runtime.on_connection_activity = std::make_shared<std::function<void()>>();
     runtime.scheduler = std::make_shared<discv4::DialScheduler>(io, runtime.pool,
         [stats = runtime.stats, fork_id_value = runtime.fork_id, genesis = runtime.genesis,
-         network_id = runtime.target.network_id, maybe_finish = runtime.maybe_finish]
+         network_id = runtime.target.network_id, on_connection_activity = runtime.on_connection_activity]
         (discv4::ValidatedPeer                                      vp,
          std::function<void(rlpx::DisconnectReason)> on_done,
          std::function<void(std::shared_ptr<rlpx::RlpxSession>)>   on_connected,
          boost::asio::yield_context                                 yc) mutable
         {
             dial_connect_only(vp, std::move(on_done),
-                [on_connected, maybe_finish]
+                [on_connected, on_connection_activity]
                 (std::shared_ptr<rlpx::RlpxSession> s) mutable
                 {
                     on_connected(s);
-                    (*maybe_finish)();
+                    (*on_connection_activity)();
                 },
-                [maybe_finish]()
+                [on_connection_activity]()
                 {
-                    (*maybe_finish)();
+                    (*on_connection_activity)();
                 },
                 yc, stats, fork_id_value, genesis, network_id);
         });
     *sched_ref = runtime.scheduler.get();
 
-    *runtime.maybe_finish = [&deadline]()
+    *runtime.on_connection_activity = [&deadline, stop_on_connection]()
     {
-        deadline.cancel();
+        if (stop_on_connection)
+        {
+            deadline.cancel();
+        }
     };
 
     // Do not pre-filter discovery/chain peer candidates by ENR fork id.
@@ -599,6 +578,7 @@ int main(int argc, char** argv)
     std::string chain_peers_json_path;
     std::string chain_peers_url = kChainPeersUrlDefault;
     bool chain_peers_url_enabled = true;
+    bool stop_on_connection = false;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -626,6 +606,10 @@ int main(int argc, char** argv)
         else if (arg == "--no-chain-peers-url" || arg == "--no-bootstrap-peers-url")
         {
             chain_peers_url_enabled = false;
+        }
+        else if (arg == "--stop-on-connection")
+        {
+            stop_on_connection = true;
         }
     }
 
@@ -701,7 +685,8 @@ int main(int argc, char** argv)
             refresh_result,
             keypair,
             deadline,
-            argv[0]);
+            argv[0],
+            stop_on_connection);
         if (runtime.has_value())
         {
             chain_runtimes.push_back(std::move(*runtime));

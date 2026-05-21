@@ -38,6 +38,7 @@ eth_watch <host> <port> <peer_pubkey_hex> [eth_offset]
 | Flag | Description |
 |------|-------------|
 | `--chain <name>` | Use a canonical chain cache key (see below) |
+| `--chains <name1,name2,...>` | Instantiate one service runtime per unique chain cache key |
 | `--watch-contract <0x…>` | Contract address to filter events on |
 | `--watch-event <sig>` | ABI event signature to match, e.g. `Transfer(address,address,uint256)` |
 | `--log-level <level>` | Logging verbosity: `trace` `debug` `info` `warn` `error` (default `info`) |
@@ -46,6 +47,8 @@ eth_watch <host> <port> <peer_pubkey_hex> [eth_offset]
 | `--no-chain-peers-url` | Disable remote fallback and use only package-local JSON/cache files |
 | `--peer-selection <mode>` | Select `cache-only`, `discover-if-needed`, `discover-first`, or `hybrid` |
 | `--cache-peer-start-offset <count>` | Rotate cached peers by `count` before spreading them across dial slots |
+| `--max-pending-peers <count>` | Cap queued peer candidates per chain while discovery outpaces available dial slots |
+| `--discv5-port <udp-port>` | Bind discv5 discovery to a specific UDP port |
 | `--run-seconds <seconds>` | Stop after a bounded live-test runtime and print final summaries |
 
 `--watch-contract` and `--watch-event` must be paired and can be repeated for
@@ -82,27 +85,35 @@ eth_watch <host> <port> <peer_pubkey_hex> [eth_offset]
 `eth_watch` matches `--chain` directly against top-level `chain_enodes.json(.gz)`
 keys. Use the canonical keys in the table above.
 
-### ENR-tree discovery config
+### Discovery config
 
-Ethereum and Polygon chains can load EIP-1459 DNS discovery roots from
-`chains_config.json`. The example looks for this file next to the executable and
-in the current working directory. It uses the same canonical top-level chain keys
-as `chain_enodes.json(.gz)`:
+Per-chain discovery policy comes from `chains_config.json`. The example looks
+for this file next to the executable and in the current working directory. It
+uses the same canonical top-level chain keys as `chain_enodes.json(.gz)`:
 
 ```json
 {
   "ethereum-mainnet": {
+    "discoveryDefault": "enr-tree",
     "enrTree": "enrtree://...@all.mainnet.ethdisco.net"
   },
   "polygon-mainnet": {
+    "discoveryDefault": "enr-tree",
     "enrTree": "enrtree://...@pos.polygon-peers.io"
+  },
+  "bnb-smart-chain": {
+    "discoveryDefault": "discv4"
+  },
+  "base-mainnet": {
+    "discoveryDefault": "cache-enr-discv5"
   }
 }
 ```
 
-`chains_config.json` is discovery-root configuration only. `eth_watch` still
-loads fork IDs, network IDs, cached `nodes`, and discv4 `bootnodes` from
-`chain_enodes.json(.gz)`.
+Supported `discoveryDefault` values are `auto`, `discv4`, `cache-enr-discv5`,
+and `enr-tree`. If a chain has no entry, `eth_watch` falls back to `auto`.
+`eth_watch` still loads fork IDs, network IDs, cached `nodes`, and discv4
+`bootnodes` from `chain_enodes.json(.gz)`.
 
 Resolved ENR-tree records are not direct RLPx/ETH peers. They seed discv5
 discovery, and only peers discovered through discv5 enter the shared dial queue.
@@ -135,6 +146,12 @@ gzip-compressed JSON file (`chain_enodes.json.gz`).
 busy. It rotates the cached `nodes` list first, then applies the normal
 band-spread behavior. For example, offset `50` turns `[0, 1, ... 99]` into
 `[50, 51, ... 99, 0, 1, ... 49]` before dialing.
+
+`--max-pending-peers 100` keeps discovery decoupled from active ETH session
+retention while bounding the per-chain backlog. Discovery can continue producing
+peer candidates after active session slots are full; candidates enter the
+scheduler queue while it is below this cap and are dropped deterministically once
+full.
 
 Live-test runs print phase summaries such as transport connect failures, RLPx
 auth successes, local HELLO sent, peer HELLO accepted, ETH Status sent/accepted,

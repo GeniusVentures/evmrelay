@@ -33,7 +33,7 @@
 #include <boost/asio/spawn.hpp>
 #include <boost/asio/steady_timer.hpp>
 
-#include <discv4/bootnodes_test.hpp>
+#include <discv4/chain_peers.hpp>
 #include <discv4/discv4_client.hpp>
 #include <rlpx/crypto/ecdh.hpp>
 #include <base/rlp-logger.hpp>
@@ -142,30 +142,6 @@ int main( int argc, char** argv )
         io.stop();
     } );
 
-    // ── Seed discovery with Sepolia bootnodes (identical to test_discovery) ───
-    auto parse_enode = []( const std::string& enode )
-        -> std::optional<std::tuple<std::string, uint16_t, std::string>>
-    {
-        const std::string prefix = "enode://";
-        if ( enode.substr( 0, prefix.size() ) != prefix ) { return std::nullopt; }
-        const auto at = enode.find( '@', prefix.size() );
-        if ( at == std::string::npos ) { return std::nullopt; }
-        const auto colon = enode.rfind( ':' );
-        if ( colon == std::string::npos || colon < at ) { return std::nullopt; }
-        std::string pubkey = enode.substr( prefix.size(), at - prefix.size() );
-        std::string host   = enode.substr( at + 1, colon - at - 1 );
-        uint16_t    port   = static_cast<uint16_t>( std::stoi( enode.substr( colon + 1 ) ) );
-        return std::make_tuple( host, port, pubkey );
-    };
-
-    auto hex_to_nibble = []( char c ) -> std::optional<uint8_t>
-    {
-        if ( c >= '0' && c <= '9' ) { return static_cast<uint8_t>( c - '0' ); }
-        if ( c >= 'a' && c <= 'f' ) { return static_cast<uint8_t>( 10 + c - 'a' ); }
-        if ( c >= 'A' && c <= 'F' ) { return static_cast<uint8_t>( 10 + c - 'A' ); }
-        return std::nullopt;
-    };
-
     const auto start_result = dv4->start();
     if ( !start_result )
     {
@@ -173,24 +149,23 @@ int main( int argc, char** argv )
         return 1;
     }
 
-    for ( const auto& enode : ETHEREUM_SEPOLIA_BOOTNODES )
+    const auto chain_config = load_chain_peer_config(
+        "ethereum-sepolia",
+        argv[0],
+        "",
+        "https://enodes.gnus.ai/chain_enodes.json.gz",
+        true );
+    if ( !chain_config.has_value() )
     {
-        auto parsed = parse_enode( enode );
-        if ( !parsed ) { continue; }
-        const auto& [host, port, pubkey_hex] = *parsed;
-        if ( pubkey_hex.size() != 128 ) { continue; }
-        discv4::NodeId bn_id{};
-        bool ok = true;
-        for ( size_t i = 0; i < 64 && ok; ++i )
-        {
-            auto hi = hex_to_nibble( pubkey_hex[i * 2] );
-            auto lo = hex_to_nibble( pubkey_hex[i * 2 + 1] );
-            if ( !hi || !lo ) { ok = false; break; }
-            bn_id[i] = static_cast<uint8_t>( ( *hi << 4 ) | *lo );
-        }
-        if ( !ok ) { continue; }
-        std::string host_copy = host;
-        uint16_t    port_copy = port;
+        std::cout << "Failed to load ethereum-sepolia chain metadata\n";
+        return 1;
+    }
+
+    for ( const auto& bootnode_peer : chain_config->bootnodes )
+    {
+        std::string host_copy = bootnode_peer.peer.ip;
+        uint16_t    port_copy = bootnode_peer.peer.udp_port;
+        discv4::NodeId bn_id = bootnode_peer.peer.node_id;
         boost::asio::spawn( io,
             [dv4, host_copy, port_copy, bn_id]( boost::asio::yield_context yc )
             {

@@ -50,7 +50,7 @@ This automatically uses the first Sepolia bootstrap node from the configuration.
 
 ## All Available Sepolia Bootstrap Nodes
 
-From `/include/rlp/PeerDiscovery/bootnodes_test.hpp`:
+From generated chain metadata in `chain_enodes.json(.gz)`:
 
 ### Node 1 (Recommended for Testing)
 ```bash
@@ -158,4 +158,3 @@ cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGen
 **Expected result:** Connection succeeds, HELLO exchange works, but no block messages (because it's a bootstrap node).
 
 **To get block messages:** You need to use the maintained discovery harnesses to find real peers, or run your own Geth node.
-

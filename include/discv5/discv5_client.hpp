@@ -42,7 +42,7 @@ using udp = asio::ip::udp;
 ///
 /// @code{.cpp}
 ///   discv5::discv5Config cfg;
-///   cfg.bootstrap_enrs = ChainBootnodeRegistry::for_chain(ChainId::kEthereumSepolia)->fetch();
+///   cfg.bootstrap_enrs = chain_config.discv5_bootnodes;
 ///   auto client = std::make_unique<discv5::discv5_client>(io, cfg);
 ///   client->set_peer_discovered_callback([](const discovery::ValidatedPeer& p){ … });
 ///   client->start();

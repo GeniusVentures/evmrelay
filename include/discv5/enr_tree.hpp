@@ -48,10 +48,6 @@ private:
     DnsTxtLookupFn lookup_;
 };
 
-[[nodiscard]] std::vector<std::string> default_enr_tree_urls_for_chain(
-    const std::string& canonical_name,
-    uint64_t           network_id) noexcept;
-
 } // namespace discv5
 
 #endif // EVMRELAY_INCLUDE_DISCV5_ENR_TREE_HPP

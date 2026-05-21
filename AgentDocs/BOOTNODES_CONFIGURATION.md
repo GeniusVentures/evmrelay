@@ -105,24 +105,32 @@ Within each chain entry, `nodes` are RLPx/ETH peer candidates and `bootnodes`
 are discovery-only seeds. Bootnodes are not direct event-watching peers.
 Use canonical chain keys such as `ethereum-sepolia` or `ethereum-mainnet`.
 
-For Ethereum and Polygon chains, `eth_watch` also loads the matching `enrTree`
-entry from `examples/chains_config.json` when present next to the executable or
-in the current working directory. The top-level keys in that file must be the
-same canonical chain keys:
+`eth_watch` also loads per-chain discovery defaults from
+`examples/chains_config.json` when present next to the executable or in the
+current working directory. The top-level keys in that file must be the same
+canonical chain keys:
 
 ```json
 {
   "ethereum-mainnet": {
+    "discoveryDefault": "enr-tree",
     "enrTree": "enrtree://...@all.mainnet.ethdisco.net"
   },
   "polygon-mainnet": {
     "enrTree": "enrtree://...@pos.polygon-peers.io"
+  },
+  "bnb-smart-chain": {
+    "discoveryDefault": "discv4"
+  },
+  "base-mainnet": {
+    "discoveryDefault": "cache-enr-discv5"
   }
 }
 ```
 
-`chains_config.json` is only for ENR-tree roots. Fork hashes and network metadata
-continue to come from generated `chain_enodes.json(.gz)`.
+Supported `discoveryDefault` values are `auto`, `discv4`,
+`cache-enr-discv5`, and `enr-tree`. Fork hashes and network metadata continue to
+come from generated `chain_enodes.json(.gz)`.
 
 If no local cache exists, `eth_watch` attempts to refresh from:
 `https://enodes.gnus.ai/chain_enodes.json.gz`.
@@ -297,9 +305,8 @@ To update bootnodes:
 
 1. Check the official GitHub repositories for each chain
 2. Extract the enode strings from `params/config.go` or `params/bootnodes.go`
-3. Update the corresponding array in:
-   - `/include/rlp/PeerDiscovery/bootnodes.hpp` (mainnet)
-   - `/include/rlp/PeerDiscovery/bootnodes_test.hpp` (testnet)
+3. Regenerate or update `chain_enodes.json(.gz)` and keep per-chain discovery
+   defaults in `examples/chains_config.json`.
 
 ## Future Enhancements
 

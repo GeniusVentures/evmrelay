@@ -67,10 +67,3 @@ TEST(EnrTreeResolverTest, ResolvesBreadthFirstAcrossBranches)
     ASSERT_EQ(enrs.size(), 1U);
     EXPECT_EQ(enrs.front(), kValidEnr);
 }
-
-TEST(EnrTreeResolverTest, DefaultEthereumRootsAreConfigured)
-{
-    const auto roots = discv5::default_enr_tree_urls_for_chain("ethereum-mainnet", 1U);
-    ASSERT_EQ(roots.size(), 1U);
-    EXPECT_NE(roots.front().find("all.mainnet.ethdisco.net"), std::string::npos);
-}

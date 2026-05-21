@@ -1,5 +1,192 @@
 # Checkpoint Log
 
+## Data-driven discovery cleanup and hand-off - 2026-05-21
+
+### Current State
+
+- Repository: `evmrelay`
+- Branch: check with `git branch --show-current` in the new chat.
+- Goal of the current work: make discovery and chain behavior data-driven from the beginning, removing hardcoded source registries and defaults.
+- Important user preference: do not implement hardcoded "make it work first, refactor later" paths. Add/extend data schema first, then parse/validate, then wire behavior through explicit configuration and small interfaces.
+
+### What Changed
+
+- Per-chain discovery policy is now data-driven through `examples/chains_config.json`.
+  - `_defaultAllChains` controls `eth_watch --all-chains`.
+  - `discoveryDefault` supports `auto`, `discv4`, `cache-enr-discv5`, and `enr-tree`.
+  - `enrTree` / `enrTrees` carries ENR-tree roots.
+- `examples/chain_config.hpp` is now the shared example-side config loader for:
+  - `chains_config.json` root and per-chain entries.
+  - default chain lists.
+  - per-chain discovery defaults and ENR-tree roots.
+  - local or refreshed `chain_enodes.json(.gz)` chain metadata.
+- `eth_watch` now:
+  - supports `--chains <chain1,chain2,...>`.
+  - uses per-chain service runtimes instead of one global class instance.
+  - uses OS-assigned discovery ports in multi-chain mode unless `--discv5-port` is explicitly set.
+  - supports `--max-pending-peers`.
+  - keeps discovery decoupled from active ETH session slots via bounded pending queues.
+  - prints final per-chain discovery summaries.
+- `EthWatchService` now:
+  - honors `ChainDiscoveryDefault` per chain.
+  - starts ENR-tree discv5, cache-ENR discv5, or discv4 according to explicit chain config.
+  - accepts discovered peers without ENR fork metadata and still rejects explicit fork mismatches.
+  - no longer falls back to compiled ENR-tree roots.
+- `ChainPeerConfig` now carries:
+  - `discv5_bootnodes`, parsed from ENR records in `nodes` and `bootnodes`.
+  - `enr_trees`.
+  - `discovery_default`.
+- Removed compiled bootnode/discovery registries:
+  - `include/discv4/bootnodes.hpp`
+  - `include/discv4/bootnodes_test.hpp`
+  - `include/discv5/discv5_bootnodes.hpp`
+  - `src/discv5/discv5_bootnodes.cpp`
+  - `test/discv5/discv5_bootnodes_test.cpp`
+- `discv5_crawl`, `test_discovery`, `test_discv5_connect`, and `test_enr_survey` now load chain data instead of using compiled bootnode arrays.
+- `AgentDocs/CLAUDE.md` now explicitly requires data-driven, GOF-style, loosely-coupled, modular design from the first implementation step.
+
+### Live Findings From This Checkpoint
+
+- BSC mainnet/testnet with `discoveryDefault=discv4` is productive:
+  - 10-second run discovered roughly 704 peers total across both BSC chains.
+  - Mainnet discovered roughly 333 peers; testnet discovered roughly 371 peers.
+- Polygon mainnet/amoy with `discoveryDefault=enr-tree` now starts discv5 through configured ENR trees:
+  - 15-second run discovered 3 candidates total.
+  - This confirmed the earlier Polygon issue was config loading, not discv5 itself.
+- Standalone `discv5_crawl --chain polygon --port 0 --timeout 10` previously produced 16 callback discoveries using Polygon seeds.
+
+### Design Rules For Next Chat
+
+- Do not add chain/network/discovery facts to C++ source.
+- If a value varies by chain/network/deployment, put it in `chain_enodes.json(.gz)` or `chains_config.json`, then parse and validate it.
+- Do not add static registries, static bootnode arrays, switch statements over chain IDs, or helper functions that infer policy from chain names.
+- If no explicit config exists, generic protocol inference is allowed only after data-driven config has been checked.
+- Tests can use local fixtures, but fixtures must not become production registries.
+- Prefer Strategy/Factory seams over source-level branching when behavior varies.
+
+### Commands Already Verified
+
+```bash
+cd evmrelay
+cmake --build build/OSX/Debug --target \
+  eth_watch \
+  discv5_crawl \
+  test_discovery \
+  test_enr_survey \
+  test_discv5_connect \
+  eth_watch_service_test \
+  discv5_enr_tree_test
+
+ctest --test-dir build/OSX/Debug \
+  -R 'eth_watch_service_test|discv5_enr_tree_test|discv5_crawler_test' \
+  --output-on-failure
+
+ctest --test-dir build/OSX/Debug \
+  -R 'discv5_client_test' \
+  --output-on-failure
+
+git diff --check
+```
+
+Notes:
+
+- `discv5_client_test` needs local UDP bind permission. It failed under restricted sandbox with `bind: Operation not permitted`, then passed when rerun with elevated local socket permissions.
+- Untracked local artifacts intentionally not part of this checkpoint:
+  - `examples/all.json`
+  - `examples/logs/`
+  - `go-ethereum/`
+  - `kelpdao-incident-report.pdf`
+  - `rlp_enodes/`
+
+### Suggested Next Steps
+
+- Run a final live multi-chain stress test after pulling this checkpoint into a new chat:
+  - Ethereum mainnet/sepolia
+  - Polygon mainnet/amoy
+  - BSC mainnet/testnet
+  - Base mainnet/sepolia
+  - Gnosis
+- Use `--chains` with OS-assigned discovery ports, `--peer-selection discover-first`, `--max-pending-peers 100`, and a short bounded `--run-seconds`.
+- Compare default discovery per chain from `chains_config.json`: ENR-tree, cache-ENR discv5, and discv4.
+- Consider moving example-side config loading from `examples/chain_config.hpp` into a reusable library module if non-example binaries need the same data-driven discovery configuration.
+
+## discv4 discovery queue and Base/BSC/Gnosis live comparison - 2026-05-21
+
+### Completed in this step
+
+- `examples/discovery/test_discovery.cpp`
+  - No longer cancels the live discovery timeout after the first connection/activity by default.
+  - Adds explicit `--stop-on-connection` for the old early-stop behavior.
+- `examples/eth_watch/eth_watch.cpp`
+  - Adds `--max-pending-peers <N>` so live discovery can keep a bounded per-chain backlog, e.g. 100 candidates, while active ETH session retention remains separate.
+- `src/eth/eth_watch_service.cpp`
+  - Changes the service scheduler fork filter to accept discovered peers with no ENR fork metadata and still reject peers that explicitly advertise the wrong fork hash.
+  - This lets discv4 fallback candidates reach ETH Status validation instead of being dropped before dialing.
+- `test/eth/eth_watch_service_test.cpp`
+  - Covers the Gnosis-style discv4 fallback handoff with a discovered peer that has no ENR `eth_fork_id`.
+
+### Live discv4 comparison
+
+All runs used:
+
+```bash
+--chain-peers-json ./chain_enodes.json.gz
+--max-peers-per-chain 3
+--max-peers-total 3
+--max-pending-peers 100
+--watch-event 'Transfer(address,address,uint256)'
+```
+
+Observed 60-second runs before the Gnosis fork-filter fix:
+
+```text
+base-mainnet hybrid:
+cached_peers=85 discovered_peers=0 auth_success=16 peer_hello_accepted=2 remote_status_accepted=0 remote_status_rejected=2
+
+base-mainnet discover-first:
+cached_peers=0 discovered_peers=0 auth_success=0 peer_hello_accepted=0 remote_status_accepted=0
+
+bnb-smart-chain hybrid:
+cached_peers=100 discovered_peers=13678 auth_success=329 peer_hello_accepted=48 remote_status_accepted=0 remote_status_rejected=45
+
+bnb-smart-chain discover-first:
+cached_peers=0 discovered_peers=17678 auth_success=477 peer_hello_accepted=41 remote_status_accepted=0 remote_status_rejected=41
+
+gnosis-chain hybrid:
+cached_peers=0 discovered_peers=24582 auth_success=0 peer_hello_accepted=0 remote_status_accepted=0
+
+gnosis-chain discover-first:
+cached_peers=0 discovered_peers=24473 auth_success=0 peer_hello_accepted=0 remote_status_accepted=0
+```
+
+Post-fix 30-second Gnosis discover-first smoke:
+
+```text
+cached_peers=0
+discovered_peers=669
+transport_connect_failures=17
+auth_success=24
+peer_hello_accepted=17
+eth_status_sent=17
+remote_status_accepted=0
+remote_status_rejected=16
+```
+
+### Current interpretation
+
+- Base discv4 bootnodes did not produce candidates in the 60-second discover-first sample; hybrid only exercised cached peers.
+- BNB Smart Chain discv4 discovery is very productive; discover-first reached more RLPx auth attempts than hybrid in the sampled run, but neither accepted ETH Status.
+- Gnosis discovery was producing peers, but the service dropped them before dialing because they lacked ENR fork metadata. The service now dials those candidates and relies on ETH Status as the authoritative validation.
+
+### Verification
+
+```bash
+cd evmrelay/build/OSX/Debug
+cmake --build . --target eth_watch test_discovery eth_watch_example_test eth_watch_service_test
+ctest -R 'eth_watch_service_test|eth_watch_example_test' --output-on-failure
+git diff --check
+```
+
 ## Sepolia live peer connectivity and ENR-only validation - 2026-05-20
 
 ### Current state
@@ -190,7 +377,7 @@ Observed results on 2026-05-19:
 ```bash
 cd evmrelay/build/OSX/Debug
 ninja
-ctest -R 'discv5_enr_test|discv5_enr_tree_test|discv5_bootnodes_test|eth_enr_tree_peer_cache_live_test|eth_watch_service_test|eth_watch_example_test|eth_watch_cli_test|eth_watch_runner_test|discv4_chain_peers_test|discv4_dial_scheduler_test' --output-on-failure
+ctest -R 'discv5_enr_test|discv5_enr_tree_test|eth_enr_tree_peer_cache_live_test|eth_watch_service_test|eth_watch_example_test|eth_watch_cli_test|eth_watch_runner_test|discv4_chain_peers_test|discv4_dial_scheduler_test' --output-on-failure
 git diff --check
 ```
 
@@ -783,3 +970,72 @@ Route finalized `gnus.bridge_event.v1` certificates into the existing bridge min
 
 Keep bridge parsing outside core consensus. Add tests for proposal/certificate handling and successful finalized bridge claim routing.
 ```
+
+### eth_watch discovery follow-up - 2026-05-21
+
+Current local discovery work is in progress and not yet committed:
+
+- `include/discv4/chain_peers.hpp`
+  - `ChainPeerConfig` now carries `discv5_bootnodes`, populated from ENR records in chain peer cache `bootnodes` and `nodes`.
+- `src/discv4/chain_peers.cpp`
+  - Parses cache ENR records into `discv5_bootnodes` so chains without ENR-tree roots can still seed discv5 discovery from the cache package.
+- `include/eth/eth_watch_service.hpp` and `src/eth/eth_watch_service.cpp`
+  - `EthWatchService` can start discv5 from cached ENR seeds when ENR-tree roots are absent.
+  - `discover-first` starts with an empty RLPx peer queue, then feeds the queue from discv5 discoveries.
+  - `discover-if-needed` starts cache-ENR discv5 only when no cached RLPx peers are queued.
+  - discv4 fallback is skipped when cache-ENR discv5 starts successfully.
+  - Discovery filtering is permissive for missing ENR fork metadata while still rejecting explicit wrong fork hashes.
+- `examples/eth_watch/eth_watch.cpp`
+  - Adds `--max-pending-peers <count>` so discovery can continue producing candidates while active connection slots are full, bounded by the per-chain queue cap.
+  - Adds `--discv5-port <udp-port>` for live runs that need a chain-specific UDP discovery bind port, such as Base UDP 9222.
+- `examples/discovery/test_discovery.cpp`
+  - Discovery no longer stops at first successful connection/activity by default.
+  - Adds `--stop-on-connection` for the old early-stop behavior.
+- `examples/README.md`
+  - Documents `--max-pending-peers` and `--discv5-port`.
+- Tests updated:
+  - `test/eth/eth_watch_service_test.cpp`
+  - `test/discv4/chain_peers_test.cpp`
+
+Verification run:
+
+```bash
+cd evmrelay
+cmake --build build/OSX/Debug --target eth_watch eth_watch_service_test discv4_chain_peers_test
+cd build/OSX/Debug
+ctest -R 'eth_watch_service_test|discv4_chain_peers_test' --output-on-failure
+cd ../..
+git diff --check
+```
+
+Result: focused build, focused tests, and whitespace check passed.
+
+Live discovery results:
+
+- Base hybrid with cache preload, 60s:
+  - `cached_peers=85 discovered_peers=0 auth_success=16 peer_hello_accepted=2 remote_status_accepted=0 remote_status_rejected=2`
+- Base discover-first with discv4 fallback before cache-ENR discv5 support, 60s:
+  - `cached_peers=0 discovered_peers=0 auth_success=0`
+- Base standalone discv5 crawl from 8 cache ENRs, UDP 9222, no RLPx preload, 60s:
+  - `callback discoveries=633 packets_received=208 whoareyou=44 nodes_packets=164 discovered=633 queued=593 measured=48 failed=0 wrong_chain=0`
+- Base `eth_watch` discover-first from cache ENRs, discv5 UDP 9000, no RLPx preload, 45s:
+  - `discv4_clients=0 cached_peers=0 discovered_peers=23 transport_connect_failures=0 auth_success=23 peer_disconnect_before_hello=23 peer_hello_accepted=0`
+- Base `eth_watch` discover-first from cache ENRs, discv5 UDP 9222, no RLPx preload, 45s:
+  - Command:
+    `./examples/eth_watch/eth_watch --chain base-mainnet --chain-peers-json ./chain_enodes.json.gz --peer-selection discover-first --max-peers-per-chain 3 --max-peers-total 3 --max-pending-peers 100 --discv5-port 9222 --run-seconds 45 --watch-event 'Transfer(address,address,uint256)'`
+  - Result:
+    `discv4_clients=0 cached_peers=0 discovered_peers=23 transport_connect_failures=0 auth_success=23 peer_disconnect_before_hello=23 peer_hello_accepted=0 eth_status_sent=0 remote_status_accepted=0 remote_status_rejected=0`
+- BNB hybrid with cache preload, 60s:
+  - `cached_peers=100 discovered_peers=13678 auth_success=329 peer_hello_accepted=48 remote_status_accepted=0 remote_status_rejected=45`
+- BNB discover-first, 60s:
+  - `cached_peers=0 discovered_peers=17678 auth_success=477 peer_hello_accepted=41 remote_status_accepted=0 remote_status_rejected=41`
+- Gnosis discover-first after permissive missing-fork filter, 30s:
+  - `cached_peers=0 discovered_peers=669 transport_connect_failures=17 auth_success=24 peer_hello_accepted=17 eth_status_sent=17 remote_status_accepted=0 remote_status_rejected=16`
+
+Interpretation:
+
+- Base has working discv5 discovery from cached ENR records; the service now reaches RLPx auth without preloading cache nodes.
+- Binding discv5 to UDP 9222 did not change the 45s Base service outcome compared with UDP 9000 in this environment: both yielded 23 RLPx auth successes and all peers disconnected before HELLO.
+- The next Base blocker is not discovery startup; it is post-auth peer behavior before HELLO, likely remote admission / peer capacity / advertised protocol expectations.
+- BNB discovery is much richer and continues to feed the queue under discover-first.
+- Gnosis required allowing missing fork metadata on discovered ENRs; after that, it reaches ETH Status but peers reject Status.

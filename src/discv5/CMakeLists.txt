@@ -3,7 +3,6 @@ add_library(discv5 OBJECT
         ${CMAKE_CURRENT_LIST_DIR}/discv5_error.cpp
         ${CMAKE_CURRENT_LIST_DIR}/discv5_enr.cpp
         ${CMAKE_CURRENT_LIST_DIR}/enr_tree.cpp
-        ${CMAKE_CURRENT_LIST_DIR}/discv5_bootnodes.cpp
         ${CMAKE_CURRENT_LIST_DIR}/discv5_crawler.cpp
         ${CMAKE_CURRENT_LIST_DIR}/discv5_client.cpp
 )
@@ -28,4 +27,3 @@ install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../../include/discv5/
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/discv5
         FILES_MATCHING PATTERN "*.hpp"
 )
-

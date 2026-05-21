@@ -344,6 +344,7 @@ private:
         std::shared_ptr<discv5::discv5_client>  discv5_client;
         bool                                    discv4_fallback_started = false;
         bool                                    discv5_enr_tree_started = false;
+        bool                                    discv5_cache_enr_started = false;
         std::shared_ptr<EthWatchRuntimeStatsSnapshot> stats;
     };
 
@@ -355,6 +356,10 @@ private:
     bool start_enr_tree_discovery(
         boost::asio::io_context& io,
         RuntimeChain&            runtime) noexcept;
+    bool start_discv5_discovery(
+        boost::asio::io_context&       io,
+        RuntimeChain&                  runtime,
+        const std::vector<std::string>& bootstrap_enrs) noexcept;
 
     bool                           orchestration_initialized_ = false;
     bool                           orchestration_running_ = false;

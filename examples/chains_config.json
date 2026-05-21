@@ -1,20 +1,47 @@
 {
+  "_defaultAllChains": [
+    "ethereum-mainnet",
+    "polygon-mainnet",
+    "bnb-smart-chain",
+    "base-mainnet"
+  ],
   "ethereum-mainnet": {
+    "discoveryDefault": "enr-tree",
     "enrTree": "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.mainnet.ethdisco.net"
   },
   "ethereum-sepolia": {
+    "discoveryDefault": "enr-tree",
     "enrTree": "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.sepolia.ethdisco.net"
   },
   "ethereum-holesky": {
+    "discoveryDefault": "enr-tree",
     "enrTree": "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.holesky.ethdisco.net"
   },
   "ethereum-hoodi": {
+    "discoveryDefault": "enr-tree",
     "enrTree": "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.hoodi.ethdisco.net"
   },
   "polygon-mainnet": {
+    "discoveryDefault": "enr-tree",
     "enrTree": "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io"
   },
   "polygon-amoy": {
+    "discoveryDefault": "enr-tree",
     "enrTree": "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@amoy.polygon-peers.io"
+  },
+  "bnb-smart-chain": {
+    "discoveryDefault": "discv4"
+  },
+  "bnb-smart-chain-testnet": {
+    "discoveryDefault": "discv4"
+  },
+  "base-mainnet": {
+    "discoveryDefault": "cache-enr-discv5"
+  },
+  "base-sepolia": {
+    "discoveryDefault": "cache-enr-discv5"
+  },
+  "gnosis-chain": {
+    "discoveryDefault": "discv4"
   }
 }

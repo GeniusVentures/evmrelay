@@ -31,8 +31,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
+#include <map>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -64,6 +67,7 @@ struct CliArgs
     std::string           chain_peers_url  = kDefaultChainPeersUrl;
     bool                  chain_peers_url_enabled = true;
     std::vector<std::string> extra_enrs{};
+    bool                  require_chain_fork = false;
     uint16_t              bind_port        = discv5::kDefaultUdpPort;
     uint32_t              timeout_sec      = 60U;
     std::string           log_level        = "info";
@@ -79,6 +83,7 @@ void print_usage(const char* argv0)
         << "  --chain-peers-url <url>   Override remote chain metadata cache URL\n"
         << "  --no-chain-peers-url      Disable remote metadata cache refresh\n"
         << "  --bootnode-enr <uri>   Add extra ENR or enode URI (may repeat)\n"
+        << "  --require-chain-fork   Apply the loaded chain fork-id filter\n"
         << "  --port <udp-port>      Local UDP bind port (default: " << discv5::kDefaultUdpPort << ")\n"
         << "  --timeout <secs>       Stop after N seconds (default: 60)\n"
         << "  --log-level <level>    trace|debug|info|warn|error (default: info)\n"
@@ -138,6 +143,10 @@ std::optional<CliArgs> parse_args(int argc, char** argv)
             const char* val = require_next("--bootnode-enr");
             if (!val) { return std::nullopt; }
             args.extra_enrs.emplace_back(val);
+        }
+        else if (flag == "--require-chain-fork")
+        {
+            args.require_chain_fork = true;
         }
         else if (flag == "--port")
         {
@@ -324,6 +333,17 @@ const char* consistency_note(
     return "counters are internally consistent for the current partial discv5 harness";
 }
 
+std::string format_fork_hash(const std::array<uint8_t, 4U>& hash)
+{
+    std::ostringstream out;
+    out << std::hex << std::setfill('0');
+    for (const auto byte : hash)
+    {
+        out << std::setw(2) << static_cast<unsigned>(byte);
+    }
+    return out.str();
+}
+
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -402,6 +422,14 @@ int main(int argc, char** argv)
                          args.chain,
                          chain_config->discv5_bootnodes.size());
         }
+
+        if (args.require_chain_fork && chain_config->fork_id.has_value())
+        {
+            discv5::ForkId fork_id{};
+            fork_id.hash = chain_config->fork_id->fork_hash;
+            fork_id.next = chain_config->fork_id->next_fork;
+            cfg.required_fork_id = fork_id;
+        }
     }
     else
     {
@@ -431,11 +459,21 @@ int main(int argc, char** argv)
     // Track peers as they are discovered.
     std::atomic<size_t> total_discovered{0U};
     std::atomic<size_t> total_errors{0U};
+    std::map<std::pair<std::array<uint8_t, 4U>, uint64_t>, size_t> fork_counts;
+    size_t no_fork_id_count = 0U;
 
     client.set_peer_discovered_callback(
-        [&logger, &total_discovered](const discovery::ValidatedPeer& peer)
+        [&logger, &total_discovered, &fork_counts, &no_fork_id_count](const discovery::ValidatedPeer& peer)
         {
             ++total_discovered;
+            if (peer.eth_fork_id.has_value())
+            {
+                ++fork_counts[{peer.eth_fork_id->hash, peer.eth_fork_id->next}];
+            }
+            else
+            {
+                ++no_fork_id_count;
+            }
             logger->debug("Discovered peer {}  {}:{}  eth_fork={}",
                          total_discovered.load(),
                          peer.ip,
@@ -562,9 +600,18 @@ int main(int argc, char** argv)
               << "  wrong_chain : " << stats.wrong_chain   << "\n"
               << "  no_eth_entry: " << stats.no_eth_entry  << "\n"
               << "  invalid_enr : " << stats.invalid_enr   << "\n"
+              << "  emitted no fork id : " << no_fork_id_count << "\n"
+              << "  emitted fork ids   : " << fork_counts.size() << " distinct\n"
               << "  interpretation: " << interpretation                        << "\n"
               << "  counter consistency: " << counter_note                     << "\n"
               << "  note        : use --log-level trace to include detailed handshake/message diagnostics\n";
+
+    for (const auto& [fork, count] : fork_counts)
+    {
+        std::cout << "    fork_hash=" << format_fork_hash(fork.first)
+                  << " fork_next=" << fork.second
+                  << " count=" << count << "\n";
+    }
 
     if (show_trace_diagnostics)
     {

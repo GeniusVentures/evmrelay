@@ -23,10 +23,12 @@
   },
   "polygon-mainnet": {
     "discoveryDefault": "enr-tree",
+    "discoveryForkFilter": "disabled",
     "enrTree": "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io"
   },
   "polygon-amoy": {
     "discoveryDefault": "enr-tree",
+    "discoveryForkFilter": "disabled",
     "enrTree": "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@amoy.polygon-peers.io"
   },
   "bnb-smart-chain": {

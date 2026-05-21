@@ -1,5 +1,127 @@
 # Checkpoint Log
 
+## Discover-only producer/consumer mode and Polygon ENR fork-filter policy - 2026-05-21
+
+### Current State
+
+- Repository: `evmrelay`
+- Branch: check with `git branch --show-current`.
+- Local commit for this checkpoint: see `git log -1 --oneline`.
+- User preference reinforced in this step:
+  - Do not fake behavior with no-op consumers when the design should allow producers to run without a consumer.
+  - Keep chain-specific discovery behavior data-driven in `examples/chains_config.json`, not hardcoded in C++.
+
+### What Changed
+
+- `eth_watch` now supports `--discover-only`.
+  - In `--chain`, `--chains`, or `--all-chains` service mode, it starts configured discovery producers and peer queues without attaching an RLPx/ETH dial consumer.
+  - Direct host/enode mode rejects `--discover-only`.
+- `EthWatchServiceConfig` now has `attach_peer_dialer`.
+  - Default is `true`.
+  - When `false`, `EthWatchService` creates runtime peer queues and discovery clients, but does not create `DialScheduler` instances.
+- `EthPeerQueue` now accepts and deduplicates cached/discovered peer candidates even when no scheduler is attached.
+  - This is the producer/consumer split: producers can fill/count queue input with no dial consumer.
+  - Live discover-only runs now keep `active_sessions=0` and `disconnect_feedback=0`.
+- Per-chain discv5 ENR fork filtering is now data-driven.
+  - `ChainPeerConfig` carries `discovery_fork_filter`.
+  - `examples/chain_config.hpp` parses `discoveryForkFilter`.
+  - Supported values are `require` and `disabled`.
+  - Default remains `require`.
+- `examples/chains_config.json` sets:
+  - `polygon-mainnet.discoveryForkFilter = "disabled"`
+  - `polygon-amoy.discoveryForkFilter = "disabled"`
+- `EthWatchService` only sets `discv5Config.required_fork_id` when the chain policy requires it.
+  - ETH Status remains the authoritative validation after dialing.
+- `discv5_crawl` diagnostics improved:
+  - Adds `--require-chain-fork` to reproduce service-side fork filtering in the crawl harness.
+  - Prints emitted fork-id distribution and count of emitted peers without fork id.
+  - Its CMake now copies `chains_config.json` next to the binary like the other examples.
+
+### Polygon Finding
+
+- Polygon ENR-tree discovery was not actually slow. The discv5 fork-id filter was dropping nearly all results.
+- Diagnostic crawl using both `chains_config.json` and `chain_enodes.json.gz`:
+
+```text
+polygon-mainnet unfiltered:
+  callback discoveries: 16
+
+polygon-mainnet with --require-chain-fork:
+  callback discoveries: 0
+  wrong_chain: 3
+  no_eth_entry: 13
+
+polygon-amoy unfiltered:
+  callback discoveries: 128
+
+polygon-amoy with --require-chain-fork:
+  callback discoveries: 1
+  wrong_chain: 72
+  no_eth_entry: 55
+```
+
+- Fork distribution showed Polygon ENR responses often omit `eth` fork id or advertise non-Polygon fork hashes.
+  - Mainnet sample had 0 peers advertising configured `22d523b2`.
+  - Amoy sample had only 1 peer advertising configured `8b7e4175`.
+- Conclusion: for Polygon, discovery-time ENR fork filtering is not reliable. Let discovery enqueue candidates and let ETH Status validate.
+
+### Live Verification
+
+Commands run from `evmrelay/build/OSX/Debug`:
+
+```bash
+cmake --build . --target eth_watch discv5_crawl eth_watch_service_test eth_watch_example_test
+
+ctest -R 'eth_watch_service_test|eth_watch_example_test' --output-on-failure
+
+git diff --check
+```
+
+Live 11-chain discover-only run:
+
+```bash
+./examples/eth_watch/eth_watch \
+  --chains ethereum-mainnet,ethereum-sepolia,ethereum-holesky,ethereum-hoodi,polygon-mainnet,polygon-amoy,bnb-smart-chain,bnb-smart-chain-testnet,base-mainnet,base-sepolia,gnosis-chain \
+  --peer-selection discover-first \
+  --discover-only \
+  --max-peers-per-chain 1 \
+  --max-peers-total 11 \
+  --max-pending-peers 100 \
+  --run-seconds 10 \
+  --log-level info
+```
+
+Observed post-fix sample:
+
+```text
+total discovered_peers: 2751
+active_sessions: 0
+disconnect_feedback: 0
+
+ethereum-mainnet: 14
+ethereum-sepolia: 3
+ethereum-holesky: 0
+ethereum-hoodi: 2
+polygon-mainnet: 46
+polygon-amoy: 94
+bnb-smart-chain: 860
+bnb-smart-chain-testnet: 816
+base-mainnet: 13
+base-sepolia: 9
+gnosis-chain: 894
+```
+
+### Notes For Next Chat
+
+- Existing untracked local artifacts intentionally left out of the commit:
+  - `examples/all.json`
+  - `examples/logs/`
+  - `go-ethereum/`
+  - `kelpdao-incident-report.pdf`
+  - `rlp_enodes/`
+- The build warning about Boost.JSON non-virtual destructors is from third-party headers and was pre-existing/noisy.
+- Suggested next step: run non-discover-only Polygon service samples to measure how many of the now-enqueued candidates pass ETH Status validation.
+
 ## Data-driven discovery cleanup and hand-off - 2026-05-21
 
 ### Current State

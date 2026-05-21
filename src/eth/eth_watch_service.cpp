@@ -280,19 +280,22 @@ void EthWatchService::run(boost::asio::io_context& io) noexcept
         runtime.stats = std::make_shared<EthWatchRuntimeStatsSnapshot>();
         runtime_stats_by_chain_[runtime.config.canonical_name] = runtime.stats;
 
-        auto dial_fn = orchestration_config_.dial_fn_factory
-            ? orchestration_config_.dial_fn_factory(chain_config)
-            : make_default_dial_fn(chain_config);
-
-        runtime.scheduler = std::make_shared<discv4::DialScheduler>(
-            io,
-            pool,
-            std::move(dial_fn));
-
-        if (chain_config.fork_id.has_value())
+        if (orchestration_config_.attach_peer_dialer)
         {
-            runtime.scheduler->filter_fn = make_optional_fork_id_filter(
-                chain_config.fork_id->fork_hash);
+            auto dial_fn = orchestration_config_.dial_fn_factory
+                ? orchestration_config_.dial_fn_factory(chain_config)
+                : make_default_dial_fn(chain_config);
+
+            runtime.scheduler = std::make_shared<discv4::DialScheduler>(
+                io,
+                pool,
+                std::move(dial_fn));
+
+            if (chain_config.fork_id.has_value())
+            {
+                runtime.scheduler->filter_fn = make_optional_fork_id_filter(
+                    chain_config.fork_id->fork_hash);
+            }
         }
 
         runtime.peer_queue = make_eth_peer_queue(
@@ -682,7 +685,8 @@ bool EthWatchService::start_discv5_discovery(
 
     discv5::discv5Config discovery_config = orchestration_config_.discv5_discovery;
     discovery_config.bootstrap_enrs = bootstrap_enrs;
-    if (runtime.config.fork_id.has_value())
+    if (runtime.config.fork_id.has_value()
+        && runtime.config.discovery_fork_filter == discv4::DiscoveryForkFilter::kRequire)
     {
         discv5::ForkId fork_id{};
         fork_id.hash = runtime.config.fork_id->fork_hash;

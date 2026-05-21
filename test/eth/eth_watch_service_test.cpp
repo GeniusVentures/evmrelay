@@ -570,6 +570,47 @@ TEST(EthWatchServiceTest, InitializeRunCreatesSchedulerAndPeerQueueFromCachedNod
     EXPECT_FALSE(queue->needs_discovery());
 }
 
+TEST(EthWatchServiceTest, RunCanLeaveDiscoveryQueueWithoutDialConsumer)
+{
+    boost::asio::io_context io;
+
+    eth::EthWatchServiceConfig config{};
+    config.attach_peer_dialer = false;
+    config.discovery_mode = eth::EthWatchDiscoveryMode::kDiscoverFirst;
+    config.chains.push_back(make_chain_config(
+        "producer-only-chain",
+        {make_validated_peer(0x11)},
+        {make_validated_peer(0x12)}));
+    config.discv4_fallback_starter = [](
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig&,
+        std::shared_ptr<eth::EthPeerQueue> queue)
+    {
+        if (!queue)
+        {
+            return false;
+        }
+        (void)queue->enqueue_discovered_peer(make_validated_peer(0x13).peer);
+        return true;
+    };
+
+    eth::EthWatchService svc;
+    ASSERT_TRUE(svc.initialize(std::move(config), [](const eth::WatchEventNotification&) {}));
+    svc.run(io);
+
+    EXPECT_EQ(svc.runtime_chain_count(), 1U);
+    EXPECT_EQ(svc.scheduler_count(), 0U);
+    EXPECT_EQ(svc.peer_queue_count(), 1U);
+    EXPECT_EQ(svc.discv4_fallback_count(), 1U);
+
+    auto queue = svc.peer_queue("producer-only-chain");
+    ASSERT_NE(queue, nullptr);
+    EXPECT_EQ(queue->scheduler(), nullptr);
+    EXPECT_EQ(queue->cached_peer_count(), 0U);
+    EXPECT_EQ(queue->discovered_peer_count(), 1U);
+    EXPECT_EQ(queue->stats().disconnect_feedback_count, 0U);
+}
+
 TEST(EthWatchServiceTest, EmptyCachedNodesWithBootnodesStartsDiscv4Fallback)
 {
     boost::asio::io_context io;

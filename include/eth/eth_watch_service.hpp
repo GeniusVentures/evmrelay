@@ -99,6 +99,7 @@ struct EthWatchServiceConfig
     EthWatchDiscoveryMode                  discovery_mode = EthWatchDiscoveryMode::kDiscoverIfNeeded;
     bool                                   enable_discv4_fallback = true;
     bool                                   enable_enr_tree_discovery = true;
+    bool                                   attach_peer_dialer = true;
     discv4::discv4Config                  discovery{};
     discv5::discv5Config                  discv5_discovery{};
 

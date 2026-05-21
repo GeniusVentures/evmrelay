@@ -9,6 +9,7 @@
 #include <discovery/discovered_peer.hpp>
 #include <rlpx/rlpx_types.hpp>
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -29,6 +30,32 @@ struct EthPeerQueueConfig
 
     /// @brief Maximum requeues after disconnect feedback before a peer is considered flaky.
     size_t max_disconnect_requeues = 3;
+
+    /// @brief How long a peer that reports TooManyPeers is suppressed.
+    std::chrono::steady_clock::duration too_many_peers_backoff = std::chrono::minutes(30);
+
+    /// @brief Rotate cached peers by this many entries before dial-slot spreading.
+    size_t cache_peer_start_offset = 0;
+};
+
+struct EthPeerQueueStatsSnapshot
+{
+    size_t cached_peer_count = 0;
+    size_t discovered_peer_count = 0;
+    size_t requeued_peer_count = 0;
+    size_t duplicate_peer_drop_count = 0;
+    size_t capacity_drop_count = 0;
+    size_t flaky_peer_drop_count = 0;
+    size_t too_many_peers_backoff_count = 0;
+    size_t backoff_drop_count = 0;
+    size_t disconnect_feedback_count = 0;
+    size_t disconnected_before_connected_count = 0;
+    size_t disconnected_after_connected_count = 0;
+    size_t too_many_peers_before_connected_count = 0;
+    size_t too_many_peers_after_connected_count = 0;
+    size_t tcp_failure_count = 0;
+    size_t timeout_count = 0;
+    size_t subprotocol_error_count = 0;
 };
 
 /// @brief Feedback from a completed or disconnected peer session.
@@ -74,10 +101,17 @@ public:
     [[nodiscard]] size_t duplicate_peer_drop_count() const noexcept;
     [[nodiscard]] size_t capacity_drop_count() const noexcept;
     [[nodiscard]] size_t flaky_peer_drop_count() const noexcept;
+    [[nodiscard]] size_t too_many_peers_backoff_count() const noexcept;
+    [[nodiscard]] size_t backoff_drop_count() const noexcept;
+    [[nodiscard]] EthPeerQueueStatsSnapshot stats() const noexcept;
     [[nodiscard]] std::shared_ptr<discv4::DialScheduler> scheduler() const noexcept;
 
 private:
     [[nodiscard]] bool enqueue_candidate(discv4::ValidatedPeer peer, bool allow_known_peer) noexcept;
+    [[nodiscard]] std::vector<discv4::ValidatedPeer> rotate_cached_peers(
+        const std::vector<discv4::ValidatedPeer>& peers) const;
+    [[nodiscard]] std::vector<discv4::ValidatedPeer> spread_cached_peers_for_dial_slots(
+        const std::vector<discv4::ValidatedPeer>& peers) const;
     [[nodiscard]] static std::string node_key(const discv4::NodeId& node_id);
     [[nodiscard]] static bool is_requeueable_disconnect(const EthPeerDisconnectFeedback& feedback) noexcept;
 
@@ -86,12 +120,23 @@ private:
     std::vector<discv4::ValidatedPeer>     discovery_bootnodes_;
     std::unordered_set<std::string>         seen_node_ids_;
     std::unordered_map<std::string, size_t> disconnect_counts_;
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point> backoff_until_;
     size_t                                 cached_peer_count_ = 0;
     size_t                                 discovered_peer_count_ = 0;
     size_t                                 requeued_peer_count_ = 0;
     size_t                                 duplicate_peer_drop_count_ = 0;
     size_t                                 capacity_drop_count_ = 0;
     size_t                                 flaky_peer_drop_count_ = 0;
+    size_t                                 too_many_peers_backoff_count_ = 0;
+    size_t                                 backoff_drop_count_ = 0;
+    size_t                                 disconnect_feedback_count_ = 0;
+    size_t                                 disconnected_before_connected_count_ = 0;
+    size_t                                 disconnected_after_connected_count_ = 0;
+    size_t                                 too_many_peers_before_connected_count_ = 0;
+    size_t                                 too_many_peers_after_connected_count_ = 0;
+    size_t                                 tcp_failure_count_ = 0;
+    size_t                                 timeout_count_ = 0;
+    size_t                                 subprotocol_error_count_ = 0;
 };
 
 /// @brief Create an eth-watch peer queue and preload the chain cache split.

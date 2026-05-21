@@ -21,6 +21,7 @@
 #include <vector>
 
 #include <csignal>
+#include <cstdlib>
 
 #include <eth/messages.hpp>
 #include <eth/eth_peer_session.hpp>
@@ -71,6 +72,7 @@ struct WatchOutputState
 {
     uint64_t total_events = 0;
     uint64_t detailed_event_limit = kDefaultDetailedEventLimit;
+    uint64_t run_seconds = 0;
     std::unordered_map<std::string, uint64_t> events_by_chain;
 };
 
@@ -221,6 +223,111 @@ void log_watch_notification(
     }
 }
 
+void schedule_service_stats(
+    boost::asio::io_context& io,
+    eth::EthWatchService& service,
+    std::shared_ptr<boost::asio::steady_timer> timer)
+{
+    timer->expires_after(kWatchStatsInterval);
+    timer->async_wait([&io, &service, timer](const boost::system::error_code& ec)
+    {
+        if (ec)
+        {
+            return;
+        }
+
+        static auto log = rlp::base::createLogger("eth_watch");
+        const auto stats = service.aggregate_runtime_stats();
+        const auto connection_stats = service.aggregate_connection_stats();
+        SPDLOG_LOGGER_INFO(log,
+                           "Watch stats [service]: active_sessions={} chains={} queues={} discv4_clients={} "
+                           "eth_messages={} new_block_hashes={} new_blocks={} receipts_messages={} "
+                           "decode_failures={} receipts_requested={} receipts_processed={} logs_seen={} "
+                           "matched_logs={} discarded_logs={} transport_connect_failures={} auth_success={} "
+                           "local_hello_sent={} peer_disconnect_before_hello={} peer_hello_accepted={} "
+                           "eth_status_sent={} remote_status_accepted={} remote_status_rejected={} "
+                           "too_many_peers_before_peer_hello={} peer_disconnect_after_eth_status_accept={}",
+                           service.active_runner_count(),
+                           service.runtime_chain_count(),
+                           service.peer_queue_count(),
+                           service.discovery_client_count(),
+                           stats.eth_messages_seen,
+                           stats.new_block_hashes_messages,
+                           stats.new_block_messages,
+                           stats.receipts_messages,
+                           stats.decode_failures,
+                           stats.receipts_requested,
+                           stats.receipts_processed,
+                           stats.logs_seen,
+                           stats.matched_logs,
+                           stats.discarded_logs,
+                           connection_stats.tcp_connect_failures,
+                           connection_stats.auth_success,
+                           connection_stats.local_hello_sent,
+                           connection_stats.peer_disconnect_before_hello,
+                           connection_stats.peer_hello_accepted,
+                           connection_stats.eth_status_sent,
+                           connection_stats.remote_status_accepted,
+                           connection_stats.remote_status_rejected,
+                           connection_stats.peer_queue.too_many_peers_before_connected_count,
+                           connection_stats.peer_queue.disconnected_after_connected_count);
+
+        schedule_service_stats(io, service, timer);
+    });
+}
+
+void log_service_summary(eth::EthWatchService& service)
+{
+    if (!service.initialized())
+    {
+        return;
+    }
+
+    static auto log = rlp::base::createLogger("eth_watch");
+    const auto traffic = service.aggregate_runtime_stats();
+    const auto connection = service.aggregate_connection_stats();
+    SPDLOG_LOGGER_INFO(log,
+                       "Final eth_watch summary: active_sessions={} chains={} cached_peers={} discovered_peers={} "
+                       "transport_connect_failures={} auth_success={} local_hello_sent={} "
+                       "peer_disconnect_before_hello={} peer_hello_accepted={} eth_status_sent={} "
+                       "remote_status_accepted={} remote_status_rejected={} peer_disconnect_after_eth_status_accept={} "
+                       "eth_messages={} matched_logs={} logs_seen={} decode_failures={}",
+                       service.active_runner_count(),
+                       service.runtime_chain_count(),
+                       connection.peer_queue.cached_peer_count,
+                       connection.peer_queue.discovered_peer_count,
+                       connection.tcp_connect_failures,
+                       connection.auth_success,
+                       connection.local_hello_sent,
+                       connection.peer_disconnect_before_hello,
+                       connection.peer_hello_accepted,
+                       connection.eth_status_sent,
+                       connection.remote_status_accepted,
+                       connection.remote_status_rejected,
+                       connection.peer_queue.disconnected_after_connected_count,
+                       traffic.eth_messages_seen,
+                       traffic.matched_logs,
+                       traffic.logs_seen,
+                       traffic.decode_failures);
+    SPDLOG_LOGGER_INFO(log,
+                       "Final disconnect summary: feedback={} before_eth_status_accept={} after_eth_status_accept={} "
+                       "peer_disconnect_before_hello={} too_many_peers_before_peer_hello={} "
+                       "too_many_peers_after_eth_status_accept={} transport_connect_failures={} "
+                       "timeouts={} subprotocol_errors={} backoff_drops={} requeued={} flaky_drops={}",
+                       connection.peer_queue.disconnect_feedback_count,
+                       connection.peer_queue.disconnected_before_connected_count,
+                       connection.peer_queue.disconnected_after_connected_count,
+                       connection.peer_disconnect_before_hello,
+                       connection.peer_queue.too_many_peers_before_connected_count,
+                       connection.peer_queue.too_many_peers_after_connected_count,
+                       connection.peer_queue.tcp_failure_count,
+                       connection.peer_queue.timeout_count,
+                       connection.peer_queue.subprotocol_error_count,
+                       connection.peer_queue.backoff_drop_count,
+                       connection.peer_queue.requeued_peer_count,
+                       connection.peer_queue.flaky_peer_drop_count);
+}
+
 std::optional<discv4::ChainPeerConfig> load_chain_peer_config(
     const std::string&                   chain_name,
     const std::string&                   argv0,
@@ -269,7 +376,9 @@ void print_usage(const char* exe)
               << "  --display-events <count>          Print full decoded details for only the first count matches (default 2).\n"
               << "  --max-peers-per-chain <count>     Active dial/watch slots per chain (default 3).\n"
               << "  --max-peers-total <count>         Active dial/watch slots across all chains (default 24).\n"
+              << "  --cache-peer-start-offset <count> Rotate cached peers by count before spreading across dial slots.\n"
               << "  --peer-selection <mode>           cache-only, discover-if-needed, discover-first, or hybrid.\n"
+              << "  --run-seconds <count>             Stop automatically after count seconds (default: run until signal).\n"
               << "\nExamples:\n"
               << "  " << exe << " --chain ethereum-sepolia --watch-event Transfer(address,address,uint256)\n"
               << "  " << exe << " --all-chains --watch-event Transfer(address,address,uint256)\n"
@@ -296,7 +405,7 @@ void run_watch(std::string host,
                eth::ForkId fork_id,
                const std::vector<eth::cli::WatchSpec>& watch_specs,
                std::shared_ptr<WatchOutputState> output_state,
-               const std::function<void()>& on_done,
+               const std::function<void(rlpx::DisconnectReason)>& on_done,
                const std::function<void(std::shared_ptr<rlpx::RlpxSession>)>& on_connected,
                boost::asio::yield_context yield)
 {
@@ -309,7 +418,7 @@ void run_watch(std::string host,
     if (!keypair_result)
     {
         SPDLOG_LOGGER_ERROR(log, "run_watch: failed to generate local keypair");
-        on_done();
+        on_done(rlpx::DisconnectReason::kProtocolError);
         return;
     }
 
@@ -326,13 +435,14 @@ void run_watch(std::string host,
     };
 
     SPDLOG_LOGGER_DEBUG(log, "run_watch: connecting to {}:{}", host, port);
-    auto session_result = rlpx::RlpxSession::connect(params, yield);
+    rlpx::DisconnectReason disconnect_reason = rlpx::DisconnectReason::kTcpError;
+    auto session_result = rlpx::RlpxSession::connect(params, yield, &disconnect_reason);
     if (!session_result)
     {
         const auto err = session_result.error();
         SPDLOG_LOGGER_DEBUG(log, "run_watch: failed to connect to {}:{} (error {}: {})",
                             host, port, static_cast<int>(err), rlpx::to_string(err));
-        on_done();
+        on_done(disconnect_reason);
         return;
     }
 
@@ -389,7 +499,7 @@ void run_watch(std::string host,
             break;
         }
         (void)session->disconnect(rlpx::DisconnectReason::kSubprotocolError);
-        on_done();
+        on_done(rlpx::DisconnectReason::kSubprotocolError);
         return;
     }
 
@@ -425,7 +535,7 @@ void run_watch(std::string host,
                 if (!addr)
                 {
                     SPDLOG_LOGGER_ERROR(log, "Invalid contract address: {}", spec.contract_hex);
-                    on_done();
+                    on_done(rlpx::DisconnectReason::kProtocolError);
                     return;
                 }
                 contract = *addr;
@@ -462,7 +572,7 @@ void run_watch(std::string host,
     {
         SPDLOG_LOGGER_ERROR(log, "run_watch: failed to install ETH message handler");
         (void)session->disconnect(rlpx::DisconnectReason::kSubprotocolError);
-        on_done();
+        on_done(rlpx::DisconnectReason::kSubprotocolError);
         return;
     }
     watch_runner->install_session_bridge();
@@ -548,7 +658,7 @@ void run_watch(std::string host,
                                    host, port);
                 (void)session->disconnect(rlpx::DisconnectReason::kTimeout);
             }
-            on_done();
+            on_done(rlpx::DisconnectReason::kTimeout);
             return;
         }
     }
@@ -588,7 +698,7 @@ void run_watch(std::string host,
                            watch_runner->service().subscription_count());
     }
 
-    on_done();
+    on_done(rlpx::DisconnectReason::kRequested);
 }
 
 std::optional<eth::ForkId> parse_fork_id_hash(std::string_view value)
@@ -646,6 +756,7 @@ int main(int argc, char** argv) {
         bool chain_peers_url_enabled = true;
         auto output_state = std::make_shared<WatchOutputState>();
         eth::EthWatchConnectionConfig watch_connection_config{};
+        eth::EthPeerQueueConfig peer_queue_config{};
         eth::EthWatchDiscoveryMode discovery_mode = eth::EthWatchDiscoveryMode::kDiscoverIfNeeded;
 
         for (int i = 1; i < argc; ++i)
@@ -806,6 +917,18 @@ int main(int argc, char** argv) {
                 }
                 output_state->detailed_event_limit = *display_events;
                 next_arg += 2;
+            } else if (arg == "--run-seconds") {
+                if (next_arg + 1 >= argc) {
+                    std::cout << "--run-seconds requires an integer argument.\n";
+                    return 1;
+                }
+                const auto run_seconds = rlp::base::parse::uint64_decimal(argv[next_arg + 1]);
+                if (!run_seconds) {
+                    std::cout << "Invalid --run-seconds value.\n";
+                    return 1;
+                }
+                output_state->run_seconds = *run_seconds;
+                next_arg += 2;
             } else if (arg == "--max-peers-per-chain") {
                 if (next_arg + 1 >= argc) {
                     std::cout << "--max-peers-per-chain requires an integer argument.\n";
@@ -833,6 +956,18 @@ int main(int argc, char** argv) {
                     return 1;
                 }
                 watch_connection_config.max_total_connections = static_cast<int>(*max_peers_total);
+                next_arg += 2;
+            } else if (arg == "--cache-peer-start-offset") {
+                if (next_arg + 1 >= argc) {
+                    std::cout << "--cache-peer-start-offset requires an integer argument.\n";
+                    return 1;
+                }
+                const auto offset = rlp::base::parse::uint64_decimal(argv[next_arg + 1]);
+                if (!offset) {
+                    std::cout << "Invalid --cache-peer-start-offset value.\n";
+                    return 1;
+                }
+                peer_queue_config.cache_peer_start_offset = static_cast<size_t>(*offset);
                 next_arg += 2;
             } else if (arg == "--peer-selection") {
                 if (next_arg + 1 >= argc) {
@@ -978,6 +1113,7 @@ int main(int argc, char** argv) {
                 std::move(*service_watches),
                 std::move(service_chains),
                 discovery_mode);
+            service_config.peer_queue = peer_queue_config;
 
             if (!service.initialize(
                     std::move(service_config),
@@ -1007,6 +1143,7 @@ int main(int argc, char** argv) {
                 std::move(*service_watches),
                 {config->chain_peer_config},
                 discovery_mode);
+            service_config.peer_queue = peer_queue_config;
 
             SPDLOG_LOGGER_INFO(log,
                                "Starting eth watch service for chain '{}' with {} cached peer(s) and {} bootnode(s)",
@@ -1053,13 +1190,45 @@ int main(int argc, char** argv) {
                               network_id, genesis_hash, fork_id,
                               watch_specs,
                               output_state,
-                              []() {},
+                              [](rlpx::DisconnectReason) {},
                               [](std::shared_ptr<rlpx::RlpxSession>) {},
                               yc);
                 });
         }
 
+        std::shared_ptr<boost::asio::steady_timer> service_stats_timer;
+        if (service.initialized())
+        {
+            service_stats_timer = std::make_shared<boost::asio::steady_timer>(io);
+            schedule_service_stats(io, service, service_stats_timer);
+        }
+
+        std::shared_ptr<boost::asio::steady_timer> run_limit_timer;
+        if (output_state->run_seconds > 0U)
+        {
+            run_limit_timer = std::make_shared<boost::asio::steady_timer>(io);
+            run_limit_timer->expires_after(std::chrono::seconds(output_state->run_seconds));
+            run_limit_timer->async_wait([&service, service_stats_timer](const boost::system::error_code& ec)
+            {
+                if (ec)
+                {
+                    return;
+                }
+                static auto log = rlp::base::createLogger("eth_watch");
+                SPDLOG_LOGGER_INFO(log, "Run limit reached; stopping eth_watch.");
+                log_service_summary(service);
+                if (service_stats_timer)
+                {
+                    service_stats_timer->cancel();
+                }
+                service.stop();
+                std::cout.flush();
+                std::exit(0);
+            });
+        }
+
         io.run();
+        log_service_summary(service);
         return 0;
     } catch (const std::exception& ex) {
         std::cout << "Unhandled exception: " << ex.what() << "\n";

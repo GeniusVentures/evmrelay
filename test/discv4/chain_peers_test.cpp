@@ -272,6 +272,35 @@ TEST_F(ChainPeersTest, LoadChainPeerConfigAllowsEmptyNodesWithBootnodes)
     EXPECT_EQ(config->bootnodes[0].peer.tcp_port, 30304U);
 }
 
+TEST_F(ChainPeersTest, LoadChainPeerConfigAppliesTopLevelForkIdToPeers)
+{
+    const std::string node = make_enode("10.0.0.1", 30303U, 'a');
+    const std::string bootnode = make_enode("10.0.0.2", 30304U, 'b');
+    const std::string json_text = std::string("{")
+        + "\"ethereum-sepolia\":{"
+        + "\"networkId\":11155111,"
+        + "\"genesisHex\":\"" + std::string(64U, '1') + "\","
+        + "\"forkId\":\"deadbeef\","
+        + "\"forkNext\":\"1234\","
+        + "\"nodes\":[{\"enode\":\"" + node + "\"}],"
+        + "\"bootnodes\":[{\"enode\":\"" + bootnode + "\"}]}}";
+
+    const auto config = discv4::load_chain_peer_config_from_json_text(
+        "ethereum-sepolia",
+        json_text);
+
+    ASSERT_TRUE(config.has_value());
+    ASSERT_TRUE(config->fork_id.has_value());
+    ASSERT_EQ(config->nodes.size(), 1U);
+    ASSERT_EQ(config->bootnodes.size(), 1U);
+    ASSERT_TRUE(config->nodes[0].peer.eth_fork_id.has_value());
+    ASSERT_TRUE(config->bootnodes[0].peer.eth_fork_id.has_value());
+    EXPECT_EQ(config->nodes[0].peer.eth_fork_id->hash, config->fork_id->fork_hash);
+    EXPECT_EQ(config->nodes[0].peer.eth_fork_id->next, config->fork_id->next_fork);
+    EXPECT_EQ(config->bootnodes[0].peer.eth_fork_id->hash, config->fork_id->fork_hash);
+    EXPECT_EQ(config->bootnodes[0].peer.eth_fork_id->next, config->fork_id->next_fork);
+}
+
 TEST_F(ChainPeersTest, FindChainPeersJsonPathPrefersJsonThenGzip)
 {
     const std::filesystem::path bin_dir = temp_dir_ / "bin";
@@ -288,6 +317,28 @@ TEST_F(ChainPeersTest, FindChainPeersJsonPathPrefersJsonThenGzip)
     const auto json_path = discv4::find_chain_peer_cache_json_path(argv0, "");
     ASSERT_TRUE(json_path.has_value());
     EXPECT_EQ(json_path->filename(), "chain_enodes.json");
+}
+
+TEST_F(ChainPeersTest, FindChainPeersJsonPathChecksCurrentWorkingDirectory)
+{
+    const std::filesystem::path bin_dir = temp_dir_ / "bin";
+    const std::filesystem::path cwd_dir = temp_dir_ / "cwd";
+    std::filesystem::create_directories(bin_dir);
+    std::filesystem::create_directories(cwd_dir);
+
+    const std::filesystem::path old_cwd = std::filesystem::current_path();
+    std::filesystem::current_path(cwd_dir);
+
+    const std::string argv0 = (bin_dir / "examples" / "eth_watch" / "eth_watch").string();
+    write_file(cwd_dir / "chain_enodes.json.gz", "{}");
+
+    const auto path = discv4::find_chain_peer_cache_json_path(argv0, "");
+
+    std::filesystem::current_path(old_cwd);
+
+    ASSERT_TRUE(path.has_value());
+    EXPECT_EQ(std::filesystem::weakly_canonical(*path),
+              std::filesystem::weakly_canonical(cwd_dir / "chain_enodes.json.gz"));
 }
 
 static constexpr const char* kChainPeersUrl = "https://enodes.gnus.ai/chain_enodes.json.gz";

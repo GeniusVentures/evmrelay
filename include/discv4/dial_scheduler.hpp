@@ -51,12 +51,12 @@ struct WatcherPool
 
 /// Callback signature for what to run per dial attempt.
 ///   @p vp           — the peer to connect to
-///   @p on_done      — call on every exit path (recycling the slot)
+///   @p on_done      — call on every exit path with the disconnect/failure reason (recycling the slot)
 ///   @p on_connected — call once the ETH handshake is confirmed
 ///   @p yield        — coroutine yield context
 using DialFn = std::function<void(
     ValidatedPeer                                               vp,
-    std::function<void()>                                       on_done,
+    std::function<void(rlpx::DisconnectReason)>                 on_done,
     std::function<void(std::shared_ptr<rlpx::RlpxSession>)>    on_connected,
     boost::asio::yield_context                                  yield)>;
 
@@ -106,19 +106,46 @@ struct DialScheduler : std::enable_shared_from_this<DialScheduler>
     ///        Otherwise queues for later drain.
     void enqueue(ValidatedPeer vp)
     {
+        static auto log = rlp::base::createLogger("dial_scheduler");
         if ( stopping )
         {
+            log->debug("Dropping peer {}:{} because scheduler is stopping",
+                       vp.peer.ip,
+                       vp.peer.tcp_port);
             return;
         }
 
         // Drop peers that do not match the chain filter (e.g. wrong ForkId).
         if ( filter_fn && !filter_fn( vp.peer ) )
         {
+            if (vp.peer.eth_fork_id.has_value())
+            {
+                const auto& fork_id = vp.peer.eth_fork_id.value();
+                log->debug("Dropping peer {}:{} because fork id {:02x}{:02x}{:02x}{:02x} did not match chain filter",
+                           vp.peer.ip,
+                           vp.peer.tcp_port,
+                           fork_id.hash[0],
+                           fork_id.hash[1],
+                           fork_id.hash[2],
+                           fork_id.hash[3]);
+            }
+            else
+            {
+                log->debug("Dropping peer {}:{} because no fork id was available for chain filter",
+                           vp.peer.ip,
+                           vp.peer.tcp_port);
+            }
             return;
         }
 
         dial_history->expire();
-        if (dial_history->contains(vp.peer.node_id)) { return; }
+        if (dial_history->contains(vp.peer.node_id))
+        {
+            log->debug("Dropping peer {}:{} because it is already in dial history",
+                       vp.peer.ip,
+                       vp.peer.tcp_port);
+            return;
+        }
 
         if (active < pool->max_per_chain &&
             pool->active_total.load() < pool->max_total)
@@ -181,18 +208,18 @@ private:
         auto was_validated = std::make_shared<bool>(false);
         auto reported      = std::make_shared<bool>(false);
         static auto log    = rlp::base::createLogger("dial_scheduler");
-        SPDLOG_LOGGER_DEBUG(log, "Dialing peer: {}:{}", vp.peer.ip, vp.peer.tcp_port);
+        log->debug("Dialing peer: {}:{}", vp.peer.ip, vp.peer.tcp_port);
         boost::asio::spawn(io,
             [sched, vp = std::move(vp), was_validated, reported](boost::asio::yield_context yc)
             {
                 sched->dial_fn(
                     vp,
-                    [sched, vp, was_validated, reported]()
+                    [sched, vp, was_validated, reported](rlpx::DisconnectReason reason)
                     {
                         if (sched->feedback_fn && !*reported)
                         {
                             *reported = true;
-                            sched->feedback_fn(vp, rlpx::DisconnectReason::kTcpError, *was_validated);
+                            sched->feedback_fn(vp, reason, *was_validated);
                         }
                         if (*was_validated) { --sched->validated_count; }
                         sched->release();

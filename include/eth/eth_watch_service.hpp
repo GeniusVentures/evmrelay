@@ -19,6 +19,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace eth {
@@ -139,6 +140,22 @@ struct EthWatchServiceConfig
 /// @param payload     Encoded message bytes.
 using SendCallback = std::function<void(uint8_t eth_msg_id, std::vector<uint8_t> payload)>;
 
+struct EthWatchRuntimeStatsSnapshot
+{
+    /// TCP/socket connection attempts that failed before RLPx auth produced any peer reason.
+    uint64_t tcp_connect_failures = 0;
+    uint64_t tcp_connected = 0;
+    uint64_t auth_success = 0;
+    uint64_t local_hello_sent = 0;
+    /// Peer sent RLPx Disconnect as its first post-auth message, before peer HELLO.
+    uint64_t peer_disconnect_before_hello = 0;
+    uint64_t peer_hello_accepted = 0;
+    uint64_t eth_status_sent = 0;
+    uint64_t remote_status_accepted = 0;
+    uint64_t remote_status_rejected = 0;
+    EthPeerQueueStatsSnapshot peer_queue{};
+};
+
 /// @brief Snapshot of live EthWatchService traffic counters.
 struct WatchStatsSnapshot
 {
@@ -194,6 +211,9 @@ public:
     [[nodiscard]] size_t peer_queue_count() const noexcept;
     [[nodiscard]] size_t discovery_client_count() const noexcept;
     [[nodiscard]] size_t discv4_fallback_count() const noexcept;
+    [[nodiscard]] size_t active_runner_count() const noexcept;
+    [[nodiscard]] WatchStatsSnapshot aggregate_runtime_stats() const noexcept;
+    [[nodiscard]] EthWatchRuntimeStatsSnapshot aggregate_connection_stats() const noexcept;
     [[nodiscard]] std::shared_ptr<EthPeerQueue> peer_queue(const std::string& chain_name) const noexcept;
 
     /// @brief Provide a callback used to send outgoing eth messages.
@@ -324,6 +344,7 @@ private:
         std::shared_ptr<discv5::discv5_client>  discv5_client;
         bool                                    discv4_fallback_started = false;
         bool                                    discv5_enr_tree_started = false;
+        std::shared_ptr<EthWatchRuntimeStatsSnapshot> stats;
     };
 
     [[nodiscard]] discv4::DialFn make_default_dial_fn(
@@ -341,6 +362,7 @@ private:
     WatchEventNotificationCallback orchestration_callback_{};
     std::vector<RuntimeChain>      runtime_chains_{};
     std::vector<std::shared_ptr<EthWatchRunner>> active_runners_{};
+    std::unordered_map<std::string, std::shared_ptr<EthWatchRuntimeStatsSnapshot>> runtime_stats_by_chain_;
 };
 
 } // namespace eth

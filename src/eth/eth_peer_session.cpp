@@ -3,6 +3,31 @@
 
 #include <eth/eth_handshake_guard.hpp>
 #include <eth/eth_peer_session.hpp>
+#include <base/parse_utility.hpp>
+#include <base/rlp-logger.hpp>
+
+namespace {
+
+void log_status_fields(
+    const char*              direction,
+    const eth::StatusMessage& status,
+    uint8_t                  negotiated_eth_version,
+    uint8_t                  negotiated_eth_offset) noexcept
+{
+    static auto log = rlp::base::createLogger("eth.status");
+    const auto common = eth::get_common_fields(status);
+    log->info("{} ETH Status negotiated_version={} offset=0x{:02x} status_version={} network_id={} genesis=0x{} fork_hash=0x{} fork_next={}",
+              direction,
+              static_cast<int>(negotiated_eth_version),
+              negotiated_eth_offset,
+              static_cast<int>(common.protocol_version),
+              common.network_id,
+              rlp::base::parse::hex_array_string(common.genesis_hash),
+              rlp::base::parse::hex_array_string(common.fork_id.fork_hash),
+              common.fork_id.next_fork);
+}
+
+} // namespace
 
 namespace eth {
 
@@ -72,6 +97,11 @@ PerformEthStatusHandshake(
         start.network_id,
         start.genesis_hash,
         start.fork_id);
+    log_status_fields(
+        "sending",
+        status,
+        negotiated_eth_version,
+        negotiated_eth_offset);
 
     auto encoded = protocol::encode_status(status);
     if (!encoded)
@@ -123,6 +153,11 @@ PerformEthStatusHandshake(
             {
                 return rlp::outcome::failure(validated_status.error());
             }
+            log_status_fields(
+                "accepted remote",
+                validated_status.value(),
+                negotiated_eth_version,
+                negotiated_eth_offset);
 
             EthStatusHandshakeResult result{};
             result.remote_status = validated_status.value();
@@ -141,6 +176,11 @@ PerformEthStatusHandshake(
             {
                 return rlp::outcome::failure(validated_status.error());
             }
+            log_status_fields(
+                "rejected remote",
+                validated_status.value(),
+                negotiated_eth_version,
+                negotiated_eth_offset);
             return rlp::outcome::failure(StatusValidationError::kProtocolVersionMismatch);
         }
     }
@@ -159,4 +199,3 @@ bool StartEthStatusHandshake(
 }
 
 } // namespace eth
-

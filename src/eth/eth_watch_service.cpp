@@ -6,11 +6,14 @@
 #include <eth/eth_watch_dialer.hpp>
 #include <eth/eth_watch_runner.hpp>
 #include <eth/messages.hpp>
+#include <base/rlp-logger.hpp>
 #include <discv5/enr_tree.hpp>
 #include <rlpx/crypto/ecdh.hpp>
+#include <rlpx/rlpx_error.hpp>
 #include <rlpx/rlpx_session.hpp>
 
 #include <algorithm>
+#include <memory>
 
 namespace eth {
 
@@ -201,12 +204,15 @@ void EthWatchService::run(boost::asio::io_context& io) noexcept
 
     runtime_chains_.clear();
     active_runners_.clear();
+    runtime_stats_by_chain_.clear();
     auto pool = make_eth_watcher_pool(orchestration_config_.connection);
 
     for (const auto& chain_config : orchestration_config_.chains)
     {
         RuntimeChain runtime{};
         runtime.config = chain_config;
+        runtime.stats = std::make_shared<EthWatchRuntimeStatsSnapshot>();
+        runtime_stats_by_chain_[runtime.config.canonical_name] = runtime.stats;
 
         auto dial_fn = orchestration_config_.dial_fn_factory
             ? orchestration_config_.dial_fn_factory(chain_config)
@@ -274,6 +280,7 @@ void EthWatchService::stop() noexcept
     }
     active_runners_.clear();
     runtime_chains_.clear();
+    runtime_stats_by_chain_.clear();
     orchestration_running_ = false;
 }
 
@@ -311,6 +318,78 @@ size_t EthWatchService::discv4_fallback_count() const noexcept
         [](const RuntimeChain& runtime) { return runtime.discv4_fallback_started; });
 }
 
+size_t EthWatchService::active_runner_count() const noexcept
+{
+    return active_runners_.size();
+}
+
+WatchStatsSnapshot EthWatchService::aggregate_runtime_stats() const noexcept
+{
+    WatchStatsSnapshot aggregate{};
+    for (const auto& runner : active_runners_)
+    {
+        if (!runner)
+        {
+            continue;
+        }
+
+        const auto stats = runner->service().stats();
+        aggregate.eth_messages_seen += stats.eth_messages_seen;
+        aggregate.new_block_hashes_messages += stats.new_block_hashes_messages;
+        aggregate.new_block_messages += stats.new_block_messages;
+        aggregate.receipts_messages += stats.receipts_messages;
+        aggregate.decode_failures += stats.decode_failures;
+        aggregate.receipts_requested += stats.receipts_requested;
+        aggregate.receipts_processed += stats.receipts_processed;
+        aggregate.logs_seen += stats.logs_seen;
+        aggregate.matched_logs += stats.matched_logs;
+        aggregate.discarded_logs += stats.discarded_logs;
+    }
+    return aggregate;
+}
+
+EthWatchRuntimeStatsSnapshot EthWatchService::aggregate_connection_stats() const noexcept
+{
+    EthWatchRuntimeStatsSnapshot aggregate{};
+    for (const auto& runtime : runtime_chains_)
+    {
+        if (runtime.stats)
+        {
+            aggregate.tcp_connect_failures += runtime.stats->tcp_connect_failures;
+            aggregate.tcp_connected += runtime.stats->tcp_connected;
+            aggregate.auth_success += runtime.stats->auth_success;
+            aggregate.local_hello_sent += runtime.stats->local_hello_sent;
+            aggregate.peer_disconnect_before_hello += runtime.stats->peer_disconnect_before_hello;
+            aggregate.peer_hello_accepted += runtime.stats->peer_hello_accepted;
+            aggregate.eth_status_sent += runtime.stats->eth_status_sent;
+            aggregate.remote_status_accepted += runtime.stats->remote_status_accepted;
+            aggregate.remote_status_rejected += runtime.stats->remote_status_rejected;
+        }
+
+        if (runtime.peer_queue)
+        {
+            const auto queue_stats = runtime.peer_queue->stats();
+            aggregate.peer_queue.cached_peer_count += queue_stats.cached_peer_count;
+            aggregate.peer_queue.discovered_peer_count += queue_stats.discovered_peer_count;
+            aggregate.peer_queue.requeued_peer_count += queue_stats.requeued_peer_count;
+            aggregate.peer_queue.duplicate_peer_drop_count += queue_stats.duplicate_peer_drop_count;
+            aggregate.peer_queue.capacity_drop_count += queue_stats.capacity_drop_count;
+            aggregate.peer_queue.flaky_peer_drop_count += queue_stats.flaky_peer_drop_count;
+            aggregate.peer_queue.too_many_peers_backoff_count += queue_stats.too_many_peers_backoff_count;
+            aggregate.peer_queue.backoff_drop_count += queue_stats.backoff_drop_count;
+            aggregate.peer_queue.disconnect_feedback_count += queue_stats.disconnect_feedback_count;
+            aggregate.peer_queue.disconnected_before_connected_count += queue_stats.disconnected_before_connected_count;
+            aggregate.peer_queue.disconnected_after_connected_count += queue_stats.disconnected_after_connected_count;
+            aggregate.peer_queue.too_many_peers_before_connected_count += queue_stats.too_many_peers_before_connected_count;
+            aggregate.peer_queue.too_many_peers_after_connected_count += queue_stats.too_many_peers_after_connected_count;
+            aggregate.peer_queue.tcp_failure_count += queue_stats.tcp_failure_count;
+            aggregate.peer_queue.timeout_count += queue_stats.timeout_count;
+            aggregate.peer_queue.subprotocol_error_count += queue_stats.subprotocol_error_count;
+        }
+    }
+    return aggregate;
+}
+
 std::shared_ptr<EthPeerQueue> EthWatchService::peer_queue(
     const std::string& chain_name) const noexcept
 {
@@ -329,16 +408,24 @@ std::shared_ptr<EthPeerQueue> EthWatchService::peer_queue(
 discv4::DialFn EthWatchService::make_default_dial_fn(
     const discv4::ChainPeerConfig& chain_config) noexcept
 {
-    return [this, chain_config](
+    const auto stats_it = runtime_stats_by_chain_.find(chain_config.canonical_name);
+    const auto runtime_stats = stats_it != runtime_stats_by_chain_.end()
+        ? stats_it->second
+        : std::shared_ptr<EthWatchRuntimeStatsSnapshot>{};
+
+    return [this, chain_config, runtime_stats](
         discv4::ValidatedPeer                                      vp,
-        std::function<void()>                                      on_done,
+        std::function<void(rlpx::DisconnectReason)>                on_done,
         std::function<void(std::shared_ptr<rlpx::RlpxSession>)>    on_connected,
         boost::asio::yield_context                                yield)
     {
+        static auto log = rlp::base::createLogger("eth_watch");
         auto keypair_result = rlpx::crypto::Ecdh::generate_ephemeral_keypair();
         if (!keypair_result)
         {
-            on_done();
+            log->warn("Failed to generate local RLPx keypair for chain '{}'",
+                      chain_config.canonical_name);
+            on_done(rlpx::DisconnectReason::kProtocolError);
             return;
         }
 
@@ -350,13 +437,55 @@ discv4::DialFn EthWatchService::make_default_dial_fn(
             keypair.private_key,
             vp.pubkey,
             "rlp-eth-watch",
-            0
+            0,
+            [runtime_stats](rlpx::ConnectProgressPhase phase, rlpx::DisconnectReason)
+            {
+                if (!runtime_stats)
+                {
+                    return;
+                }
+
+                switch (phase)
+                {
+                case rlpx::ConnectProgressPhase::kTcpConnected:
+                    ++runtime_stats->tcp_connected;
+                    break;
+                case rlpx::ConnectProgressPhase::kAuthSucceeded:
+                    ++runtime_stats->auth_success;
+                    break;
+                case rlpx::ConnectProgressPhase::kLocalHelloSent:
+                    ++runtime_stats->local_hello_sent;
+                    break;
+                case rlpx::ConnectProgressPhase::kPeerDisconnectBeforeHello:
+                    ++runtime_stats->peer_disconnect_before_hello;
+                    break;
+                case rlpx::ConnectProgressPhase::kPeerHelloAccepted:
+                    ++runtime_stats->peer_hello_accepted;
+                    break;
+                }
+            }
         };
 
-        auto session_result = rlpx::RlpxSession::connect(params, yield);
+        log->debug("Dialing RLPx peer {}:{} for chain '{}'",
+                   vp.peer.ip,
+                   vp.peer.tcp_port,
+                   chain_config.canonical_name);
+
+        rlpx::DisconnectReason disconnect_reason = rlpx::DisconnectReason::kTcpError;
+        auto session_result = rlpx::RlpxSession::connect(params, yield, &disconnect_reason);
         if (!session_result)
         {
-            on_done();
+            if (runtime_stats && disconnect_reason == rlpx::DisconnectReason::kTcpError)
+            {
+                ++runtime_stats->tcp_connect_failures;
+            }
+            log->debug("RLPx dial failed for {}:{} on chain '{}' ({}: {})",
+                       vp.peer.ip,
+                       vp.peer.tcp_port,
+                       chain_config.canonical_name,
+                       static_cast<int>(session_result.error()),
+                       rlpx::to_string(session_result.error()));
+            on_done(disconnect_reason);
             return;
         }
 
@@ -369,6 +498,10 @@ discv4::DialFn EthWatchService::make_default_dial_fn(
             chain_config.genesis_hash,
             fork_id);
 
+        if (runtime_stats)
+        {
+            ++runtime_stats->eth_status_sent;
+        }
         const auto handshake_result = PerformEthStatusHandshake(
             EthStatusHandshakeStart{
                 std::make_shared<RlpxEthSessionChannel>(session),
@@ -381,9 +514,27 @@ discv4::DialFn EthWatchService::make_default_dial_fn(
             yield);
         if (!handshake_result)
         {
+            if (runtime_stats)
+            {
+                ++runtime_stats->remote_status_rejected;
+            }
+            log->debug("ETH Status handshake failed for {}:{} on chain '{}' (error {})",
+                       vp.peer.ip,
+                       vp.peer.tcp_port,
+                       chain_config.canonical_name,
+                       static_cast<int>(handshake_result.error()));
             (void)session->disconnect(rlpx::DisconnectReason::kSubprotocolError);
-            on_done();
+            on_done(rlpx::DisconnectReason::kSubprotocolError);
             return;
+        }
+
+        log->info("Connected RLPx/ETH peer {}:{} for chain '{}'",
+                  vp.peer.ip,
+                  vp.peer.tcp_port,
+                  chain_config.canonical_name);
+        if (runtime_stats)
+        {
+            ++runtime_stats->remote_status_accepted;
         }
 
         on_connected(session);

@@ -3,6 +3,8 @@
 
 #include <eth/eth_peer_queue.hpp>
 
+#include <base/rlp-logger.hpp>
+
 #include <algorithm>
 #include <string_view>
 
@@ -35,7 +37,9 @@ EthPeerQueue::~EthPeerQueue()
 
 void EthPeerQueue::preload_cached_peers(const std::vector<discv4::ValidatedPeer>& peers) noexcept
 {
-    for (const auto& peer : peers)
+    const auto rotated_peers = rotate_cached_peers(peers);
+    const auto spread_peers = spread_cached_peers_for_dial_slots(rotated_peers);
+    for (const auto& peer : spread_peers)
     {
         if (enqueue_candidate(peer, false))
         {
@@ -88,12 +92,58 @@ bool EthPeerQueue::enqueue_validated_discovery_peer(const discovery::ValidatedPe
 
 bool EthPeerQueue::report_peer_disconnected(const EthPeerDisconnectFeedback& feedback) noexcept
 {
+    const auto key = node_key(feedback.peer.peer.node_id);
+    ++disconnect_feedback_count_;
+    if (feedback.was_connected)
+    {
+        ++disconnected_after_connected_count_;
+    }
+    else
+    {
+        ++disconnected_before_connected_count_;
+    }
+
+    switch (feedback.reason)
+    {
+    case rlpx::DisconnectReason::kTooManyPeers:
+        if (feedback.was_connected)
+        {
+            ++too_many_peers_after_connected_count_;
+        }
+        else
+        {
+            ++too_many_peers_before_connected_count_;
+        }
+        break;
+    case rlpx::DisconnectReason::kTcpError:
+        ++tcp_failure_count_;
+        break;
+    case rlpx::DisconnectReason::kTimeout:
+        ++timeout_count_;
+        break;
+    case rlpx::DisconnectReason::kSubprotocolError:
+        ++subprotocol_error_count_;
+        break;
+    default:
+        break;
+    }
+
+    if (feedback.reason == rlpx::DisconnectReason::kTooManyPeers)
+    {
+        static auto log = rlp::base::createLogger("eth_peer_queue");
+        backoff_until_[key] = std::chrono::steady_clock::now() + config_.too_many_peers_backoff;
+        ++too_many_peers_backoff_count_;
+        log->debug("Backing off peer {}:{} after TooManyPeers disconnect",
+                   feedback.peer.peer.ip,
+                   feedback.peer.peer.tcp_port);
+        return false;
+    }
+
     if (!is_requeueable_disconnect(feedback))
     {
         return false;
     }
 
-    const auto key = node_key(feedback.peer.peer.node_id);
     auto& disconnect_count = disconnect_counts_[key];
     if (disconnect_count >= config_.max_disconnect_requeues)
     {
@@ -151,6 +201,38 @@ size_t EthPeerQueue::flaky_peer_drop_count() const noexcept
     return flaky_peer_drop_count_;
 }
 
+size_t EthPeerQueue::too_many_peers_backoff_count() const noexcept
+{
+    return too_many_peers_backoff_count_;
+}
+
+size_t EthPeerQueue::backoff_drop_count() const noexcept
+{
+    return backoff_drop_count_;
+}
+
+EthPeerQueueStatsSnapshot EthPeerQueue::stats() const noexcept
+{
+    EthPeerQueueStatsSnapshot snapshot{};
+    snapshot.cached_peer_count = cached_peer_count_;
+    snapshot.discovered_peer_count = discovered_peer_count_;
+    snapshot.requeued_peer_count = requeued_peer_count_;
+    snapshot.duplicate_peer_drop_count = duplicate_peer_drop_count_;
+    snapshot.capacity_drop_count = capacity_drop_count_;
+    snapshot.flaky_peer_drop_count = flaky_peer_drop_count_;
+    snapshot.too_many_peers_backoff_count = too_many_peers_backoff_count_;
+    snapshot.backoff_drop_count = backoff_drop_count_;
+    snapshot.disconnect_feedback_count = disconnect_feedback_count_;
+    snapshot.disconnected_before_connected_count = disconnected_before_connected_count_;
+    snapshot.disconnected_after_connected_count = disconnected_after_connected_count_;
+    snapshot.too_many_peers_before_connected_count = too_many_peers_before_connected_count_;
+    snapshot.too_many_peers_after_connected_count = too_many_peers_after_connected_count_;
+    snapshot.tcp_failure_count = tcp_failure_count_;
+    snapshot.timeout_count = timeout_count_;
+    snapshot.subprotocol_error_count = subprotocol_error_count_;
+    return snapshot;
+}
+
 std::shared_ptr<discv4::DialScheduler> EthPeerQueue::scheduler() const noexcept
 {
     return scheduler_;
@@ -164,6 +246,18 @@ bool EthPeerQueue::enqueue_candidate(discv4::ValidatedPeer peer, bool allow_know
     }
 
     const auto key = node_key(peer.peer.node_id);
+    const auto now = std::chrono::steady_clock::now();
+    if (const auto backoff = backoff_until_.find(key);
+        backoff != backoff_until_.end())
+    {
+        if (now < backoff->second)
+        {
+            ++backoff_drop_count_;
+            return false;
+        }
+        backoff_until_.erase(backoff);
+    }
+
     const auto insert_result = seen_node_ids_.insert(key);
     if (!insert_result.second && !allow_known_peer)
     {
@@ -188,6 +282,69 @@ bool EthPeerQueue::enqueue_candidate(discv4::ValidatedPeer peer, bool allow_know
     return true;
 }
 
+std::vector<discv4::ValidatedPeer> EthPeerQueue::rotate_cached_peers(
+    const std::vector<discv4::ValidatedPeer>& peers) const
+{
+    if (peers.size() <= 1U || config_.cache_peer_start_offset == 0U)
+    {
+        return peers;
+    }
+
+    const size_t offset = config_.cache_peer_start_offset % peers.size();
+    if (offset == 0U)
+    {
+        return peers;
+    }
+
+    std::vector<discv4::ValidatedPeer> rotated;
+    rotated.reserve(peers.size());
+    rotated.insert(rotated.end(), peers.begin() + static_cast<std::ptrdiff_t>(offset), peers.end());
+    rotated.insert(rotated.end(), peers.begin(), peers.begin() + static_cast<std::ptrdiff_t>(offset));
+    return rotated;
+}
+
+std::vector<discv4::ValidatedPeer> EthPeerQueue::spread_cached_peers_for_dial_slots(
+    const std::vector<discv4::ValidatedPeer>& peers) const
+{
+    if (!scheduler_ || !scheduler_->pool || peers.size() <= 1U)
+    {
+        return peers;
+    }
+
+    const auto configured_slots = scheduler_->pool->max_per_chain;
+    if (configured_slots <= 1)
+    {
+        return peers;
+    }
+
+    const auto band_count = std::min(
+        peers.size(),
+        static_cast<size_t>(configured_slots));
+    if (band_count <= 1U)
+    {
+        return peers;
+    }
+
+    std::vector<discv4::ValidatedPeer> spread;
+    spread.reserve(peers.size());
+
+    for (size_t offset = 0U; spread.size() < peers.size(); ++offset)
+    {
+        for (size_t band = 0U; band < band_count; ++band)
+        {
+            const size_t begin = (peers.size() * band) / band_count;
+            const size_t end = (peers.size() * (band + 1U)) / band_count;
+            const size_t index = begin + offset;
+            if (index < end)
+            {
+                spread.push_back(peers[index]);
+            }
+        }
+    }
+
+    return spread;
+}
+
 std::string EthPeerQueue::node_key(const discv4::NodeId& node_id)
 {
     static constexpr std::string_view kHexDigits = "0123456789abcdef";
@@ -205,8 +362,6 @@ bool EthPeerQueue::is_requeueable_disconnect(const EthPeerDisconnectFeedback& fe
 {
     switch (feedback.reason)
     {
-    case rlpx::DisconnectReason::kTooManyPeers:
-        return true;
     case rlpx::DisconnectReason::kTcpError:
     case rlpx::DisconnectReason::kTimeout:
         return feedback.was_connected;

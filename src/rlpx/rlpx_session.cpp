@@ -276,6 +276,15 @@ std::optional<uint8_t> RlpxSession::normalize_eth_message_id_for_test(
 // Factory for outbound connections
 Result<std::shared_ptr<RlpxSession>>
 RlpxSession::connect(const SessionConnectParams& params, asio::yield_context yield) noexcept {
+    return connect(params, yield, nullptr);
+}
+
+Result<std::shared_ptr<RlpxSession>>
+RlpxSession::connect(
+    const SessionConnectParams& params,
+    asio::yield_context         yield,
+    DisconnectReason*           pre_hello_disconnect_reason) noexcept
+{
     static auto log = rlp::base::createLogger("rlpx.session");
 
     // Step 1: Establish TCP connection with timeout
@@ -291,6 +300,9 @@ RlpxSession::connect(const SessionConnectParams& params, asio::yield_context yie
     if (!transport_result) {
         return transport_result.error();
     }
+    if (params.progress_handler) {
+        params.progress_handler(ConnectProgressPhase::kTcpConnected, DisconnectReason::kRequested);
+    }
 
     // Step 2: Run the real RLPx auth handshake (auth → ack)
     auth::HandshakeConfig hs_config;
@@ -304,6 +316,9 @@ RlpxSession::connect(const SessionConnectParams& params, asio::yield_context yie
     auto hs_result = handshake.execute(yield);
     if (!hs_result) {
         return hs_result.error();
+    }
+    if (params.progress_handler) {
+        params.progress_handler(ConnectProgressPhase::kAuthSucceeded, DisconnectReason::kRequested);
     }
     SPDLOG_LOGGER_INFO(log, "connect: auth handshake completed");
     auto& hs = hs_result.value();
@@ -363,6 +378,9 @@ RlpxSession::connect(const SessionConnectParams& params, asio::yield_context yie
     if (!send_result) {
         return send_result.error();
     }
+    if (params.progress_handler) {
+        params.progress_handler(ConnectProgressPhase::kLocalHelloSent, DisconnectReason::kRequested);
+    }
     SPDLOG_LOGGER_INFO(log, "connect: local HELLO sent");
 
     // Step 6: Receive peer HELLO
@@ -415,6 +433,9 @@ RlpxSession::connect(const SessionConnectParams& params, asio::yield_context yie
             if (session->hello_handler_) {
                 session->hello_handler_(peer_hello.value());
             }
+            if (params.progress_handler) {
+                params.progress_handler(ConnectProgressPhase::kPeerHelloAccepted, DisconnectReason::kRequested);
+            }
         } else {
             static auto log = rlp::base::createLogger("rlpx.session");
             SPDLOG_LOGGER_WARN(log, "connect: peer HELLO decode failed, payload_size={}", peer_msg.payload.size());
@@ -423,9 +444,17 @@ RlpxSession::connect(const SessionConnectParams& params, asio::yield_context yie
     } else if (peer_msg.id == kDisconnectMessageId) {
         static auto log = rlp::base::createLogger("rlpx.session");
         auto disc = protocol::DisconnectMessage::decode(peer_msg.payload);
-        SPDLOG_LOGGER_INFO(log, "connect: peer sent Disconnect before HELLO");
-        SPDLOG_LOGGER_DEBUG(log, "connect: peer sent Disconnect before HELLO, reason={}",
-            disc ? static_cast<int>(disc.value().reason) : -1);
+        if (disc && pre_hello_disconnect_reason)
+        {
+            *pre_hello_disconnect_reason = disc.value().reason;
+        }
+        if (params.progress_handler) {
+            params.progress_handler(
+                ConnectProgressPhase::kPeerDisconnectBeforeHello,
+                disc ? disc.value().reason : DisconnectReason::kProtocolError);
+        }
+        log->info("connect: peer sent Disconnect before HELLO, reason={}",
+                  disc ? static_cast<int>(disc.value().reason) : -1);
         return SessionError::kHandshakeFailed;
     } else {
         static auto log = rlp::base::createLogger("rlpx.session");

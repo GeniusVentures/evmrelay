@@ -104,11 +104,11 @@ discv4::DialFn no_op_dial_fn()
 {
     return [](
         discv4::ValidatedPeer,
-        std::function<void()> done,
+        std::function<void(rlpx::DisconnectReason)> done,
         std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
         boost::asio::yield_context)
     {
-        done();
+        done(rlpx::DisconnectReason::kTcpError);
     };
 }
 
@@ -871,7 +871,7 @@ TEST(EthWatchServiceTest, DiscoveryPeersQueueWhileDialSlotIsSaturatedAndDrainOnR
 {
     boost::asio::io_context io;
     std::vector<discv4::ValidatedPeer> dialed_peers;
-    std::vector<std::function<void()>> release_callbacks;
+    std::vector<std::function<void(rlpx::DisconnectReason)>> release_callbacks;
 
     const auto cached_peer = make_validated_peer(0x31);
     const auto discovered_peer_a = make_validated_peer(0x32);
@@ -889,7 +889,7 @@ TEST(EthWatchServiceTest, DiscoveryPeersQueueWhileDialSlotIsSaturatedAndDrainOnR
     {
         return [&dialed_peers, &release_callbacks](
             discv4::ValidatedPeer peer,
-            std::function<void()> done,
+            std::function<void(rlpx::DisconnectReason)> done,
             std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
             boost::asio::yield_context)
         {
@@ -924,7 +924,7 @@ TEST(EthWatchServiceTest, DiscoveryPeersQueueWhileDialSlotIsSaturatedAndDrainOnR
     EXPECT_EQ(dialed_peers[0].peer.node_id, cached_peer.peer.node_id);
     ASSERT_EQ(release_callbacks.size(), 1U);
 
-    release_callbacks[0]();
+    release_callbacks[0](rlpx::DisconnectReason::kTcpError);
     io.restart();
     io.run_for(std::chrono::milliseconds(50));
 
@@ -933,7 +933,7 @@ TEST(EthWatchServiceTest, DiscoveryPeersQueueWhileDialSlotIsSaturatedAndDrainOnR
     EXPECT_EQ(queue->scheduler()->active, 1);
     EXPECT_EQ(queue->scheduler()->queue.size(), 1U);
 
-    release_callbacks[1]();
+    release_callbacks[1](rlpx::DisconnectReason::kTcpError);
     io.restart();
     io.run_for(std::chrono::milliseconds(50));
 
@@ -947,7 +947,7 @@ TEST(EthWatchServiceTest, DiscoveryCanContinueProducingPeersAfterDialFailureRele
 {
     boost::asio::io_context io;
     std::vector<discv4::ValidatedPeer> dialed_peers;
-    std::vector<std::function<void()>> release_callbacks;
+    std::vector<std::function<void(rlpx::DisconnectReason)>> release_callbacks;
 
     const auto first_peer = make_validated_peer(0x35);
     const auto later_peer = make_validated_peer(0x36);
@@ -963,7 +963,7 @@ TEST(EthWatchServiceTest, DiscoveryCanContinueProducingPeersAfterDialFailureRele
     {
         return [&dialed_peers, &release_callbacks](
             discv4::ValidatedPeer peer,
-            std::function<void()> done,
+            std::function<void(rlpx::DisconnectReason)> done,
             std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
             boost::asio::yield_context)
         {
@@ -992,7 +992,7 @@ TEST(EthWatchServiceTest, DiscoveryCanContinueProducingPeersAfterDialFailureRele
     EXPECT_EQ(dialed_peers[0].peer.node_id, first_peer.peer.node_id);
     ASSERT_EQ(release_callbacks.size(), 1U);
 
-    release_callbacks[0]();
+    release_callbacks[0](rlpx::DisconnectReason::kTcpError);
     EXPECT_EQ(queue->scheduler()->active, 0);
     EXPECT_TRUE(queue->enqueue_discovered_peer(later_peer.peer));
     EXPECT_EQ(queue->discovered_peer_count(), 2U);
@@ -1027,8 +1027,9 @@ TEST(EthWatchServiceTest, SchedulerFeedbackRequeuesThroughProductionPeerQueue)
 
     queue->scheduler()->feedback_fn(peer, rlpx::DisconnectReason::kTooManyPeers, true);
 
-    EXPECT_EQ(queue->requeued_peer_count(), 1U);
-    EXPECT_EQ(queue->scheduler()->queue.size(), 2U);
+    EXPECT_EQ(queue->requeued_peer_count(), 0U);
+    EXPECT_EQ(queue->too_many_peers_backoff_count(), 1U);
+    EXPECT_EQ(queue->scheduler()->queue.size(), 1U);
 }
 
 TEST(EthWatchServiceTest, InitializeRejectsIncompleteRuntimeConfig)

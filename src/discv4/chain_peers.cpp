@@ -485,6 +485,23 @@ std::vector<discv4::ValidatedPeer> parse_chain_peers_from_json_value(
     return peers;
 }
 
+void apply_chain_fork_id_to_peers(
+    std::vector<discv4::ValidatedPeer>& peers,
+    const eth::ForkId&                  chain_fork_id)
+{
+    discv4::ForkId fork_id{};
+    fork_id.hash = chain_fork_id.fork_hash;
+    fork_id.next = chain_fork_id.next_fork;
+
+    for (auto& peer : peers)
+    {
+        if (!peer.peer.eth_fork_id.has_value())
+        {
+            peer.peer.eth_fork_id = fork_id;
+        }
+    }
+}
+
 std::optional<std::array<uint8_t, 4>> parse_chain_fork_id_hash_from_json_value(
     const boost::json::value& parsed,
     const std::string&        chain_name)
@@ -630,6 +647,12 @@ std::optional<discv4::ChainPeerConfig> parse_chain_peer_config_from_json_value(
         eth::ForkId fork_id{};
         fork_id.fork_hash = *fork_hash;
         config.fork_id = fork_id;
+    }
+
+    if (config.fork_id.has_value())
+    {
+        apply_chain_fork_id_to_peers(config.nodes, *config.fork_id);
+        apply_chain_fork_id_to_peers(config.bootnodes, *config.fork_id);
     }
 
     if (const auto verification = verify_chain_peer_cache_json_signature_impl(parsed, std::string(kTrustedChainPeerCacheSignerAddress));
@@ -781,6 +804,15 @@ std::optional<std::filesystem::path> find_chain_peer_cache_json_path(
     if (const auto local_file = find_existing_chain_peer_cache_json_path(bin_dir); local_file.has_value())
     {
         return local_file;
+    }
+
+    const std::filesystem::path cwd = std::filesystem::current_path();
+    if (cwd != bin_dir)
+    {
+        if (const auto cwd_file = find_existing_chain_peer_cache_json_path(cwd); cwd_file.has_value())
+        {
+            return cwd_file;
+        }
     }
 
     if (bin_dir.filename() == "MacOS" && bin_dir.parent_path().filename() == "Contents")

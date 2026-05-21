@@ -23,6 +23,17 @@ using PingHandler = std::function<void(const protocol::PingMessage&)>;
 using PongHandler = std::function<void(const protocol::PongMessage&)>;
 using EthMessageHandler = std::function<void(uint8_t, const ByteBuffer&)>;
 
+enum class ConnectProgressPhase : uint8_t
+{
+    kTcpConnected,
+    kAuthSucceeded,
+    kLocalHelloSent,
+    kPeerDisconnectBeforeHello,
+    kPeerHelloAccepted
+};
+
+using ConnectProgressHandler = std::function<void(ConnectProgressPhase, DisconnectReason)>;
+
 // Session creation parameters for outbound connections
 struct SessionConnectParams {
     std::string_view remote_host;
@@ -32,6 +43,7 @@ struct SessionConnectParams {
     PublicKey peer_public_key;
     std::string_view client_id;
     uint16_t listen_port;
+    ConnectProgressHandler progress_handler{};
 };
 
 // Session creation parameters for inbound connections
@@ -61,6 +73,14 @@ public:
     /// @return Constructed session on success, SessionError on failure.
     [[nodiscard]] static Result<std::shared_ptr<RlpxSession>>
     connect(const SessionConnectParams& params, boost::asio::yield_context yield) noexcept;
+
+    /// @brief Factory for outbound connections, returning a peer disconnect
+    ///        reason if the peer sends Disconnect before HELLO.
+    [[nodiscard]] static Result<std::shared_ptr<RlpxSession>>
+    connect(
+        const SessionConnectParams& params,
+        boost::asio::yield_context  yield,
+        DisconnectReason*           pre_hello_disconnect_reason) noexcept;
 
     /// @brief Factory for inbound connections.
     /// @param params Session accept parameters.

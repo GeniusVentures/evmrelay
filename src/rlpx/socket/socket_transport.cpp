@@ -9,6 +9,7 @@
 #include <boost/asio/connect.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/system/error_code.hpp>
+#include <base/rlp-logger.hpp>
 
 namespace rlpx::socket {
 
@@ -194,6 +195,8 @@ connect_with_timeout(
     std::chrono::milliseconds timeout,
     asio::yield_context yield
 ) noexcept {
+    static auto log = rlp::base::createLogger("rlpx.socket");
+
     // Create socket
     tcp::socket socket(executor);
 
@@ -220,6 +223,11 @@ connect_with_timeout(
     if (resolve_ec)
     {
         timer.cancel();
+        log->debug("connect_with_timeout: resolve {}:{} failed: {} ({})",
+                   host,
+                   port,
+                   resolve_ec.message(),
+                   resolve_ec.value());
         return SessionError::kConnectionFailed;
     }
 
@@ -235,10 +243,16 @@ connect_with_timeout(
 
     if (connect_ec)
     {
+        log->debug("connect_with_timeout: connect {}:{} failed: {} ({})",
+                   host,
+                   port,
+                   connect_ec.message(),
+                   connect_ec.value());
         return SessionError::kConnectionFailed;
     }
 
     // Connection successful
+    log->debug("connect_with_timeout: connected {}:{}", host, port);
     return SocketTransport(std::move(socket));
 }
 

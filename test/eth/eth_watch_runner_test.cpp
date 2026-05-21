@@ -215,7 +215,7 @@ TEST(EthWatchRunnerTest, StartEthWatchChainPeerDialingEnqueuesPeersBehindActiveL
         io,
         pool,
         [](discv4::ValidatedPeer,
-           std::function<void()>,
+           std::function<void(rlpx::DisconnectReason)>,
            std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
            boost::asio::yield_context)
         {
@@ -252,7 +252,7 @@ TEST(EthWatchRunnerTest, EthPeerQueueKeepsBootnodesOutOfDialQueue)
         io,
         pool,
         [](discv4::ValidatedPeer,
-           std::function<void()>,
+           std::function<void(rlpx::DisconnectReason)>,
            std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
            boost::asio::yield_context)
         {
@@ -272,6 +272,89 @@ TEST(EthWatchRunnerTest, EthPeerQueueKeepsBootnodesOutOfDialQueue)
     scheduler->stop();
 }
 
+TEST(EthWatchRunnerTest, EthPeerQueueSpreadsCachedPeersAcrossActiveDialBands)
+{
+    boost::asio::io_context io;
+    eth::EthWatchConnectionConfig config{};
+    config.max_total_connections = 3;
+    config.max_connections_per_chain = 3;
+    const auto pool = eth::make_eth_watcher_pool(config);
+
+    discv4::ChainPeerConfig chain_config{};
+    chain_config.canonical_name = "ethereum-sepolia";
+    for (uint16_t i = 0; i < 9U; ++i)
+    {
+        chain_config.nodes.push_back(make_validated_peer(
+            static_cast<uint8_t>(0x10U + i),
+            static_cast<uint16_t>(30300U + i)));
+    }
+
+    auto scheduler = eth::start_eth_watch_chain_peer_dialing(
+        io,
+        pool,
+        [](discv4::ValidatedPeer,
+           std::function<void(rlpx::DisconnectReason)>,
+           std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
+           boost::asio::yield_context)
+        {
+        },
+        {});
+    const auto queue = eth::make_eth_peer_queue(scheduler, chain_config);
+
+    ASSERT_TRUE(static_cast<bool>(queue));
+    EXPECT_EQ(queue->cached_peer_count(), 9U);
+    EXPECT_EQ(scheduler->active, 3);
+    ASSERT_EQ(scheduler->queue.size(), 6U);
+    EXPECT_EQ(scheduler->queue[0].peer.tcp_port, 30301U);
+    EXPECT_EQ(scheduler->queue[1].peer.tcp_port, 30304U);
+    EXPECT_EQ(scheduler->queue[2].peer.tcp_port, 30307U);
+    EXPECT_EQ(scheduler->queue[3].peer.tcp_port, 30302U);
+    EXPECT_EQ(scheduler->queue[4].peer.tcp_port, 30305U);
+    EXPECT_EQ(scheduler->queue[5].peer.tcp_port, 30308U);
+    scheduler->stop();
+}
+
+TEST(EthWatchRunnerTest, EthPeerQueueRotatesCachedPeersBeforeDialSlotSpread)
+{
+    boost::asio::io_context io;
+    eth::EthWatchConnectionConfig config{};
+    config.max_total_connections = 1;
+    config.max_connections_per_chain = 1;
+    const auto pool = eth::make_eth_watcher_pool(config);
+
+    discv4::ChainPeerConfig chain_config{};
+    chain_config.canonical_name = "ethereum-sepolia";
+    for (uint16_t i = 0; i < 4U; ++i)
+    {
+        chain_config.nodes.push_back(make_validated_peer(
+            static_cast<uint8_t>(0x20U + i),
+            static_cast<uint16_t>(30300U + i)));
+    }
+
+    auto scheduler = eth::start_eth_watch_chain_peer_dialing(
+        io,
+        pool,
+        [](discv4::ValidatedPeer,
+           std::function<void(rlpx::DisconnectReason)>,
+           std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
+           boost::asio::yield_context)
+        {
+        },
+        {});
+    eth::EthPeerQueueConfig queue_config{};
+    queue_config.cache_peer_start_offset = 2U;
+    const auto queue = eth::make_eth_peer_queue(scheduler, chain_config, queue_config);
+
+    ASSERT_TRUE(static_cast<bool>(queue));
+    EXPECT_EQ(queue->cached_peer_count(), 4U);
+    EXPECT_EQ(scheduler->active, 1);
+    ASSERT_EQ(scheduler->queue.size(), 3U);
+    EXPECT_EQ(scheduler->queue[0].peer.tcp_port, 30303U);
+    EXPECT_EQ(scheduler->queue[1].peer.tcp_port, 30300U);
+    EXPECT_EQ(scheduler->queue[2].peer.tcp_port, 30301U);
+    scheduler->stop();
+}
+
 TEST(EthWatchRunnerTest, EthPeerQueueReportsDiscoveryFallbackWhenNoCachedPeers)
 {
     boost::asio::io_context io;
@@ -288,7 +371,7 @@ TEST(EthWatchRunnerTest, EthPeerQueueReportsDiscoveryFallbackWhenNoCachedPeers)
         io,
         pool,
         [](discv4::ValidatedPeer,
-           std::function<void()>,
+           std::function<void(rlpx::DisconnectReason)>,
            std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
            boost::asio::yield_context)
         {
@@ -319,7 +402,7 @@ TEST(EthWatchRunnerTest, EthPeerQueueEnqueuesDiscoveredPeersIntoSameDialQueue)
         io,
         pool,
         [](discv4::ValidatedPeer,
-           std::function<void()>,
+           std::function<void(rlpx::DisconnectReason)>,
            std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
            boost::asio::yield_context)
         {
@@ -361,7 +444,7 @@ TEST(EthWatchRunnerTest, EthPeerQueueDropsDuplicateDiscoveredPeers)
         io,
         pool,
         [](discv4::ValidatedPeer,
-           std::function<void()>,
+           std::function<void(rlpx::DisconnectReason)>,
            std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
            boost::asio::yield_context)
         {
@@ -399,7 +482,7 @@ TEST(EthWatchRunnerTest, EthPeerQueueDropsNewestWhenPendingQueueIsFull)
         io,
         pool,
         [](discv4::ValidatedPeer,
-           std::function<void()>,
+           std::function<void(rlpx::DisconnectReason)>,
            std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
            boost::asio::yield_context)
         {
@@ -435,7 +518,7 @@ TEST(EthWatchRunnerTest, EthPeerQueueDropsNewestWhenPendingQueueIsFull)
     scheduler->stop();
 }
 
-TEST(EthWatchRunnerTest, EthPeerQueueRequeuesTooManyPeersDisconnects)
+TEST(EthWatchRunnerTest, EthPeerQueueBacksOffTooManyPeersDisconnects)
 {
     boost::asio::io_context io;
     eth::EthWatchConnectionConfig config{};
@@ -448,7 +531,7 @@ TEST(EthWatchRunnerTest, EthPeerQueueRequeuesTooManyPeersDisconnects)
         io,
         pool,
         [](discv4::ValidatedPeer,
-           std::function<void()>,
+           std::function<void(rlpx::DisconnectReason)>,
            std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
            boost::asio::yield_context)
         {
@@ -456,12 +539,17 @@ TEST(EthWatchRunnerTest, EthPeerQueueRequeuesTooManyPeersDisconnects)
         {make_validated_peer(0x10, 30300U)});
     auto queue = std::make_shared<eth::EthPeerQueue>(scheduler);
 
-    EXPECT_TRUE(queue->report_peer_disconnected(
+    EXPECT_FALSE(queue->report_peer_disconnected(
         eth::EthPeerDisconnectFeedback{peer, rlpx::DisconnectReason::kTooManyPeers, false}));
 
-    EXPECT_EQ(queue->requeued_peer_count(), 1U);
-    ASSERT_EQ(scheduler->queue.size(), 1U);
-    EXPECT_EQ(scheduler->queue.front().peer.tcp_port, 30303U);
+    EXPECT_EQ(queue->requeued_peer_count(), 0U);
+    EXPECT_EQ(queue->too_many_peers_backoff_count(), 1U);
+    EXPECT_TRUE(scheduler->queue.empty());
+
+    EXPECT_FALSE(queue->report_peer_disconnected(
+        eth::EthPeerDisconnectFeedback{peer, rlpx::DisconnectReason::kTcpError, true}));
+    EXPECT_EQ(queue->backoff_drop_count(), 1U);
+    EXPECT_TRUE(scheduler->queue.empty());
     scheduler->stop();
 }
 
@@ -478,7 +566,7 @@ TEST(EthWatchRunnerTest, EthPeerQueueRequeuesConnectedPeersAfterNetworkDisconnec
         io,
         pool,
         [](discv4::ValidatedPeer,
-           std::function<void()>,
+           std::function<void(rlpx::DisconnectReason)>,
            std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
            boost::asio::yield_context)
         {
@@ -510,7 +598,7 @@ TEST(EthWatchRunnerTest, EthPeerQueueStopsRequeueingFlakyPeers)
         io,
         pool,
         [](discv4::ValidatedPeer,
-           std::function<void()>,
+           std::function<void(rlpx::DisconnectReason)>,
            std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
            boost::asio::yield_context)
         {
@@ -521,11 +609,11 @@ TEST(EthWatchRunnerTest, EthPeerQueueStopsRequeueingFlakyPeers)
     auto queue = std::make_shared<eth::EthPeerQueue>(scheduler, queue_config);
 
     EXPECT_TRUE(queue->report_peer_disconnected(
-        eth::EthPeerDisconnectFeedback{peer, rlpx::DisconnectReason::kTooManyPeers, false}));
+        eth::EthPeerDisconnectFeedback{peer, rlpx::DisconnectReason::kTcpError, true}));
     EXPECT_TRUE(queue->report_peer_disconnected(
-        eth::EthPeerDisconnectFeedback{peer, rlpx::DisconnectReason::kTooManyPeers, false}));
+        eth::EthPeerDisconnectFeedback{peer, rlpx::DisconnectReason::kTcpError, true}));
     EXPECT_FALSE(queue->report_peer_disconnected(
-        eth::EthPeerDisconnectFeedback{peer, rlpx::DisconnectReason::kTooManyPeers, false}));
+        eth::EthPeerDisconnectFeedback{peer, rlpx::DisconnectReason::kTcpError, true}));
 
     EXPECT_EQ(queue->requeued_peer_count(), 2U);
     EXPECT_EQ(queue->flaky_peer_drop_count(), 1U);
@@ -545,7 +633,7 @@ TEST(EthWatchRunnerTest, EthPeerQueueReceivesSchedulerDisconnectFeedback)
         io,
         pool,
         [](discv4::ValidatedPeer,
-           std::function<void()>,
+           std::function<void(rlpx::DisconnectReason)>,
            std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
            boost::asio::yield_context)
         {
@@ -556,9 +644,9 @@ TEST(EthWatchRunnerTest, EthPeerQueueReceivesSchedulerDisconnectFeedback)
     ASSERT_TRUE(static_cast<bool>(scheduler->feedback_fn));
     scheduler->feedback_fn(peer, rlpx::DisconnectReason::kTooManyPeers, false);
 
-    EXPECT_EQ(queue->requeued_peer_count(), 1U);
-    ASSERT_EQ(scheduler->queue.size(), 1U);
-    EXPECT_EQ(scheduler->queue.front().peer.tcp_port, 30306U);
+    EXPECT_EQ(queue->requeued_peer_count(), 0U);
+    EXPECT_EQ(queue->too_many_peers_backoff_count(), 1U);
+    EXPECT_TRUE(scheduler->queue.empty());
     scheduler->stop();
 }
 
@@ -571,11 +659,11 @@ TEST(EthWatchRunnerTest, EthPeerQueueIgnoresUnconnectedDialFailuresFromScheduler
         io,
         pool,
         [](discv4::ValidatedPeer,
-           std::function<void()> on_done,
+           std::function<void(rlpx::DisconnectReason)> on_done,
            std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
            boost::asio::yield_context)
         {
-            on_done();
+            on_done(rlpx::DisconnectReason::kTcpError);
         },
         {});
     auto queue = std::make_shared<eth::EthPeerQueue>(scheduler);
@@ -596,6 +684,38 @@ TEST(EthWatchRunnerTest, EthPeerQueueIgnoresUnconnectedDialFailuresFromScheduler
     EXPECT_EQ(queue->requeued_peer_count(), 0U);
     EXPECT_TRUE(scheduler->queue.empty());
     EXPECT_EQ(scheduler->active, 0);
+    scheduler->stop();
+}
+
+TEST(EthWatchRunnerTest, EthPeerQueueBacksOffTooManyPeersFromSchedulerDialCompletion)
+{
+    boost::asio::io_context io;
+    eth::EthWatchConnectionConfig config{};
+    config.max_total_connections = 1;
+    config.max_connections_per_chain = 1;
+    const auto pool = eth::make_eth_watcher_pool(config);
+
+    const auto peer = make_validated_peer(0xF0, 30307U);
+    auto scheduler = eth::start_eth_watch_chain_peer_dialing(
+        io,
+        pool,
+        [](discv4::ValidatedPeer,
+           std::function<void(rlpx::DisconnectReason)> on_done,
+           std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
+           boost::asio::yield_context)
+        {
+            on_done(rlpx::DisconnectReason::kTooManyPeers);
+        },
+        {});
+    auto queue = std::make_shared<eth::EthPeerQueue>(scheduler);
+
+    EXPECT_TRUE(queue->enqueue_discovered_peer(peer.peer));
+    io.run_for(std::chrono::milliseconds(100));
+
+    EXPECT_EQ(queue->too_many_peers_backoff_count(), 1U);
+    EXPECT_EQ(queue->requeued_peer_count(), 0U);
+    EXPECT_EQ(scheduler->active, 0);
+    EXPECT_TRUE(scheduler->queue.empty());
     scheduler->stop();
 }
 

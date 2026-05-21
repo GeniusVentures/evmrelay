@@ -19,6 +19,9 @@ const char* to_string(SessionError error) noexcept {
         case SessionError::kInvalidMessage: return "Invalid message";
         case SessionError::kInvalidFrameSize: return "Invalid frame size";
         case SessionError::kBufferOverflow: return "Buffer overflow";
+        case SessionError::kConnectionFailed: return "Connection failed";
+        case SessionError::kNotConnected: return "Not connected";
+        case SessionError::kDisconnected: return "Disconnected";
         default: return "Unknown error";
     }
 }

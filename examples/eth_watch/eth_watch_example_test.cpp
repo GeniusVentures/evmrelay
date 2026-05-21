@@ -103,11 +103,11 @@ discv4::DialFn no_op_dial_fn()
 {
     return [](
         discv4::ValidatedPeer,
-        std::function<void()> done,
+        std::function<void(rlpx::DisconnectReason)> done,
         std::function<void(std::shared_ptr<rlpx::RlpxSession>)>,
         boost::asio::yield_context)
     {
-        done();
+        done(rlpx::DisconnectReason::kTcpError);
     };
 }
 

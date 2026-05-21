@@ -44,6 +44,9 @@ eth_watch <host> <port> <peer_pubkey_hex> [eth_offset]
 | `--chain-peers-json <path>` | Load peers from a local chain peer cache |
 | `--chain-peers-url <url>` | Override the remote chain peer cache URL used only when no local package JSON is found |
 | `--no-chain-peers-url` | Disable remote fallback and use only package-local JSON/cache files |
+| `--peer-selection <mode>` | Select `cache-only`, `discover-if-needed`, `discover-first`, or `hybrid` |
+| `--cache-peer-start-offset <count>` | Rotate cached peers by `count` before spreading them across dial slots |
+| `--run-seconds <seconds>` | Stop after a bounded live-test runtime and print final summaries |
 
 `--watch-contract` and `--watch-event` must be paired and can be repeated for
 multiple contracts/events.
@@ -106,6 +109,12 @@ discovery, and only peers discovered through discv5 enter the shared dial queue.
 If ENR-tree resolution produces no usable ENRs and valid cache `bootnodes` are
 available, `EthWatchService` falls back to discv4 discovery.
 
+When chain fork metadata is available, discv5-discovered ENRs are filtered by
+their `eth` ENR entry (`fork_hash`, `fork_next`) before entering the dial queue.
+The ETH Status handshake is still the authoritative validation after RLPx
+connects. For live Sepolia peers, current validation confirms
+`fork_hash=268956b6` and `fork_next=0`.
+
 ### Optional local chain peer cache file
 
 `eth_watch` can load chain metadata from a local JSON cache. The `nodes` array is
@@ -121,6 +130,16 @@ Gnosis when the cache has no pre-scored peers.
 
 The local chain peer cache file may be either plain JSON (`chain_enodes.json`) or a
 gzip-compressed JSON file (`chain_enodes.json.gz`).
+
+`--cache-peer-start-offset` is useful when the highest-ranked cached peers are
+busy. It rotates the cached `nodes` list first, then applies the normal
+band-spread behavior. For example, offset `50` turns `[0, 1, ... 99]` into
+`[50, 51, ... 99, 0, 1, ... 49]` before dialing.
+
+Live-test runs print phase summaries such as transport connect failures, RLPx
+auth successes, local HELLO sent, peer HELLO accepted, ETH Status sent/accepted,
+remote Status rejections, disconnect phase counts, TooManyPeers counts, queue
+backoff/requeue counts, and total ETH messages received.
 
 Expected file shape:
 

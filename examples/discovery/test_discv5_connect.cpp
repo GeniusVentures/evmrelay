@@ -193,7 +193,7 @@ static bool is_candidate_blocked(
 
 static void dial_connect_only(
     discv4::ValidatedPeer vp,
-    std::function<void()> on_done,
+    std::function<void(rlpx::DisconnectReason)> on_done,
     std::function<void(std::shared_ptr<rlpx::RlpxSession>)> on_connected,
     boost::asio::yield_context yield,
     std::shared_ptr<DialStats> stats,
@@ -206,7 +206,7 @@ static void dial_connect_only(
     if (!keypair_result)
     {
         ++stats->connect_failed;
-        on_done();
+        on_done(rlpx::DisconnectReason::kTcpError);
         return;
     }
     const auto& keypair = keypair_result.value();
@@ -244,7 +244,7 @@ static void dial_connect_only(
         }
 
         ++stats->connect_failed;
-        on_done();
+        on_done(rlpx::DisconnectReason::kTcpError);
         return;
     }
     auto session = std::move(session_result.value());
@@ -365,13 +365,13 @@ static void dial_connect_only(
         }
 
         (void)session->disconnect(rlpx::DisconnectReason::kTimeout);
-        on_done();
+        on_done(rlpx::DisconnectReason::kTcpError);
         return;
     }
 
     boost::system::error_code lt_ec;
     lifetime->async_wait(boost::asio::redirect_error(yield, lt_ec));
-    on_done();
+    on_done(rlpx::DisconnectReason::kTcpError);
 }
 
 int main(int argc, char** argv)
@@ -528,7 +528,7 @@ int main(int argc, char** argv)
         pool,
         [&io, &deadline, min_connections, sched_ref, stats, seeded_pubkeys, quality, sepolia_fork_id]
         (discv4::ValidatedPeer vp,
-         std::function<void()> on_done,
+         std::function<void(rlpx::DisconnectReason)> on_done,
          std::function<void(std::shared_ptr<rlpx::RlpxSession>)> on_connected,
          boost::asio::yield_context yc) mutable
         {

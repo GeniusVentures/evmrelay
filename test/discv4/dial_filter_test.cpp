@@ -43,12 +43,12 @@ make_counting_scheduler( boost::asio::io_context& io )
 
     discv4::DialFn count_fn = [dial_count](
         discv4::ValidatedPeer,
-        std::function<void()>                                    on_done,
+        std::function<void(rlpx::DisconnectReason)> on_done,
         std::function<void( std::shared_ptr<rlpx::RlpxSession> )>,
         boost::asio::yield_context ) noexcept
     {
         ++( *dial_count );
-        on_done();
+        on_done(rlpx::DisconnectReason::kTcpError);
     };
 
     auto sched = std::make_shared<discv4::DialScheduler>( io, pool, count_fn );

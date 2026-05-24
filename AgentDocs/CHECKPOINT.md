@@ -1,5 +1,68 @@
 # Checkpoint Log
 
+## Schema-driven JSON parsing and RPC manager config foundation - 2026-05-24
+
+### Current State
+
+- Repository: `evmrelay`
+- Branch: `develop`
+- This checkpoint keeps JSON schemas in C++ for now, but all normal JSON object item loading added or touched in this pass goes through `rlp::base::json::JsonSchemaObject` / `JsonSchemaArray`.
+
+### What Changed
+
+- Added reusable schema-driven JSON parsing in `base`:
+  - `JsonSchemaField`
+  - `JsonSchemaObject`
+  - `JsonSchemaArray`
+  - `JsonFieldType`
+  - `JsonParsedObject`
+  - `JsonParsedArray`
+  - typed parsed-value accessors.
+- Added nested object/array traversal, required/optional/default handling, typed primitive conversion, and `JsonError` paths such as `endpoints[0].priority`.
+- Added `eth::rpc::RpcManagerConfig` / `RpcEndpointConfig` loading from JSON text or file.
+- Registered `rpc_manager_config_test`.
+- Reworked JSON-RPC response parsing to schema-validate response envelopes, block-number result objects, receipt objects, log objects, and topic/log arrays.
+- Reworked chain peer cache object readers to use schema parsing for:
+  - ENR-tree/source fields;
+  - ETH message schemas and schema-set filters;
+  - chain peer node records;
+  - signed-cache signature fields;
+  - chain config required fields.
+
+### Remaining Intentional Direct Boost.JSON Use
+
+Some direct Boost.JSON access remains where the JSON shape is intentionally dynamic or not ordinary object item loading:
+
+- selecting a chain entry by runtime chain name;
+- selecting an `_ethMessageSchemaSets` entry by runtime schema-set name;
+- preserving the unsigned JSON object for signature verification;
+- `forkNext`, which currently accepts either a JSON integer or a hex string.
+
+### Verification
+
+Commands run from the SuperGenius repository root:
+
+```bash
+cmake --build evmrelay/build/OSX/Debug --target rpc_manager_config_test json_rpc_test
+cmake --build evmrelay/build/OSX/Debug --target discv4_chain_peers_test rpc_receipt_source_test
+
+./evmrelay/build/OSX/Debug/test_bin/rpc_manager_config_test
+./evmrelay/build/OSX/Debug/test_bin/json_rpc_test
+./evmrelay/build/OSX/Debug/test_bin/rpc_receipt_source_test
+./evmrelay/build/OSX/Debug/test_bin/discv4_chain_peers_test
+```
+
+Results:
+
+- `rpc_manager_config_test`: passed 6/6.
+- `json_rpc_test`: passed 6/6.
+- `rpc_receipt_source_test`: passed 10/10.
+- `discv4_chain_peers_test`: local cases passed 23/24; the only failure was the live URL download test because no JSON was downloaded in the restricted environment.
+
+### Next Work
+
+Continue from `AgentDocs/RPC_MANAGER_HANDOFF.md`.
+
 ## All-chain live C++ functional test and RPC manager handoff - 2026-05-24
 
 ### Current State

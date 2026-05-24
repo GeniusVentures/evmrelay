@@ -148,6 +148,14 @@ target_link_libraries(rpc_receipt_source_test
     evmrelay
 )
 
+# RPC manager config tests
+addtest(rpc_manager_config_test
+    rpc_manager_config_test.cpp
+)
+target_link_libraries(rpc_manager_config_test
+    evmrelay
+)
+
 # EthWatchCli tests
 addtest(eth_watch_cli_test
     eth_watch_cli_test.cpp

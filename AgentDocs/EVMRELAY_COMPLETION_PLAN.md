@@ -147,6 +147,8 @@ Keep the implementation modular and keep source roles separate:
 - `eth::EthWatchService` / relay runner: production owner for chain metadata intake, discovery-to-dialer queue orchestration, RLPx/ETH session setup, event watching, and decoded message/event callbacks.
 - `examples/eth_watch/eth_watch.cpp`: thin CLI/example wrapper only; it should parse arguments, build configs, call production eth-watch APIs, and avoid owning scheduler/discovery orchestration.
 - Discovery clients: optionally expand peer sets from `bootnodes`, but promote discovered candidates into peer candidates only after validation.
+- `rlp::base::json`: shared schema-driven JSON object and array parser. New JSON object loading should declare `JsonSchemaObject` / `JsonSchemaArray` metadata and consume typed `JsonParsedObject` values instead of feature-local `if_contains` parsing branches.
+- `eth::rpc_manager_config`: configuration-only RPC endpoint loader. It validates endpoint config through the base JSON schema parser and should remain separate from runtime RPC orchestration.
 
 ## Non-Negotiable Semantics
 
@@ -161,6 +163,7 @@ Keep the implementation modular and keep source roles separate:
 - Discovery callbacks must not perform blocking RLPx work directly. They may validate, deduplicate, filter, and enqueue.
 - Example binaries must not own core relay orchestration. If orchestration logic is needed by the relay, it belongs under `include/eth` and `src/eth`, with `EthWatchService` as the primary production integration point unless a smaller helper class is warranted.
 - Schema validation must fail or warn clearly when a chain entry lacks required `nodes` or `bootnodes`.
+- JSON object parsing should stay schema-driven. Feature modules may do domain conversion after schema validation, but field presence/type/default handling belongs in `base/json_utility`.
 - Docs, tests, and function names should use "chain peers" for `nodes` and "bootnodes/bootstrap peers" for `bootnodes`.
 
 ## Tasks

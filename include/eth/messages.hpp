@@ -29,8 +29,10 @@ inline constexpr uint8_t kNewBlockMessageId = 0x07;
 inline constexpr uint8_t kNewPooledTransactionHashesMessageId = 0x08;
 inline constexpr uint8_t kGetPooledTransactionsMessageId = 0x09;
 inline constexpr uint8_t kPooledTransactionsMessageId = 0x0a;
+inline constexpr uint8_t kUpgradeStatusMessageId = 0x0b;
 inline constexpr uint8_t kGetReceiptsMessageId = 0x0f;
 inline constexpr uint8_t kReceiptsMessageId = 0x10;
+inline constexpr uint8_t kBlockRangeUpdateMessageId = 0x11;
 
 using ByteBuffer = std::vector<uint8_t>;
 using EncodeResult = rlp::EncodingResult<ByteBuffer>;
@@ -63,6 +65,9 @@ using ValidationResult = rlp::outcome::result<void, eth::StatusValidationError,
 // STATUS
 [[nodiscard]] EncodeResult encode_status(const StatusMessage& msg) noexcept;
 [[nodiscard]] DecodeResult<StatusMessage> decode_status(rlp::ByteView rlp_data) noexcept;
+[[nodiscard]] DecodeResult<StatusMessage> decode_status(
+    rlp::ByteView                         rlp_data,
+    const std::vector<eth::EthMessageSchema>& schemas) noexcept;
 
 // NEW_BLOCK_HASHES
 [[nodiscard]] EncodeResult encode_new_block_hashes(const NewBlockHashesMessage& msg) noexcept;
@@ -71,6 +76,14 @@ using ValidationResult = rlp::outcome::result<void, eth::StatusValidationError,
 // NEW_POOLED_TRANSACTION_HASHES
 [[nodiscard]] EncodeResult encode_new_pooled_tx_hashes(const NewPooledTransactionHashesMessage& msg) noexcept;
 [[nodiscard]] DecodeResult<NewPooledTransactionHashesMessage> decode_new_pooled_tx_hashes(rlp::ByteView rlp_data) noexcept;
+
+// BLOCK_RANGE_UPDATE
+[[nodiscard]] EncodeResult encode_block_range_update(const BlockRangeUpdateMessage& msg) noexcept;
+[[nodiscard]] DecodeResult<BlockRangeUpdateMessage> decode_block_range_update(rlp::ByteView rlp_data) noexcept;
+
+// UPGRADE_STATUS
+[[nodiscard]] EncodeResult encode_upgrade_status(const UpgradeStatusMessage& msg) noexcept;
+[[nodiscard]] DecodeResult<UpgradeStatusMessage> decode_upgrade_status(rlp::ByteView rlp_data) noexcept;
 
 // GET_BLOCK_HEADERS
 [[nodiscard]] EncodeResult encode_get_block_headers(const GetBlockHeadersMessage& msg) noexcept;
@@ -87,18 +100,30 @@ using ValidationResult = rlp::outcome::result<void, eth::StatusValidationError,
 // BLOCK_BODIES
 [[nodiscard]] EncodeResult encode_block_bodies(const BlockBodiesMessage& msg) noexcept;
 [[nodiscard]] DecodeResult<BlockBodiesMessage> decode_block_bodies(rlp::ByteView rlp_data) noexcept;
+[[nodiscard]] DecodeResult<BlockBodiesMessage> decode_block_bodies(
+    rlp::ByteView                         rlp_data,
+    const std::vector<eth::EthMessageSchema>& schemas) noexcept;
 
 // NEW_BLOCK
 [[nodiscard]] EncodeResult encode_new_block(const NewBlockMessage& msg) noexcept;
 [[nodiscard]] DecodeResult<NewBlockMessage> decode_new_block(rlp::ByteView rlp_data) noexcept;
+[[nodiscard]] DecodeResult<NewBlockMessage> decode_new_block(
+    rlp::ByteView                         rlp_data,
+    const std::vector<eth::EthMessageSchema>& schemas) noexcept;
 
 // GET_RECEIPTS
 [[nodiscard]] EncodeResult encode_get_receipts(const GetReceiptsMessage& msg) noexcept;
 [[nodiscard]] DecodeResult<GetReceiptsMessage> decode_get_receipts(rlp::ByteView rlp_data) noexcept;
+[[nodiscard]] DecodeResult<GetReceiptsMessage> decode_get_receipts(
+    rlp::ByteView                         rlp_data,
+    const std::vector<eth::EthMessageSchema>& schemas) noexcept;
 
 // RECEIPTS
 [[nodiscard]] EncodeResult encode_receipts(const ReceiptsMessage& msg) noexcept;
 [[nodiscard]] DecodeResult<ReceiptsMessage> decode_receipts(rlp::ByteView rlp_data) noexcept;
+[[nodiscard]] DecodeResult<ReceiptsMessage> decode_receipts(
+    rlp::ByteView                         rlp_data,
+    const std::vector<eth::EthMessageSchema>& schemas) noexcept;
 
 // GET_POOLED_TRANSACTIONS
 [[nodiscard]] EncodeResult encode_get_pooled_transactions(const GetPooledTransactionsMessage& msg) noexcept;

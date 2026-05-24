@@ -384,6 +384,40 @@ TEST(EthWatchServiceTest, ProcessMessageUnknownIdIsIgnored)
     svc.process_message(0xFF, rlp::ByteView(garbage.data(), garbage.size()));
 }
 
+TEST(EthWatchServiceTest, ProcessMessageUsesSchemaAwareReceiptsDecoder)
+{
+    eth::EthWatchService svc;
+    svc.set_eth_message_schemas({
+        eth::EthMessageSchema{
+            "Receipts",
+            eth::protocol::kReceiptsMessageId,
+            std::nullopt,
+            {
+                eth::EthMessageFieldSchema{"request_id", eth::EthMessageFieldType::kUint64, {}, 0U},
+                eth::EthMessageFieldSchema{"last_block_incomplete", eth::EthMessageFieldType::kBool, {}, 1U},
+                eth::EthMessageFieldSchema{"receipts", eth::EthMessageFieldType::kReceipts, {}, 2U},
+            }},
+    });
+
+    rlp::RlpEncoder encoder;
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.add(uint64_t{1}));
+    ASSERT_TRUE(encoder.add(false));
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.EndList());
+    ASSERT_TRUE(encoder.EndList());
+    auto wire = encoder.GetBytes();
+    ASSERT_TRUE(wire.has_value());
+
+    svc.process_message(
+        eth::protocol::kReceiptsMessageId,
+        rlp::ByteView(wire.value()->data(), wire.value()->size()));
+
+    const auto stats = svc.stats();
+    EXPECT_EQ(stats.receipts_messages, 1U);
+    EXPECT_EQ(stats.decode_failures, 0U);
+}
+
 // ============================================================================
 // EthWatchService — set_send_callback / request flow
 // ============================================================================
@@ -568,6 +602,27 @@ TEST(EthWatchServiceTest, InitializeRunCreatesSchedulerAndPeerQueueFromCachedNod
     ASSERT_NE(queue, nullptr);
     EXPECT_EQ(queue->cached_peer_count(), 1U);
     EXPECT_FALSE(queue->needs_discovery());
+}
+
+TEST(EthWatchServiceTest, DisabledDiscoveryForkFilterLeavesSchedulerUnfiltered)
+{
+    boost::asio::io_context io;
+
+    auto chain_config = make_chain_config("polygon-like-chain", {make_validated_peer(0x10)});
+    chain_config.discovery_fork_filter = discv4::DiscoveryForkFilter::kDisabled;
+
+    eth::EthWatchServiceConfig config{};
+    config.chains.push_back(std::move(chain_config));
+    config.dial_fn_factory = [](const discv4::ChainPeerConfig&) { return no_op_dial_fn(); };
+
+    eth::EthWatchService svc;
+    ASSERT_TRUE(svc.initialize(std::move(config), [](const eth::WatchEventNotification&) {}));
+    svc.run(io);
+
+    auto queue = svc.peer_queue("polygon-like-chain");
+    ASSERT_NE(queue, nullptr);
+    ASSERT_NE(queue->scheduler(), nullptr);
+    EXPECT_FALSE(static_cast<bool>(queue->scheduler()->filter_fn));
 }
 
 TEST(EthWatchServiceTest, RunCanLeaveDiscoveryQueueWithoutDialConsumer)
@@ -871,6 +926,49 @@ TEST(EthWatchServiceTest, EnrTreeDiscoveryStartsDiscv5AndKeepsSeedsDiscoveryOnly
     EXPECT_EQ(svc.discv4_fallback_count(), 0U);
     EXPECT_EQ(queue->cached_peer_count(), 0U);
     EXPECT_TRUE(queue->discovery_bootnodes().empty());
+}
+
+TEST(EthWatchServiceTest, EnrTreeDiscoveryEnqueuesResolvedTreePeersBeforeDiscv5Expansion)
+{
+    boost::asio::io_context io;
+    bool discv5_started = false;
+
+    eth::EthWatchServiceConfig config{};
+    config.discovery_mode = eth::EthWatchDiscoveryMode::kDiscoverFirst;
+    config.chains.push_back(make_chain_config("polygon-mainnet", {}, {}));
+    config.chains.back().discovery_fork_filter = discv4::DiscoveryForkFilter::kDisabled;
+    config.chains.back().enr_trees.push_back(
+        "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io");
+    config.dial_fn_factory = [](const discv4::ChainPeerConfig&) { return no_op_dial_fn(); };
+    config.enr_tree_resolver = [](
+        const discv4::ChainPeerConfig&,
+        const std::vector<std::string>&)
+    {
+        return std::vector<std::string>{
+            "enr:-KG4QBRp0DeaQjDB1SYKiydfTWYiGTSGh0YxdJV7pfhEZtOqLJuG8VyGm6quuv-svohW4-YEs5cAAaimdGZPqxQsQjeEagWI-4NldGjHxoQi1SOygIJpZIJ2NIJpcIRopCo1iXNlY3AyNTZrMaEDd0aWThxpXekujcthNN7pZ80iTPaYGJHmBRJzFFPtmYKEc25hcMCDdGNwgnZgg3VkcIJ2YA"};
+    };
+    config.discv5_enr_tree_starter = [&discv5_started](
+        boost::asio::io_context&,
+        const discv4::ChainPeerConfig& chain,
+        std::shared_ptr<eth::EthPeerQueue> queue,
+        const std::vector<std::string>& bootstrap_enrs)
+    {
+        discv5_started = true;
+        return chain.canonical_name == "polygon-mainnet"
+            && queue
+            && queue->discovered_peer_count() == 1U
+            && bootstrap_enrs.size() == 1U;
+    };
+
+    eth::EthWatchService svc;
+    ASSERT_TRUE(svc.initialize(std::move(config), [](const eth::WatchEventNotification&) {}));
+    svc.run(io);
+
+    auto queue = svc.peer_queue("polygon-mainnet");
+    ASSERT_NE(queue, nullptr);
+    EXPECT_TRUE(discv5_started);
+    EXPECT_EQ(queue->cached_peer_count(), 0U);
+    EXPECT_EQ(queue->discovered_peer_count(), 1U);
 }
 
 TEST(EthWatchServiceTest, DiscoverFirstStartsDiscv5FromCacheEnrsWithoutPreloadingNodes)

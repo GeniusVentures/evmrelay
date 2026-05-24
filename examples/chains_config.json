@@ -5,45 +5,652 @@
     "bnb-smart-chain",
     "base-mainnet"
   ],
+  "_ethMessageSchemaSets": {
+    "ethereum-default": [
+      {
+        "name": "Status",
+        "id": 0,
+        "protocolVersion": 69,
+        "fields": [
+          {
+            "name": "protocol_version",
+            "type": "uint8",
+            "offset": 0
+          },
+          {
+            "name": "network_id",
+            "type": "uint64",
+            "offset": 1
+          },
+          {
+            "name": "genesis_hash",
+            "type": "hash32",
+            "size": 32,
+            "offset": 2
+          },
+          {
+            "name": "fork_id",
+            "type": "forkid",
+            "offset": 3
+          },
+          {
+            "name": "earliest_block",
+            "type": "uint64",
+            "offset": 4
+          },
+          {
+            "name": "latest_block",
+            "type": "uint64",
+            "offset": 5
+          },
+          {
+            "name": "latest_block_hash",
+            "type": "hash32",
+            "size": 32,
+            "offset": 6
+          }
+        ]
+      },
+      {
+        "name": "Status",
+        "id": 0,
+        "protocolVersion": 68,
+        "fields": [
+          {
+            "name": "protocol_version",
+            "type": "uint8",
+            "offset": 0
+          },
+          {
+            "name": "network_id",
+            "type": "uint64",
+            "offset": 1
+          },
+          {
+            "name": "td",
+            "type": "uint256",
+            "offset": 2
+          },
+          {
+            "name": "block_hash",
+            "type": "hash32",
+            "size": 32,
+            "offset": 3
+          },
+          {
+            "name": "genesis_hash",
+            "type": "hash32",
+            "size": 32,
+            "offset": 4
+          },
+          {
+            "name": "fork_id",
+            "type": "forkid",
+            "offset": 5
+          }
+        ]
+      },
+      {
+        "name": "Status",
+        "id": 0,
+        "protocolVersion": 67,
+        "fields": [
+          {
+            "name": "protocol_version",
+            "type": "uint8",
+            "offset": 0
+          },
+          {
+            "name": "network_id",
+            "type": "uint64",
+            "offset": 1
+          },
+          {
+            "name": "td",
+            "type": "uint256",
+            "offset": 2
+          },
+          {
+            "name": "block_hash",
+            "type": "hash32",
+            "size": 32,
+            "offset": 3
+          },
+          {
+            "name": "genesis_hash",
+            "type": "hash32",
+            "size": 32,
+            "offset": 4
+          },
+          {
+            "name": "fork_id",
+            "type": "forkid",
+            "offset": 5
+          }
+        ]
+      },
+      {
+        "name": "Status",
+        "id": 0,
+        "protocolVersion": 66,
+        "fields": [
+          {
+            "name": "protocol_version",
+            "type": "uint8",
+            "offset": 0
+          },
+          {
+            "name": "network_id",
+            "type": "uint64",
+            "offset": 1
+          },
+          {
+            "name": "td",
+            "type": "uint256",
+            "offset": 2
+          },
+          {
+            "name": "block_hash",
+            "type": "hash32",
+            "size": 32,
+            "offset": 3
+          },
+          {
+            "name": "genesis_hash",
+            "type": "hash32",
+            "size": 32,
+            "offset": 4
+          },
+          {
+            "name": "fork_id",
+            "type": "forkid",
+            "offset": 5
+          }
+        ]
+      },
+      {
+        "name": "NewBlockHashes",
+        "id": 1,
+        "fields": [
+          {
+            "name": "entries",
+            "type": "block_hash_entries",
+            "offset": 0
+          }
+        ]
+      },
+      {
+        "name": "Transactions",
+        "id": 2,
+        "fields": [
+          {
+            "name": "transactions",
+            "type": "transactions",
+            "offset": 0
+          }
+        ]
+      },
+      {
+        "name": "GetBlockHeaders",
+        "id": 3,
+        "fields": [
+          {
+            "name": "request_id",
+            "type": "uint64",
+            "offset": 0
+          },
+          {
+            "name": "query",
+            "type": "get_block_headers_query",
+            "offset": 1
+          }
+        ]
+      },
+      {
+        "name": "GetBlockHeadersLegacy",
+        "id": 3,
+        "fields": [
+          {
+            "name": "query",
+            "type": "get_block_headers_query",
+            "offset": 0
+          }
+        ]
+      },
+      {
+        "name": "BlockHeaders",
+        "id": 4,
+        "fields": [
+          {
+            "name": "request_id",
+            "type": "uint64",
+            "offset": 0
+          },
+          {
+            "name": "headers",
+            "type": "block_headers",
+            "offset": 1
+          }
+        ]
+      },
+      {
+        "name": "BlockHeadersLegacy",
+        "id": 4,
+        "fields": [
+          {
+            "name": "headers",
+            "type": "block_headers",
+            "offset": 0
+          }
+        ]
+      },
+      {
+        "name": "GetBlockBodies",
+        "id": 5,
+        "fields": [
+          {
+            "name": "request_id",
+            "type": "uint64",
+            "offset": 0
+          },
+          {
+            "name": "block_hashes",
+            "type": "hash_list",
+            "offset": 1
+          }
+        ]
+      },
+      {
+        "name": "GetBlockBodiesLegacy",
+        "id": 5,
+        "fields": [
+          {
+            "name": "block_hashes",
+            "type": "hash_list",
+            "offset": 0
+          }
+        ]
+      },
+      {
+        "name": "BlockBodies",
+        "id": 6,
+        "fields": [
+          {
+            "name": "request_id",
+            "type": "uint64",
+            "offset": 0
+          },
+          {
+            "name": "bodies",
+            "type": "block_bodies",
+            "offset": 1
+          }
+        ]
+      },
+      {
+        "name": "BlockBodiesLegacy",
+        "id": 6,
+        "fields": [
+          {
+            "name": "bodies",
+            "type": "block_bodies",
+            "offset": 0
+          }
+        ]
+      },
+      {
+        "name": "NewBlock",
+        "id": 7,
+        "fields": [
+          {
+            "name": "block",
+            "type": "block",
+            "offset": 0
+          },
+          {
+            "name": "total_difficulty",
+            "type": "uint256",
+            "offset": 1
+          }
+        ]
+      },
+      {
+        "name": "NewPooledTransactionHashes",
+        "id": 8,
+        "fields": [
+          {
+            "name": "types",
+            "type": "bytes",
+            "offset": 0
+          },
+          {
+            "name": "sizes",
+            "type": "uint32_list",
+            "offset": 1
+          },
+          {
+            "name": "hashes",
+            "type": "hash_list",
+            "offset": 2
+          }
+        ]
+      },
+      {
+        "name": "GetPooledTransactions",
+        "id": 9,
+        "fields": [
+          {
+            "name": "request_id",
+            "type": "uint64",
+            "offset": 0
+          },
+          {
+            "name": "transaction_hashes",
+            "type": "hash_list",
+            "offset": 1
+          }
+        ]
+      },
+      {
+        "name": "GetPooledTransactionsLegacy",
+        "id": 9,
+        "fields": [
+          {
+            "name": "transaction_hashes",
+            "type": "hash_list",
+            "offset": 0
+          }
+        ]
+      },
+      {
+        "name": "PooledTransactions",
+        "id": 10,
+        "fields": [
+          {
+            "name": "request_id",
+            "type": "uint64",
+            "offset": 0
+          },
+          {
+            "name": "transactions",
+            "type": "pooled_transactions",
+            "offset": 1
+          }
+        ]
+      },
+      {
+        "name": "PooledTransactionsLegacy",
+        "id": 10,
+        "fields": [
+          {
+            "name": "transactions",
+            "type": "pooled_transactions",
+            "offset": 0
+          }
+        ]
+      },
+      {
+        "name": "GetReceipts",
+        "id": 15,
+        "fields": [
+          {
+            "name": "request_id",
+            "type": "uint64",
+            "offset": 0
+          },
+          {
+            "name": "block_hashes",
+            "type": "hash_list",
+            "offset": 1
+          }
+        ]
+      },
+      {
+        "name": "GetReceiptsLegacy",
+        "id": 15,
+        "fields": [
+          {
+            "name": "block_hashes",
+            "type": "hash_list",
+            "offset": 0
+          }
+        ]
+      },
+      {
+        "name": "Receipts",
+        "id": 16,
+        "fields": [
+          {
+            "name": "request_id",
+            "type": "uint64",
+            "offset": 0
+          },
+          {
+            "name": "receipts",
+            "type": "receipts",
+            "offset": 1
+          }
+        ]
+      },
+      {
+        "name": "ReceiptsLegacy",
+        "id": 16,
+        "fields": [
+          {
+            "name": "receipts",
+            "type": "receipts",
+            "offset": 0
+          }
+        ]
+      },
+      {
+        "name": "BlockRangeUpdate",
+        "id": 17,
+        "protocolVersion": 69,
+        "fields": [
+          {
+            "name": "earliest_block",
+            "type": "uint64",
+            "offset": 0
+          },
+          {
+            "name": "latest_block",
+            "type": "uint64",
+            "offset": 1
+          },
+          {
+            "name": "latest_block_hash",
+            "type": "hash32",
+            "size": 32,
+            "offset": 2
+          }
+        ]
+      }
+    ],
+    "polygon-bor": {
+      "extends": "ethereum-default",
+      "prepend": [
+        {
+          "name": "Status",
+          "id": 0,
+          "protocolVersion": 69,
+          "fields": [
+            {
+              "name": "protocol_version",
+              "type": "uint8",
+              "offset": 0
+            },
+            {
+              "name": "network_id",
+              "type": "uint64",
+              "offset": 1
+            },
+            {
+              "name": "bor_extra",
+              "type": "uint32",
+              "offset": 2
+            },
+            {
+              "name": "genesis_hash",
+              "type": "hash32",
+              "size": 32,
+              "offset": 3
+            },
+            {
+              "name": "fork_id",
+              "type": "forkid",
+              "offset": 4
+            },
+            {
+              "name": "earliest_block",
+              "type": "uint64",
+              "offset": 5
+            },
+            {
+              "name": "latest_block",
+              "type": "uint64",
+              "offset": 6
+            },
+            {
+              "name": "latest_block_hash",
+              "type": "hash32",
+              "size": 32,
+              "offset": 7
+            }
+          ]
+        },
+        {
+          "name": "Status",
+          "id": 0,
+          "protocolVersion": 69,
+          "fields": [
+            {
+              "name": "protocol_version",
+              "type": "uint8",
+              "offset": 0
+            },
+            {
+              "name": "network_id",
+              "type": "uint64",
+              "offset": 1
+            },
+            {
+              "name": "td",
+              "type": "uint256",
+              "offset": 2
+            },
+            {
+              "name": "block_hash",
+              "type": "hash32",
+              "size": 32,
+              "offset": 3
+            },
+            {
+              "name": "genesis_hash",
+              "type": "hash32",
+              "size": 32,
+              "offset": 4
+            },
+            {
+              "name": "fork_id",
+              "type": "forkid",
+              "offset": 5
+            }
+          ]
+        }
+      ]
+    },
+    "bsc68": {
+      "extends": "ethereum-default",
+      "remove": [
+        {
+          "id": 0,
+          "protocolVersion": 69
+        },
+        {
+          "id": 0,
+          "protocolVersion": 67
+        },
+        {
+          "id": 0,
+          "protocolVersion": 66
+        },
+        {
+          "id": 17
+        }
+      ],
+      "append": [
+        {
+          "name": "UpgradeStatus",
+          "id": 11,
+          "protocolVersion": 68,
+          "fields": [
+            {
+              "name": "disable_peer_tx_broadcast",
+              "type": "bool",
+              "offset": 0
+            }
+          ]
+        }
+      ]
+    },
+    "base-op-geth": {
+      "extends": "ethereum-default"
+    },
+    "gnosis-geth-like": {
+      "extends": "ethereum-default"
+    }
+  },
   "ethereum-mainnet": {
     "discoveryDefault": "enr-tree",
-    "enrTree": "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.mainnet.ethdisco.net"
+    "enrTree": "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.mainnet.ethdisco.net",
+    "ethMessageSchemaSet": "ethereum-default"
   },
   "ethereum-sepolia": {
     "discoveryDefault": "enr-tree",
-    "enrTree": "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.sepolia.ethdisco.net"
+    "enrTree": "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.sepolia.ethdisco.net",
+    "ethMessageSchemaSet": "ethereum-default"
   },
   "ethereum-holesky": {
     "discoveryDefault": "enr-tree",
-    "enrTree": "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.holesky.ethdisco.net"
+    "enrTree": "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.holesky.ethdisco.net",
+    "ethMessageSchemaSet": "ethereum-default"
   },
   "ethereum-hoodi": {
     "discoveryDefault": "enr-tree",
-    "enrTree": "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.hoodi.ethdisco.net"
+    "enrTree": "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.hoodi.ethdisco.net",
+    "ethMessageSchemaSet": "ethereum-default"
   },
   "polygon-mainnet": {
     "discoveryDefault": "enr-tree",
     "discoveryForkFilter": "disabled",
-    "enrTree": "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io"
+    "enrTree": "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io",
+    "ethMessageSchemaSet": "polygon-bor"
   },
   "polygon-amoy": {
     "discoveryDefault": "enr-tree",
     "discoveryForkFilter": "disabled",
-    "enrTree": "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@amoy.polygon-peers.io"
+    "enrTree": "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@amoy.polygon-peers.io",
+    "ethMessageSchemaSet": "polygon-bor"
   },
   "bnb-smart-chain": {
-    "discoveryDefault": "discv4"
+    "discoveryDefault": "discv4",
+    "ethMessageSchemaSet": "bsc68"
   },
   "bnb-smart-chain-testnet": {
-    "discoveryDefault": "discv4"
+    "discoveryDefault": "discv4",
+    "ethMessageSchemaSet": "bsc68"
   },
   "base-mainnet": {
-    "discoveryDefault": "cache-enr-discv5"
+    "discoveryDefault": "cache-enr-discv5",
+    "ethMessageSchemaSet": "base-op-geth"
   },
   "base-sepolia": {
-    "discoveryDefault": "cache-enr-discv5"
+    "discoveryDefault": "cache-enr-discv5",
+    "ethMessageSchemaSet": "base-op-geth"
   },
   "gnosis-chain": {
-    "discoveryDefault": "discv4"
+    "discoveryDefault": "discv4",
+    "ethMessageSchemaSet": "gnosis-geth-like"
   }
 }

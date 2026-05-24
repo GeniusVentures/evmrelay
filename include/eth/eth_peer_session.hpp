@@ -13,6 +13,9 @@ namespace eth {
 /// @brief Callback invoked when the remote ETH Status message is accepted.
 using EthStatusAcceptedHandler = std::function<void(const StatusMessage&)>;
 
+/// @brief Callback invoked when the remote sends an RLPx Disconnect during ETH Status.
+using EthStatusRemoteDisconnectHandler = std::function<void(rlpx::DisconnectReason)>;
+
 /// @brief Parameters for starting the ETH Status handshake on a negotiated session.
 struct EthStatusHandshakeStart
 {
@@ -20,7 +23,9 @@ struct EthStatusHandshakeStart
     uint64_t                           network_id = 0;
     Hash256                            genesis_hash{};
     ForkId                             fork_id{};
+    std::vector<EthMessageSchema>      eth_message_schemas;
     EthStatusAcceptedHandler           accepted_status_handler;
+    EthStatusRemoteDisconnectHandler   remote_disconnect_handler;
     rlpx::EthMessageHandler            inbound_message_handler;
 };
 

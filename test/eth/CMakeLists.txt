@@ -81,6 +81,17 @@ target_link_libraries(eth_enr_tree_peer_cache_live_test
     evmrelay
 )
 
+# Live all-chain discovery + RLPx/ETH functional test.
+addtest(eth_watch_all_chains_live_test
+    eth_watch_all_chains_live_test.cpp
+)
+target_include_directories(eth_watch_all_chains_live_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/examples
+)
+target_link_libraries(eth_watch_all_chains_live_test
+    evmrelay
+)
+
 # Transport-neutral receipt source tests
 addtest(eth_receipt_source_test
     eth_receipt_source_test.cpp

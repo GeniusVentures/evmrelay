@@ -33,7 +33,8 @@ enum class TransactionType : uint8_t
 {
     kLegacy   = 0x00, ///< Pre-EIP-2718 (no type prefix)
     kAccessList = 0x01, ///< EIP-2930
-    kDynamicFee = 0x02  ///< EIP-1559
+    kDynamicFee = 0x02, ///< EIP-1559
+    kOpDeposit = 0x7e   ///< OP Stack deposit transaction
 };
 
 /// @brief An EIP-2930 access list entry: contract address + storage slots.

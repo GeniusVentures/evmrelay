@@ -10,6 +10,7 @@
 #include <rlpx/rlpx_session.hpp>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace eth {
 
@@ -23,14 +24,16 @@ public:
         std::string                        chain_name,
         uint64_t                           network_id,
         Hash256                            genesis_hash,
-        ForkId                             fork_id) noexcept;
+        ForkId                             fork_id,
+        std::vector<EthMessageSchema>      eth_message_schemas = {}) noexcept;
 
     EthWatchRunner(
         std::shared_ptr<rlpx::RlpxSession> session,
         std::string                        chain_name,
         uint64_t                           network_id,
         Hash256                            genesis_hash,
-        ForkId                             fork_id) noexcept;
+        ForkId                             fork_id,
+        std::vector<EthMessageSchema>      eth_message_schemas = {}) noexcept;
 
     /// @brief Set the top-level callback for enriched filtered events.
     void set_event_callback(WatchEventNotificationCallback callback) noexcept;
@@ -67,6 +70,7 @@ private:
     uint64_t                           network_id_ = 0;
     Hash256                            genesis_hash_{};
     ForkId                             fork_id_{};
+    std::vector<EthMessageSchema>      eth_message_schemas_;
     EthWatchService                    watch_service_{};
     WatchEventNotificationCallback     event_callback_{};
 };

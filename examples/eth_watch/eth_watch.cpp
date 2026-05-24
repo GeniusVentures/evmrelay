@@ -14,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -39,6 +40,27 @@
 #include <eth/eth_handshake.hpp>
 
 namespace {
+
+template <size_t N>
+std::string format_nonzero_counts(const std::array<uint64_t, N>& counts)
+{
+    std::ostringstream out;
+    bool first = true;
+    for (size_t i = 0; i < counts.size(); ++i)
+    {
+        if (counts[i] == 0U)
+        {
+            continue;
+        }
+        if (!first)
+        {
+            out << ",";
+        }
+        out << i << "=" << counts[i];
+        first = false;
+    }
+    return first ? "none" : out.str();
+}
 
 inline constexpr const char* kDefaultChainPeersUrl = "https://enodes.gnus.ai/chain_enodes.json.gz";
 inline constexpr auto kWatchStatsInterval = std::chrono::seconds(4);
@@ -267,6 +289,7 @@ void schedule_service_stats(
                            "matched_logs={} discarded_logs={} transport_connect_failures={} auth_success={} "
                            "local_hello_sent={} peer_disconnect_before_hello={} peer_hello_accepted={} "
                            "eth_status_sent={} remote_status_accepted={} remote_status_rejected={} "
+                           "remote_status_reject_disconnect_reasons={} remote_status_reject_validation_errors={} "
                            "too_many_peers_before_peer_hello={} peer_disconnect_after_eth_status_accept={}",
                            service.active_runner_count(),
                            service.runtime_chain_count(),
@@ -290,6 +313,8 @@ void schedule_service_stats(
                            connection_stats.eth_status_sent,
                            connection_stats.remote_status_accepted,
                            connection_stats.remote_status_rejected,
+                           format_nonzero_counts(connection_stats.remote_status_rejected_disconnect_reasons),
+                           format_nonzero_counts(connection_stats.remote_status_rejected_validation_errors),
                            connection_stats.peer_queue.too_many_peers_before_connected_count,
                            connection_stats.peer_queue.disconnected_after_connected_count);
 
@@ -313,7 +338,9 @@ void log_service_summary(
                        "Final eth_watch summary: active_sessions={} chains={} cached_peers={} discovered_peers={} "
                        "transport_connect_failures={} auth_success={} local_hello_sent={} "
                        "peer_disconnect_before_hello={} peer_hello_accepted={} eth_status_sent={} "
-                       "remote_status_accepted={} remote_status_rejected={} peer_disconnect_after_eth_status_accept={} "
+                       "remote_status_accepted={} remote_status_rejected={} "
+                       "remote_status_reject_disconnect_reasons={} remote_status_reject_validation_errors={} "
+                       "peer_disconnect_after_eth_status_accept={} "
                        "eth_messages={} matched_logs={} logs_seen={} decode_failures={}",
                        service.active_runner_count(),
                        service.runtime_chain_count(),
@@ -327,6 +354,8 @@ void log_service_summary(
                        connection.eth_status_sent,
                        connection.remote_status_accepted,
                        connection.remote_status_rejected,
+                       format_nonzero_counts(connection.remote_status_rejected_disconnect_reasons),
+                       format_nonzero_counts(connection.remote_status_rejected_validation_errors),
                        connection.peer_queue.disconnected_after_connected_count,
                        traffic.eth_messages_seen,
                        traffic.matched_logs,
@@ -429,6 +458,7 @@ void run_watch(std::string host,
                uint64_t network_id,
                eth::Hash256 genesis_hash,
                eth::ForkId fork_id,
+               std::vector<eth::EthMessageSchema> eth_message_schemas,
                const std::vector<eth::cli::WatchSpec>& watch_specs,
                std::shared_ptr<WatchOutputState> output_state,
                const std::function<void(rlpx::DisconnectReason)>& on_done,
@@ -502,7 +532,9 @@ void run_watch(std::string host,
             network_id,
             genesis_hash,
             fork_id,
+            eth_message_schemas,
             eth::EthStatusAcceptedHandler{},
+            eth::EthStatusRemoteDisconnectHandler{},
             rlpx::EthMessageHandler{}
         },
         yield);
@@ -588,7 +620,9 @@ void run_watch(std::string host,
                 network_id,
                 genesis_hash,
                 fork_id,
+                eth_message_schemas,
                 eth::EthStatusAcceptedHandler{},
+                eth::EthStatusRemoteDisconnectHandler{},
                 [watch_runner](uint8_t eth_msg_id, const rlpx::ByteBuffer& payload)
                 {
                     const rlp::ByteView payload_view(payload.data(), payload.size());
@@ -1309,12 +1343,14 @@ int main(int argc, char** argv) {
                  network_id = config->network_id,
                  genesis_hash = config->genesis_hash,
                  fork_id = config->fork_id,
+                 eth_message_schemas = config->chain_peer_config.eth_message_schemas,
                  watch_specs = std::move(config->watch_specs),
                  output_state](boost::asio::yield_context yc)
                 {
                     run_watch(host, port, peer_pubkey,
                               chain_name,
                               network_id, genesis_hash, fork_id,
+                              eth_message_schemas,
                               watch_specs,
                               output_state,
                               [](rlpx::DisconnectReason) {},

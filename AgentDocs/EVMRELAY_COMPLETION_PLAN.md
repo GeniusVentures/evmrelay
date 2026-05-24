@@ -90,7 +90,21 @@ Current implementation state:
 
 Immediate next step:
 
-Add per-active-session traffic liveness diagnostics and a separate scan mode so live ENR discovery can sample about 300 peers while retaining only the desired number of active ETH sessions.
+Run the opt-in live all-chains functional test:
+
+```bash
+cd evmrelay
+cmake --build build/OSX/Debug --target eth_watch_all_chains_live_test
+env EVMRELAY_RUN_LIVE_ALL_CHAINS_TEST=1 \
+    EVMRELAY_LIVE_ALL_CHAINS_JSON=/path/to/chain_enodes.json \
+    ./build/OSX/Debug/test_bin/eth_watch_all_chains_live_test
+```
+
+The C++ functional test starts every configured chain concurrently through
+`EthWatchService` in `kDiscoverFirst` mode, asserts cached peers are not used,
+requires total discovered peers to meet or exceed the startup cached-peer count,
+verifies each chain discovers peers, then requires at least 10 accepted ETH
+Status handshakes and at least 5 ETH messages before the timed stop.
 
 Suggested tests for the next session:
 

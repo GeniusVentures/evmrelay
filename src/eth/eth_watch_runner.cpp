@@ -11,13 +11,16 @@ EthWatchRunner::EthWatchRunner(
     std::string                        chain_name,
     uint64_t                           network_id,
     Hash256                            genesis_hash,
-    ForkId                             fork_id) noexcept
+    ForkId                             fork_id,
+    std::vector<EthMessageSchema>      eth_message_schemas) noexcept
     : channel_(std::move(channel))
     , chain_name_(std::move(chain_name))
     , network_id_(network_id)
     , genesis_hash_(genesis_hash)
     , fork_id_(fork_id)
+    , eth_message_schemas_(std::move(eth_message_schemas))
 {
+    watch_service_.set_eth_message_schemas(eth_message_schemas_);
 }
 
 EthWatchRunner::EthWatchRunner(
@@ -25,12 +28,14 @@ EthWatchRunner::EthWatchRunner(
     std::string                        chain_name,
     uint64_t                           network_id,
     Hash256                            genesis_hash,
-    ForkId                             fork_id) noexcept
+    ForkId                             fork_id,
+    std::vector<EthMessageSchema>      eth_message_schemas) noexcept
     : EthWatchRunner(std::make_shared<RlpxEthSessionChannel>(std::move(session)),
                      std::move(chain_name),
                      network_id,
                      genesis_hash,
-                     fork_id)
+                     fork_id,
+                     std::move(eth_message_schemas))
 {
 }
 

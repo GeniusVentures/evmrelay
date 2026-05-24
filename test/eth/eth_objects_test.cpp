@@ -67,6 +67,36 @@ TEST(EthObjectsTest, ReceiptRoundtripStatus) {
     EXPECT_EQ(result.logs[0].data, log.data);
 }
 
+TEST(EthObjectsTest, DecodeTypedReceiptStripsEnvelopeType) {
+    eth::codec::Receipt original;
+    original.status = true;
+    original.cumulative_gas_used = 21'000;
+    original.bloom = make_filled<eth::codec::Bloom>(0x01);
+
+    auto encoded = eth::codec::encode_receipt(original);
+    ASSERT_TRUE(encoded.has_value());
+
+    std::vector<uint8_t> typed;
+    typed.reserve(encoded.value().size() + 1U);
+    typed.push_back(0x02);
+    typed.insert(typed.end(), encoded.value().begin(), encoded.value().end());
+
+    auto decoded = eth::codec::decode_receipt(rlp::ByteView(typed.data(), typed.size()));
+    ASSERT_TRUE(decoded.has_value());
+    ASSERT_TRUE(decoded.value().status.has_value());
+    EXPECT_TRUE(*decoded.value().status);
+    EXPECT_EQ(decoded.value().cumulative_gas_used, original.cumulative_gas_used);
+}
+
+TEST(EthObjectsTest, DecodeOpDepositTransactionAcceptsNestedPayload) {
+    const std::vector<uint8_t> raw_deposit_tx{0x7e, 0xc0};
+
+    auto decoded = eth::codec::decode_transaction(
+        rlp::ByteView(raw_deposit_tx.data(), raw_deposit_tx.size()));
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(decoded.value().type, eth::codec::TransactionType::kOpDeposit);
+}
+
 TEST(EthObjectsTest, ReceiptRoundtripStateRoot) {
     eth::codec::Receipt original;
     original.state_root = make_filled<eth::codec::Hash256>(0x55);
@@ -131,4 +161,3 @@ TEST(EthObjectsTest, BlockHeaderRoundtrip) {
     ASSERT_TRUE(result.base_fee_per_gas.has_value());
     EXPECT_EQ(result.base_fee_per_gas.value(), original.base_fee_per_gas.value());
 }
-

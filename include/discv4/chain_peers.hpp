@@ -53,6 +53,7 @@ struct ChainPeerConfig
     ChainDiscoveryDefault      discovery_default = ChainDiscoveryDefault::kAuto;
     DiscoveryForkFilter        discovery_fork_filter = DiscoveryForkFilter::kRequire;
     std::optional<eth::ForkId> fork_id;
+    std::vector<eth::EthMessageSchema> eth_message_schemas;
     std::string                signature;
     std::string                signer_address;
 };

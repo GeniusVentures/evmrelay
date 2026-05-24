@@ -99,6 +99,7 @@ find_package(Boost REQUIRED COMPONENTS date_time filesystem random regex system 
 include_directories(${Boost_INCLUDE_DIRS})
 
 # zlib
+set(ZLIB_ROOT "${_THIRDPARTY_BUILD_DIR}/zlib")
 set(ZLIB_DIR "${_THIRDPARTY_BUILD_DIR}/zlib/lib/cmake/zlib")
 find_package(ZLIB CONFIG REQUIRED)
 

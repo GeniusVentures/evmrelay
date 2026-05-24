@@ -3,6 +3,7 @@
 
 #include <eth/eth_handshake.hpp>
 #include <eth/eth_handshake_guard.hpp>
+#include <rlpx/protocol/messages.hpp>
 
 namespace eth {
 
@@ -58,6 +59,17 @@ PerformEthStatusHandshake(
         inbound_message.id = inbound_result.value().id;
         inbound_message.payload = std::move(inbound_result.value().payload);
 
+        if (inbound_message.id == rlpx::kDisconnectMessageId)
+        {
+            const auto disconnect = rlpx::protocol::DisconnectMessage::decode(
+                rlpx::ByteView(inbound_message.payload.data(), inbound_message.payload.size()));
+            if (disconnect && start.remote_disconnect_handler)
+            {
+                start.remote_disconnect_handler(disconnect.value().reason);
+            }
+            return rlp::outcome::failure(StatusValidationError::kProtocolVersionMismatch);
+        }
+
         bool status_received = false;
         const auto handshake_disposition = HandleEthHandshakeMessage(
             inbound_message,
@@ -74,7 +86,8 @@ PerformEthStatusHandshake(
                 negotiated_eth_offset,
                 negotiated_eth_version,
                 start.network_id,
-                start.genesis_hash);
+                start.genesis_hash,
+                start.eth_message_schemas);
             if (!validated_status)
             {
                 return rlp::outcome::failure(validated_status.error());
@@ -92,7 +105,8 @@ PerformEthStatusHandshake(
                 negotiated_eth_offset,
                 negotiated_eth_version,
                 start.network_id,
-                start.genesis_hash);
+                start.genesis_hash,
+                start.eth_message_schemas);
             if (!validated_status)
             {
                 return rlp::outcome::failure(validated_status.error());
@@ -103,4 +117,3 @@ PerformEthStatusHandshake(
 }
 
 } // namespace eth
-

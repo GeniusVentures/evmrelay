@@ -36,7 +36,8 @@ DecodeValidatedStatusMessage(
     uint8_t                        negotiated_eth_offset,
     uint8_t                        negotiated_eth_version,
     uint64_t                       network_id,
-    const Hash256&                 genesis_hash) noexcept
+    const Hash256&                 genesis_hash,
+    const std::vector<EthMessageSchema>& eth_message_schemas) noexcept
 {
     const auto eth_id = NormalizeEthWireMessageId(message.id, negotiated_eth_offset);
     if (!eth_id.has_value() || *eth_id != protocol::kStatusMessageId)
@@ -45,7 +46,9 @@ DecodeValidatedStatusMessage(
     }
 
     const rlp::ByteView payload(message.payload.data(), message.payload.size());
-    const auto decoded = protocol::decode_status(payload);
+    const auto decoded = eth_message_schemas.empty()
+        ? protocol::decode_status(payload)
+        : protocol::decode_status(payload, eth_message_schemas);
     if (!decoded)
     {
         return rlp::outcome::failure(StatusValidationError::kProtocolVersionMismatch);
@@ -103,4 +106,3 @@ HandshakeMessageDisposition HandleEthHandshakeMessage(
 }
 
 } // namespace eth
-

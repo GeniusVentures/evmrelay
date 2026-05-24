@@ -358,6 +358,11 @@ DecodeResult<Transaction> decode_transaction(rlp::ByteView raw_data) noexcept
         {
             tx.type = TransactionType::kDynamicFee;
         }
+        else if (type_byte == static_cast<uint8_t>(TransactionType::kOpDeposit))
+        {
+            tx.type = TransactionType::kOpDeposit;
+            return tx;
+        }
         else
         {
             return rlp::DecodingError::kUnexpectedString;
@@ -511,6 +516,11 @@ EncodeResult encode_receipt(const Receipt& receipt) noexcept {
 }
 
 DecodeResult<Receipt> decode_receipt(rlp::ByteView rlp_data) noexcept {
+    if (!rlp_data.empty() && rlp_data[0] < kRlpListPrefixMin)
+    {
+        rlp_data = rlp_data.substr(kTypedTxPrefixSize);
+    }
+
     rlp::RlpDecoder decoder(rlp_data);
 
     auto list_size = decoder.ReadListHeaderBytes();
@@ -621,8 +631,12 @@ DecodeResult<BlockHeader> decode_block_header(rlp::ByteView rlp_data) noexcept {
         header.base_fee_per_gas = base_fee;
     }
 
+    while (!decoder.IsFinished()) {
+        auto skipped = decoder.SkipItem();
+        if (!skipped) return skipped.error();
+    }
+
     return header;
 }
 
 } // namespace eth::codec
-

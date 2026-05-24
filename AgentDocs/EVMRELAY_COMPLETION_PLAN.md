@@ -114,6 +114,31 @@ Suggested tests for the next session:
 - CLI output callbacks receive decoded notifications with chain metadata from the service.
 - ~~Discovery callback enqueues discovered peers into the same `EthPeerQueue` in an end-to-end service test.~~
 
+## Final Integration Target - 2026-05-24
+
+The relay peer/discovery path is close to complete, but it is not yet in its final SuperGenius integration state. The remaining production work is to make `evmrelay` the EVM observation and RPC verification substrate used by the parent project, replacing the current `src/watcher/impl/evm_messaging_watcher.*` WebSocket-only implementation with a thin adapter over:
+
+- `eth::EthWatchService` for P2P observation and decoded bridge/log callbacks;
+- `eth::rpc::RpcManager` / receipt sources for JSON-RPC receipt, log, block, and chain-id verification;
+- security decision and validator vote policy objects described in `EVMRELAY_SECURITY_HARDENING_PLAN.md`;
+- chain/RPC endpoint metadata loaded through `rpc_manager`, including ChainList / ethereum-lists public endpoint ingestion.
+
+`evmrelay` should not directly mint, burn, or satisfy bridge consensus. Its production responsibility is to produce normalized observations and RPC-backed verification evidence that the SuperGenius validator/consensus layer can use before minting UTXO value or authorizing EVM exits.
+
+The final parent-project bridge flow should be:
+
+```text
+EthWatchService observes candidate bridge/burn log
+  -> event filter and ABI decoder normalize event evidence
+  -> RpcManager verifies receipt/log/block/finality through independent RPC endpoints
+  -> SecurityDecision records quorum, chain id, block hash, log index, payload hash, nonce, and finality
+  -> src/watcher/impl adapter forwards only verified decisions to parent watcher/validator code
+  -> SuperGenius bridge consensus applies validator count, trust-domain, weight-cap, replay, and provenance policy
+  -> mint or exit path proceeds only after consensus policy passes
+```
+
+The current `src/watcher/impl/evm_messaging_watcher.*` shape should be treated as a compatibility wrapper, not the production EVM verifier. It currently accepts one configured WebSocket endpoint, builds `eth_subscribe` JSON by string concatenation, and forwards raw subscription messages. The final implementation needs to stop treating a single websocket notification as bridge evidence.
+
 ## Context
 
 The current `rlp_enodes` output schema requires each chain entry to contain both:
@@ -149,6 +174,10 @@ Keep the implementation modular and keep source roles separate:
 - Discovery clients: optionally expand peer sets from `bootnodes`, but promote discovered candidates into peer candidates only after validation.
 - `rlp::base::json`: shared schema-driven JSON object and array parser. New JSON object loading should declare `JsonSchemaObject` / `JsonSchemaArray` metadata and consume typed `JsonParsedObject` values instead of feature-local `if_contains` parsing branches.
 - `eth::rpc_manager_config`: configuration-only RPC endpoint loader. It validates endpoint config through the base JSON schema parser and should remain separate from runtime RPC orchestration.
+- `eth::rpc::RpcManager`: runtime owner for chain-scoped RPC endpoint pools, endpoint health, request dispatch, and receipt source construction. It should be consumed by verifier/adapters, not embedded in `EthWatchService` startup orchestration.
+- `eth::ChainlistProvider` or equivalent metadata loader: downloads and normalizes ChainList / ethereum-lists chain metadata into `RpcEndpointConfig` candidates that `rpc_manager` can load, validate, and health-check.
+- `src/watcher/impl/evm_messaging_watcher.*`: parent-project adapter. It should translate existing `watcher::MessagingWatcher` configuration/callbacks into `evmrelay` service configuration and forward verified bridge decisions or normalized verified messages, not raw single-provider websocket payloads.
+- SuperGenius validator/consensus code: only owner allowed to decide bridge mint consensus, apply bridge voting thresholds, cap effective genesis/high-reputation weight, preserve UTXO bridge provenance, and authorize mint/exit actions.
 
 ## Non-Negotiable Semantics
 
@@ -165,6 +194,9 @@ Keep the implementation modular and keep source roles separate:
 - Schema validation must fail or warn clearly when a chain entry lacks required `nodes` or `bootnodes`.
 - JSON object parsing should stay schema-driven. Feature modules may do domain conversion after schema validation, but field presence/type/default handling belongs in `base/json_utility`.
 - Docs, tests, and function names should use "chain peers" for `nodes` and "bootnodes/bootstrap peers" for `bootnodes`.
+- Public RPC endpoint discovery is configuration input, not a trust decision. ChainList / ethereum-lists endpoints must be filtered, normalized, deduplicated, optionally probed with `eth_chainId`, and then loaded into `rpc_manager`; a public endpoint cannot by itself satisfy bridge verification.
+- A websocket subscription notification, a P2P observation, or one JSON-RPC receipt response is never sufficient mint evidence. Parent watcher callbacks used for bridge minting must receive a verified decision or an explicitly degraded/unverified diagnostic object.
+- `EthWatchService` may observe candidate bridge/burn events, but finality, replay, bridge/burn value validation, and mint consensus must be enforced through RPC verification plus SuperGenius validator consensus.
 
 ## Tasks
 
@@ -256,17 +288,201 @@ Remaining work:
 
 ### 6. Documentation Cleanup
 
-- Update `BOOTNODES_CONFIGURATION.md`, `WHY_NO_MESSAGES.md`, and quick test docs to consistently state:
-  - bootnodes are discovery-only;
-  - `chain_enodes.json.nodes` is the RLPx/ETH peer candidate list;
-  - `chain_enodes.json.bootnodes` is the discovery seed list.
-- Remove or rewrite sections that imply cached peers and bootnodes are interchangeable.
-- Update command examples to use `--chain-peers-json` for peer cache input and a separate explicit option for discovery seed input if/when that option exists.
-- Document `chain_enodes.json.gz` as the pre-cache for startup peer candidates and discovery seeds.
-- Document the Gnosis/no-pre-cached-nodes path: load chain metadata and bootnodes, run discv4 discovery, then enqueue discovered peers.
-- Document EIP-1459 / ENR tree usage separately, including example `enrtree://` source configuration, the expected discover-first flow, and the default strategy split: Ethereum/Polygon prefer EIP-1459, other chains prefer discv4.
-- Document the discovery-to-dialer pipeline: discovery seeds produce discovered peer candidates, peer candidates enter a bounded dial queue, and RLPx/ETH sessions consume from that queue.
-- Document `examples/eth_watch/eth_watch.cpp` as an example CLI over the production `EthWatchService` APIs, not as the implementation home for relay behavior.
+- ~~Update `BOOTNODES_CONFIGURATION.md`, `WHY_NO_MESSAGES.md`, and quick test docs to consistently state:~~
+  - ~~bootnodes are discovery-only;~~
+  - ~~`chain_enodes.json.nodes` is the RLPx/ETH peer candidate list;~~
+  - ~~`chain_enodes.json.bootnodes` is the discovery seed list.~~
+- ~~Remove or rewrite sections that imply cached peers and bootnodes are interchangeable.~~
+- ~~Update command examples to use `--chain-peers-json` for peer cache input and a separate explicit option for discovery seed input if/when that option exists.~~
+- ~~Document `chain_enodes.json.gz` as the pre-cache for startup peer candidates and discovery seeds.~~
+- ~~Document the Gnosis/no-pre-cached-nodes path: load chain metadata and bootnodes, run discv4 discovery, then enqueue discovered peers.~~
+- ~~Document EIP-1459 / ENR tree usage separately, including example `enrtree://` source configuration, the expected discover-first flow, and the default strategy split: Ethereum/Polygon prefer EIP-1459, other chains prefer discv4.~~
+- ~~Document the discovery-to-dialer pipeline: discovery seeds produce discovered peer candidates, peer candidates enter a bounded dial queue, and RLPx/ETH sessions consume from that queue.~~
+- ~~Document `examples/eth_watch/eth_watch.cpp` as an example CLI over the production `EthWatchService` APIs, not as the implementation home for relay behavior.~~
+
+### 7. ChainList / Ethereum-Lists RPC Metadata Ingestion
+
+Goal: create a normalized list of EVM-compatible chains and public RPC nodes that can be loaded into `rpc_manager`. CSV generation is out of scope for this plan.
+
+Primary source:
+
+- `https://chainid.network/chains.json`
+
+Fallback source:
+
+- `https://github.com/ethereum-lists/chains`
+- repository data files under `_data/chains/*.json`
+
+Input format: `chains.json` is a JSON array of chain objects with fields such as `name`, optional `title`, `chain`, `chainId`, `networkId`, `shortName`, `rpc`, `faucets`, `nativeCurrency`, `explorers`, `features`, optional `status`, and optional `redFlags`.
+
+Implement:
+
+- Add a `ChainlistProvider` or similarly named loader under `include/eth` / `src/eth`, preferably in the RPC manager area, that consumes JSON text and produces normalized chain endpoint metadata.
+- Keep network download mechanics separate from parsing so unit tests can use local JSON fixtures and the downloader can fall back cleanly.
+- Parse each chain object for:
+  - `name`;
+  - `title`, when present;
+  - `chainId`;
+  - `networkId`;
+  - `shortName`;
+  - `nativeCurrency.symbol`, when present;
+  - `status`, defaulting to `active` when missing;
+  - `rpc[]`;
+  - `explorers[]`;
+  - `features[]`, when present;
+  - `redFlags[]`, when present.
+- Filter RPC URLs:
+  - keep only `http://` and `https://` by default;
+  - optionally keep `wss://` endpoints in a separate `websocketEndpoints` list when `includeWebsocket` is enabled;
+  - drop URLs containing API-key placeholders including `${INFURA_API_KEY}`, `${ALCHEMY_API_KEY}`, `${ANKR_API_KEY}`, `${POKT_API_KEY}`, and `${BLASTAPI_API_KEY}`;
+  - drop malformed URLs;
+  - deduplicate URLs per `chainId`;
+  - preserve enough diagnostics to explain filtered endpoints without logging secrets.
+- Normalize to one chain object containing:
+
+```json
+{
+  "chainId": 1,
+  "networkId": 1,
+  "name": "Ethereum Mainnet",
+  "shortName": "eth",
+  "currencySymbol": "ETH",
+  "status": "active",
+  "rpcEndpoints": ["https://..."],
+  "websocketEndpoints": ["wss://..."],
+  "explorers": [
+    {
+      "name": "etherscan",
+      "url": "https://etherscan.io",
+      "standard": "EIP3091"
+    }
+  ]
+}
+```
+
+Recommended filters:
+
+- `includeTestnets`: include or exclude known testnets based on chain metadata/config policy.
+- `includeDeprecated`: default `false`; skip `status=deprecated` and chains with equivalent red flags unless explicitly requested.
+- `includeIncubating`: optional.
+- `requireWorkingRpc`: when enabled, probe endpoints before enabling them.
+- `includeWebsocket`: default `false` for RPC manager config; websocket endpoints remain separate.
+
+Validation:
+
+- Deduplicate by `chainId + RPC URL`.
+- Optionally POST `eth_chainId` to each HTTP(S) endpoint:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "eth_chainId",
+  "params": [],
+  "id": 1
+}
+```
+
+- Convert returned hex chain id to integer and keep the endpoint as available only when it equals the chain object's `chainId`.
+- Mark failed endpoints as unavailable with diagnostics when `requireWorkingRpc=false`; drop them from active config when `requireWorkingRpc=true`.
+- If `chainid.network` is unavailable, fetch or use a local checkout/archive of `ethereum-lists/chains`.
+- If aggregated JSON fails, parse each `_data/chains/*.json` file independently.
+- Log parse errors per chain file and continue processing other chains.
+
+Tests:
+
+- parses aggregated `chains.json` fixture;
+- parses fallback per-chain file fixtures;
+- defaults missing `status` to `active`;
+- extracts `nativeCurrency.symbol`;
+- filters placeholder API-key URLs;
+- separates HTTP(S) RPC and `wss://` endpoints;
+- rejects malformed URLs;
+- deduplicates repeated endpoints;
+- preserves explorer metadata;
+- handles deprecated/incubating/testnet filters;
+- validates `eth_chainId` success, wrong-chain response, invalid hex response, timeout, and provider error through a mock transport;
+- produces `RpcEndpointConfig` candidates without checking any API key into fixtures.
+
+### 8. RPC Manager Finalization For Bridge Verification
+
+The `RPC_MANAGER_HANDOFF.md` foundation should be completed before parent watcher integration relies on it.
+
+Implement:
+
+- Finish endpoint health state in `RpcEndpointPool`: available, temporarily failed, disabled, with retry/backoff metadata.
+- Add `RpcReceiptSourceFactory` or an equivalent adapter that creates chain-scoped receipt sources from `RpcManager`.
+- Add a `RpcReceiptVerifier` or `RpcObservedMessageVerifier` that accepts an observed bridge event/log and verifies it through multiple configured RPC endpoints.
+- Apply RPC checks to:
+  - `eth_chainId`;
+  - finality head / confirmation depth;
+  - `eth_getTransactionReceipt`;
+  - exact `blockHash` re-check;
+  - log index, emitter address, topic0, topics, data, tx hash, block number, block hash, and status;
+  - bridge/burn amount/value, source sender, destination recipient, nonce/message id, and configured source/destination domain fields after ABI decoding.
+- Return a `SecurityDecision`-compatible result rather than a bare boolean.
+- Fail closed when quorum is unavailable, trust domains are insufficient, endpoints disagree, the chain id is wrong, finality is stale, or required receipt/log fields are missing.
+
+Tests:
+
+- endpoint failure marks only that endpoint unhealthy;
+- chain with no usable endpoint fails closed;
+- wrong chain id fails closed;
+- providers disagree on block hash;
+- providers disagree on receipt status;
+- providers disagree on event log contents;
+- external-only or internal-only provider availability fails in production policy when diversity is required;
+- bridge/burn event with mismatched value, recipient, nonce, contract, topic, or chain domain is rejected.
+
+### 9. Parent Project Watcher Integration
+
+Goal: move the parent EVM watcher from single-endpoint websocket forwarding to `evmrelay` observation plus RPC-backed verification.
+
+Current parent files to update:
+
+- `src/watcher/impl/evm_messaging_watcher.hpp`
+- `src/watcher/impl/evm_messaging_watcher.cpp`
+- `src/watcher/impl/CMakeLists.txt`
+
+Implement:
+
+- Replace raw `ws_url`/`eth_subscribe` ownership with an adapter that builds `eth::EthWatchServiceConfig` and configured watch filters from the existing parent watcher config.
+- Keep parent-facing constructor and `watcher::MessagingWatcher` callback compatibility where practical, but change callback payload semantics for bridge paths from raw websocket JSON to normalized verified observation / security decision JSON.
+- Accept chain configuration that references:
+  - chain id;
+  - bridge contract address;
+  - event topics / ABI event signature;
+  - source/destination domain ids;
+  - confirmation/finality policy;
+  - RPC manager endpoint config or chainlist-derived endpoint set;
+  - relay peer cache / discovery config.
+- Start and stop `EthWatchService` from the parent watcher lifecycle without blocking parent shutdown.
+- Route decoded candidate events into the RPC verifier before invoking bridge-mint callbacks.
+- Preserve a diagnostic mode for raw observations if needed, but make it explicitly non-mintable and unavailable as a production bridge evidence path.
+- Remove ad hoc JSON subscription string building from production bridge paths.
+
+Parent integration tests:
+
+- parent watcher config builds a valid `EthWatchServiceConfig`;
+- parent watcher rejects missing chain id, contract address, topics, RPC policy, or finality policy in production mode;
+- observed event is not forwarded to mint path until RPC verification succeeds;
+- RPC verifier failure emits a diagnostic/rejected decision and does not call mint callback;
+- stopWatching shuts down service and RPC work cleanly;
+- websocket/raw mode, if retained, is diagnostic-only and marked non-consensus.
+
+### 10. Bridge Mint Consensus Integration Criteria
+
+This plan should finish with a production bridge path that cannot mint from one source of truth.
+
+Completion criteria:
+
+- `EthWatchService` observes candidate bridge/burn events and decodes them into structured evidence.
+- `RpcManager` verifies each candidate against independent RPC endpoints before parent callbacks can produce validator vote evidence.
+- `SecurityDecision` or equivalent evidence object contains chain id, bridge contract, tx hash, log index, block number/hash, topic/data hash, decoded bridge/burn value, sender, recipient, nonce/message id, finality depth, quorum policy id, provider vote summaries, and degraded state.
+- Parent watcher code forwards only verified decisions into the validator vote path for bridge mints.
+- SuperGenius validator policy enforces minimum distinct validators, minimum trust-domain/operator diversity, effective bridge weight threshold, per-validator bridge-weight cap, replay protection, nonce/message-id policy, and provenance tagging for bridge-originated UTXO value.
+- Genesis or any one high-reputation validator cannot satisfy bridge mint consensus alone.
+- Any failed RPC quorum, event mismatch, stale finality, wrong chain id, provider divergence, unknown contract/topic, replay, nonce gap, or production policy ambiguity fails closed.
+- Tests cover the end-to-end path: observed bridge/burn log -> RPC verification -> security decision -> parent watcher callback -> validator vote policy accept/reject.
 
 ## Suggested Implementation Order
 
@@ -282,3 +498,14 @@ Remaining work:
 10. ~~Add EIP-1459 / ENR tree source support and tests for discovery seed generation for chains that support it, with Ethereum/Polygon defaulting to ENR-tree discovery and other chains defaulting to discv4.~~
 11. ~~Run focused discv4, discv5, eth, and eth_watch tests.~~
 12. ~~Refresh docs and smoke-test commands.~~
+13. Add ChainList / ethereum-lists parser fixtures and normalize chain metadata plus HTTP(S)/WSS endpoint lists.
+14. Add ChainList downloader/fallback path: `chainid.network/chains.json` first, then ethereum-lists `_data/chains/*.json` parsing.
+15. Convert normalized ChainList RPC endpoints into `RpcEndpointConfig` candidates loaded by `rpc_manager`.
+16. Add optional endpoint probing with `eth_chainId`, wrong-chain rejection, endpoint diagnostics, and availability marking.
+17. Finish `RpcEndpointPool` health/backoff and `RpcReceiptSourceFactory` from `RpcManager`.
+18. Implement RPC verification for observed bridge/burn events, including receipt/log/block/finality checks and decoded value/domain checks.
+19. Add `SecurityDecision` or equivalent verified evidence object and make verifier output the only bridge-mintable watcher payload.
+20. Replace `src/watcher/impl/evm_messaging_watcher.*` websocket-only behavior with a parent-project adapter over `EthWatchService` plus RPC verification.
+21. Wire verified watcher output into SuperGenius validator vote policy, preserving a diagnostic-only raw observation mode if needed.
+22. Add end-to-end tests for observed bridge/burn event -> RPC quorum verification -> security decision -> parent watcher callback -> validator vote policy.
+23. Run parent and evmrelay focused tests, then document production config requirements for peer cache, ChainList/RPC endpoints, finality policy, quorum policy, and bridge consensus policy.

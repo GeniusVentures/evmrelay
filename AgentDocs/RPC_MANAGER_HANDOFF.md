@@ -19,6 +19,16 @@ Keep this separate from `EthWatchService` orchestration until the runtime API is
   - `eth_getLogs`
   - `eth_getTransactionReceipt`
 - `src/eth/rpc_receipt_source.cpp` already wraps a `JsonRpcTransport` for receipt/log fetching and can be reused rather than replaced.
+- Runtime RPC selection now exists in `include/eth/rpc_manager.hpp` and `src/eth/rpc_manager.cpp`:
+  - `RpcEndpoint`
+  - `RpcEndpointPool`
+  - `RpcManager`
+  - URL rendering with `apiKeyEnvVar` / `apiKeyLiteral`
+  - deterministic grouping and ordering by chain/priority/weight
+- The transport layer now exists in `include/eth/rpc_http_transport.hpp` and `src/eth/rpc_http_transport.cpp`.
+  - It uses Boost.Beast + Boost.Asio.
+  - HTTP and HTTPS are both supported.
+  - HTTPS uses OpenSSL and RFC2818 hostname verification when peer verification is enabled.
 
 ## Important Constraints
 
@@ -31,49 +41,41 @@ Keep this separate from `EthWatchService` orchestration until the runtime API is
 
 ## Suggested Next Classes
 
-- `RpcEndpoint`: resolved runtime endpoint with URL, chain id/name, priority, weight, rate-limit hints, and provider metadata.
-- `RpcEndpointPool`: per-chain endpoint selection, health state, priority/weight ordering, retry suppression, and basic rate-limit bookkeeping.
-- `RpcHttpClient` or `JsonRpcHttpTransport`: concrete HTTP(S) transport implementing the existing `JsonRpcTransport` shape or a sibling async-ready interface.
 - `RpcManager`: owns configured endpoint pools and creates chain-scoped transports or receipt sources.
+- `RpcReceiptSourceFactory`: a small adapter that binds `RpcManager` to `RpcReceiptSource` without pushing runtime policy into `EthWatchService`.
 - `ChainlistProvider`: optional loader for ChainList-style public endpoint metadata, filtered into `RpcEndpointConfig` candidates.
 - `RpcObservedMessageVerifier` or `RpcReceiptVerifier`: consumes observed chain/log facts and verifies them through independent RPC endpoints.
 
 ## Recommended Implementation Order
 
-1. Add a runtime `RpcEndpoint` model separate from `RpcEndpointConfig`.
-2. Add URL rendering for `urlTemplate` with:
-   - no key;
-   - `apiKeyEnvVar`;
-   - `apiKeyLiteral`;
-   - missing key failure when a template requires one.
-3. Add endpoint grouping by `chainName` / `chainId`.
-4. Add deterministic endpoint selection for tests.
-5. Add `RpcEndpointPool` with simple health state:
+1. Add `RpcEndpointPool` with simple health state:
    - available;
    - temporarily failed;
    - disabled.
-6. Add a concrete JSON-RPC HTTP transport using Boost.Beast/Asio if no existing one fits.
-7. Wire `RpcReceiptSource` creation from `RpcManager`.
-8. Add verifier-level quorum/finality policy only after endpoint selection and transport are tested.
+2. Wire `RpcReceiptSource` creation from `RpcManager`.
+3. Add a chain-scoped `RpcReceiptSourceFactory` or equivalent adapter.
+4. Add endpoint failure/retry suppression and basic rate-limit bookkeeping.
+5. Add ChainList ingestion once the runtime manager surface is stable.
+6. Add verifier-level quorum/finality policy only after endpoint selection and transport are tested.
 
 ## Tests To Add Next
 
-- URL template rendering with and without API keys.
-- Missing `apiKeyEnvVar` environment variable.
-- Endpoint grouping by chain.
-- Priority ordering and deterministic weighted fallback.
 - Endpoint failure marks only that endpoint unhealthy.
 - Chain with no usable endpoint fails closed.
 - `RpcManager` can create a receipt source for a configured chain.
 - HTTP transport test with a local fake server or mock transport.
+- HTTPS transport test with a loopback TLS server and self-signed certificate.
+- Receipt source creation from the manager without leaking transport policy into `EthWatchService`.
 
 ## Verification Commands
 
 From the SuperGenius repository root:
 
 ```bash
-cmake --build evmrelay/build/OSX/Debug --target rpc_manager_config_test json_rpc_test rpc_receipt_source_test
+cmake --build evmrelay/build/OSX/Debug --target rpc_manager_test rpc_http_transport_test rpc_manager_config_test json_rpc_test rpc_receipt_source_test
 
+./evmrelay/build/OSX/Debug/test_bin/rpc_manager_test
+./evmrelay/build/OSX/Debug/test_bin/rpc_http_transport_test
 ./evmrelay/build/OSX/Debug/test_bin/rpc_manager_config_test
 ./evmrelay/build/OSX/Debug/test_bin/json_rpc_test
 ./evmrelay/build/OSX/Debug/test_bin/rpc_receipt_source_test
@@ -95,6 +97,8 @@ cmake --build evmrelay/build/OSX/Debug --target rpc_manager_config_test json_rpc
 
 ## Known State From This Checkpoint
 
+- `rpc_manager_test`: passed 8/8.
+- `rpc_http_transport_test`: passed 3/3.
 - `rpc_manager_config_test`: passed 6/6.
 - `json_rpc_test`: passed 6/6.
 - `rpc_receipt_source_test`: passed 10/10.

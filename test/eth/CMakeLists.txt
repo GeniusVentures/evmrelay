@@ -156,6 +156,22 @@ target_link_libraries(rpc_manager_config_test
     evmrelay
 )
 
+# RPC manager runtime tests
+addtest(rpc_manager_test
+    rpc_manager_test.cpp
+)
+target_link_libraries(rpc_manager_test
+    evmrelay
+)
+
+# RPC HTTP transport tests
+addtest(rpc_http_transport_test
+    rpc_http_transport_test.cpp
+)
+target_link_libraries(rpc_http_transport_test
+    evmrelay
+)
+
 # EthWatchCli tests
 addtest(eth_watch_cli_test
     eth_watch_cli_test.cpp

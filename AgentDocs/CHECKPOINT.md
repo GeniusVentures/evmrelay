@@ -143,7 +143,14 @@ git diff --check -- AgentDocs/EVMRELAY_COMPLETION_PLAN.md AgentDocs/QUICK_TEST_G
 
 ### Next Work: RPC Manager Sub-library
 
-The next requested feature is likely a separate evmrelay sub-library for RPC-backed verification of RLPx-observed messages.
+The RPC manager runtime slice is now in place:
+
+- runtime endpoint resolution exists in `RpcManager`;
+- endpoint grouping and deterministic selection are implemented;
+- the Boost.Beast/Asio HTTP transport supports both HTTP and HTTPS;
+- transport and manager tests are passing locally.
+
+The next requested feature is the bridge from the runtime manager to receipt verification.
 
 Suggested shape:
 
@@ -174,6 +181,14 @@ Suggested shape:
   - `src/eth/eth_receipt_source.cpp`
 - The verifier should use block/receipt bloom checks to narrow candidates, then fetch exact receipts/logs through RPC and verify the observed RLPx message/log exactly.
 - Keep bridge finality/quorum policy separate unless explicitly requested.
+
+### Current RPC Manager State
+
+- `RpcManager` and `RpcEndpointPool` now exist in `include/eth/rpc_manager.hpp` and `src/eth/rpc_manager.cpp`.
+- URL rendering supports `apiKeyEnvVar`, `apiKeyLiteral`, and missing-key failure for templates that require `{key}`.
+- `RpcHttpTransport` now lives in `include/eth/rpc_http_transport.hpp` and `src/eth/rpc_http_transport.cpp`.
+- HTTP and HTTPS are both supported with Boost.Beast/Asio; HTTPS uses OpenSSL and can verify the peer when enabled.
+- The next implementation step is to expose a chain-scoped receipt-source factory on top of the manager, without moving that orchestration into `EthWatchService`.
 
 ### Notes For Next Chat
 

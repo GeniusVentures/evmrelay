@@ -31,6 +31,59 @@ eth::ForkId make_sepolia_fork_id()
     return eth::ForkId{{0xed, 0x88, 0xb5, 0xfd}, 0};
 }
 
+eth::Hash256 make_amoy_genesis()
+{
+    eth::Hash256 genesis{};
+    const uint8_t raw[32] = {
+        0x72, 0x02, 0xb2, 0xb5, 0x3c, 0x5a, 0x08, 0x36,
+        0xe7, 0x73, 0xe3, 0x19, 0xd1, 0x89, 0x22, 0xcc,
+        0x75, 0x6d, 0xd6, 0x74, 0x32, 0xf9, 0xa1, 0xf6,
+        0x53, 0x52, 0xb6, 0x1f, 0x44, 0x06, 0xc6, 0x97,
+    };
+    std::copy(raw, raw + 32, genesis.begin());
+    return genesis;
+}
+
+eth::ForkId make_amoy_fork_id()
+{
+    return eth::ForkId{{0x8b, 0x7e, 0x41, 0x75}, 0};
+}
+
+std::vector<uint8_t> from_hex(std::string_view hex)
+{
+    std::vector<uint8_t> out;
+    out.reserve(hex.size() / 2U);
+    for (size_t i = 0; i + 1U < hex.size(); i += 2U)
+    {
+        out.push_back(static_cast<uint8_t>(
+            std::stoul(std::string(hex.substr(i, 2U)), nullptr, 16)));
+    }
+    return out;
+}
+
+std::vector<eth::EthMessageSchema> make_bor_status_schemas()
+{
+    using Field = eth::EthMessageFieldSchema;
+    using Type = eth::EthMessageFieldType;
+
+    return {
+        eth::EthMessageSchema{
+            "Status",
+            eth::protocol::kStatusMessageId,
+            eth::kEthProtocolVersion69,
+            {
+                Field{"protocol_version", Type::kUint8, {}, 0U},
+                Field{"network_id", Type::kUint64, {}, 1U},
+                Field{"bor_extra", Type::kUint32, {}, 2U},
+                Field{"genesis_hash", Type::kHash32, 32U, 3U},
+                Field{"fork_id", Type::kForkId, {}, 4U},
+                Field{"earliest_block", Type::kUint64, {}, 5U},
+                Field{"latest_block", Type::kUint64, {}, 6U},
+                Field{"latest_block_hash", Type::kHash32, 32U, 7U},
+            }},
+    };
+}
+
 class MockEthSessionChannel final : public eth::IEthSessionChannel
 {
 public:
@@ -288,7 +341,9 @@ TEST(EthPeerSessionTest, PerformEthStatusHandshakeQueuesLocalStatusAndAcceptsRem
                 kSepoliaNetworkID,
                 make_sepolia_genesis(),
                 make_sepolia_fork_id(),
+                {},
                 eth::EthStatusAcceptedHandler{},
+                eth::EthStatusRemoteDisconnectHandler{},
                 rlpx::EthMessageHandler{}
             },
             yield);
@@ -300,6 +355,49 @@ TEST(EthPeerSessionTest, PerformEthStatusHandshakeQueuesLocalStatusAndAcceptsRem
     EXPECT_EQ(channel->postedMessages.front().id,
               static_cast<uint8_t>(channel->negotiatedEthOffset + eth::protocol::kStatusMessageId));
     EXPECT_EQ(eth::ExtractLatestBlockNumber(result.value().remote_status), 100U);
+}
+
+TEST(EthPeerSessionTest, PerformEthStatusHandshakeAcceptsBorExtendedEth69Status)
+{
+    auto channel = std::make_shared<MockEthSessionChannel>();
+    rlpx::framing::Message remoteStatusMessage{};
+    remoteStatusMessage.id = static_cast<uint8_t>(channel->negotiatedEthOffset + eth::protocol::kStatusMessageId);
+    remoteStatusMessage.payload = from_hex(
+        "f859"
+        "45"
+        "83013882"
+        "840aa41494"
+        "a07202b2b53c5a0836e773e319d18922cc756dd67432f9a1f65352b61f4406c697"
+        "c6848b7e417580"
+        "80"
+        "840231016a"
+        "a0ded939a9c1496168516bdfff5d9e9ce79e4091adee907ab8978fd86270983056");
+    channel->receivedMessages.push_back(std::move(remoteStatusMessage));
+
+    boost::asio::io_context io;
+    rlp::outcome::result<eth::EthStatusHandshakeResult, eth::StatusValidationError, rlp::outcome::policy::all_narrow> result =
+        rlp::outcome::failure(eth::StatusValidationError::kProtocolVersionMismatch);
+
+    boost::asio::spawn(io, [&channel, &result](boost::asio::yield_context yield)
+    {
+        result = eth::PerformEthStatusHandshake(
+            eth::EthStatusHandshakeStart{
+                channel,
+                80002,
+                make_amoy_genesis(),
+                make_amoy_fork_id(),
+                make_bor_status_schemas(),
+                eth::EthStatusAcceptedHandler{},
+                eth::EthStatusRemoteDisconnectHandler{},
+                rlpx::EthMessageHandler{}
+            },
+            yield);
+    });
+    io.run();
+
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(channel->postedMessages.size(), 1U);
+    EXPECT_EQ(eth::ExtractLatestBlockNumber(result.value().remote_status), 36766058U);
 }
 
 TEST(EthPeerSessionTest, PerformEthStatusHandshakeRejectsPreHandshakeNonStatusMessage)
@@ -322,7 +420,9 @@ TEST(EthPeerSessionTest, PerformEthStatusHandshakeRejectsPreHandshakeNonStatusMe
                 kSepoliaNetworkID,
                 make_sepolia_genesis(),
                 make_sepolia_fork_id(),
+                {},
                 eth::EthStatusAcceptedHandler{},
+                eth::EthStatusRemoteDisconnectHandler{},
                 rlpx::EthMessageHandler{}
             },
             yield);
@@ -343,7 +443,9 @@ TEST(EthPeerSessionTest, StartEthStatusHandshakeInstallsPostHandshakeForwarder)
             kSepoliaNetworkID,
             make_sepolia_genesis(),
             make_sepolia_fork_id(),
+            {},
             eth::EthStatusAcceptedHandler{},
+            eth::EthStatusRemoteDisconnectHandler{},
             [&forwardedPayload](uint8_t ethMessageId, const rlpx::ByteBuffer& payload)
             {
                 EXPECT_EQ(ethMessageId, eth::protocol::kNewBlockHashesMessageId);

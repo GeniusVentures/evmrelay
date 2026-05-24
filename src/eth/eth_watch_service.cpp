@@ -7,6 +7,7 @@
 #include <eth/eth_watch_runner.hpp>
 #include <eth/messages.hpp>
 #include <base/rlp-logger.hpp>
+#include <discv5/discv5_enr.hpp>
 #include <discv5/enr_tree.hpp>
 #include <rlpx/crypto/ecdh.hpp>
 #include <rlpx/rlpx_error.hpp>
@@ -14,6 +15,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 
 namespace eth {
 
@@ -177,6 +179,58 @@ discv4::FilterFn make_optional_fork_id_filter(
     };
 }
 
+bool direct_enr_tree_peer_allowed(
+    const discv4::ChainPeerConfig& chain,
+    const discovery::ValidatedPeer& peer) noexcept
+{
+    if (!chain.fork_id.has_value()
+        || chain.discovery_fork_filter == discv4::DiscoveryForkFilter::kDisabled)
+    {
+        return true;
+    }
+    if (!peer.eth_fork_id.has_value())
+    {
+        return false;
+    }
+    return peer.eth_fork_id->hash == chain.fork_id->fork_hash
+        && peer.eth_fork_id->next == chain.fork_id->next_fork;
+}
+
+size_t enqueue_resolved_enr_tree_peers(
+    const discv4::ChainPeerConfig& chain,
+    const std::shared_ptr<EthPeerQueue>& queue,
+    const std::vector<std::string>& enrs) noexcept
+{
+    if (!queue)
+    {
+        return 0U;
+    }
+
+    size_t enqueued = 0U;
+    for (const auto& enr : enrs)
+    {
+        if (enr.rfind("enr:", 0U) != 0U)
+        {
+            continue;
+        }
+        const auto record = discv5::EnrParser::parse(enr);
+        if (!record)
+        {
+            continue;
+        }
+        const auto peer = discv5::EnrParser::to_validated_peer(record.value());
+        if (!peer || !direct_enr_tree_peer_allowed(chain, peer.value()))
+        {
+            continue;
+        }
+        if (queue->enqueue_validated_discovery_peer(peer.value()))
+        {
+            ++enqueued;
+        }
+    }
+    return enqueued;
+}
+
 } // namespace
 
 EthWatchService::~EthWatchService()
@@ -291,7 +345,8 @@ void EthWatchService::run(boost::asio::io_context& io) noexcept
                 pool,
                 std::move(dial_fn));
 
-            if (chain_config.fork_id.has_value())
+            if (chain_config.fork_id.has_value()
+                && chain_config.discovery_fork_filter == discv4::DiscoveryForkFilter::kRequire)
             {
                 runtime.scheduler->filter_fn = make_optional_fork_id_filter(
                     chain_config.fork_id->fork_hash);
@@ -447,6 +502,16 @@ EthWatchRuntimeStatsSnapshot EthWatchService::aggregate_connection_stats() const
             aggregate.eth_status_sent += runtime.stats->eth_status_sent;
             aggregate.remote_status_accepted += runtime.stats->remote_status_accepted;
             aggregate.remote_status_rejected += runtime.stats->remote_status_rejected;
+            for (size_t i = 0; i < aggregate.remote_status_rejected_disconnect_reasons.size(); ++i)
+            {
+                aggregate.remote_status_rejected_disconnect_reasons[i] +=
+                    runtime.stats->remote_status_rejected_disconnect_reasons[i];
+            }
+            for (size_t i = 0; i < aggregate.remote_status_rejected_validation_errors.size(); ++i)
+            {
+                aggregate.remote_status_rejected_validation_errors[i] +=
+                    runtime.stats->remote_status_rejected_validation_errors[i];
+            }
         }
 
         if (runtime.peer_queue)
@@ -579,8 +644,10 @@ discv4::DialFn EthWatchService::make_default_dial_fn(
             chain_config.canonical_name,
             chain_config.network_id,
             chain_config.genesis_hash,
-            fork_id);
+            fork_id,
+            chain_config.eth_message_schemas);
 
+        std::optional<rlpx::DisconnectReason> remote_status_disconnect_reason;
         if (runtime_stats)
         {
             ++runtime_stats->eth_status_sent;
@@ -591,7 +658,12 @@ discv4::DialFn EthWatchService::make_default_dial_fn(
                 chain_config.network_id,
                 chain_config.genesis_hash,
                 fork_id,
+                chain_config.eth_message_schemas,
                 EthStatusAcceptedHandler{},
+                [&remote_status_disconnect_reason](rlpx::DisconnectReason reason)
+                {
+                    remote_status_disconnect_reason = reason;
+                },
                 rlpx::EthMessageHandler{}
             },
             yield);
@@ -600,6 +672,19 @@ discv4::DialFn EthWatchService::make_default_dial_fn(
             if (runtime_stats)
             {
                 ++runtime_stats->remote_status_rejected;
+                if (remote_status_disconnect_reason.has_value())
+                {
+                    ++runtime_stats->remote_status_rejected_disconnect_reasons[
+                        static_cast<uint8_t>(*remote_status_disconnect_reason)];
+                }
+                else
+                {
+                    const auto error_index = static_cast<size_t>(handshake_result.error());
+                    if (error_index < runtime_stats->remote_status_rejected_validation_errors.size())
+                    {
+                        ++runtime_stats->remote_status_rejected_validation_errors[error_index];
+                    }
+                }
             }
             log->debug("ETH Status handshake failed for {}:{} on chain '{}' (error {})",
                        vp.peer.ip,
@@ -659,6 +744,18 @@ bool EthWatchService::start_enr_tree_discovery(
     if (bootstrap_enrs.empty())
     {
         return false;
+    }
+
+    const auto direct_enqueued = enqueue_resolved_enr_tree_peers(
+        runtime.config,
+        runtime.peer_queue,
+        bootstrap_enrs);
+    if (direct_enqueued > 0U)
+    {
+        static auto log = rlp::base::createLogger("eth_watch");
+        log->info("Enqueued {} direct ENR-tree peer(s) for chain '{}'",
+                  direct_enqueued,
+                  runtime.config.canonical_name);
     }
 
     return start_discv5_discovery(io, runtime, bootstrap_enrs);
@@ -818,6 +915,11 @@ void EthWatchService::set_send_callback(SendCallback cb) noexcept
     send_cb_ = std::move(cb);
 }
 
+void EthWatchService::set_eth_message_schemas(std::vector<EthMessageSchema> schemas) noexcept
+{
+    eth_message_schemas_ = std::move(schemas);
+}
+
 // ---------------------------------------------------------------------------
 // watch_event
 // ---------------------------------------------------------------------------
@@ -941,7 +1043,9 @@ void EthWatchService::process_message(uint8_t eth_msg_id, rlp::ByteView payload)
     if (eth_msg_id == protocol::kNewBlockMessageId)
     {
         ++stats_.new_block_messages;
-        auto decoded = protocol::decode_new_block(payload);
+        auto decoded = eth_message_schemas_.empty()
+            ? protocol::decode_new_block(payload)
+            : protocol::decode_new_block(payload, eth_message_schemas_);
         if (!decoded)
         {
             ++stats_.decode_failures;
@@ -957,7 +1061,9 @@ void EthWatchService::process_message(uint8_t eth_msg_id, rlp::ByteView payload)
     if (eth_msg_id == protocol::kReceiptsMessageId)
     {
         ++stats_.receipts_messages;
-        auto decoded = protocol::decode_receipts(payload);
+        auto decoded = eth_message_schemas_.empty()
+            ? protocol::decode_receipts(payload)
+            : protocol::decode_receipts(payload, eth_message_schemas_);
         if (!decoded)
         {
             ++stats_.decode_failures;

@@ -18,6 +18,7 @@
 #include <boost/json/serialize.hpp>
 #include <zlib.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -218,6 +219,318 @@ std::vector<std::string> parse_enr_tree_urls(const boost::json::object& chain_ob
         }
     }
     return out;
+}
+
+std::optional<eth::EthMessageFieldType> parse_eth_message_field_type(std::string_view value)
+{
+    if (value == "uint8") { return eth::EthMessageFieldType::kUint8; }
+    if (value == "uint16") { return eth::EthMessageFieldType::kUint16; }
+    if (value == "uint32") { return eth::EthMessageFieldType::kUint32; }
+    if (value == "uint64") { return eth::EthMessageFieldType::kUint64; }
+    if (value == "uint256") { return eth::EthMessageFieldType::kUint256; }
+    if (value == "hash32") { return eth::EthMessageFieldType::kHash32; }
+    if (value == "hash4") { return eth::EthMessageFieldType::kHash4; }
+    if (value == "forkid") { return eth::EthMessageFieldType::kForkId; }
+    if (value == "bytes") { return eth::EthMessageFieldType::kBytes; }
+    if (value == "bool") { return eth::EthMessageFieldType::kBool; }
+    if (value == "hash_or_number") { return eth::EthMessageFieldType::kHashOrNumber; }
+    if (value == "hash_list") { return eth::EthMessageFieldType::kHashList; }
+    if (value == "uint_list") { return eth::EthMessageFieldType::kUintList; }
+    if (value == "uint32_list") { return eth::EthMessageFieldType::kUint32List; }
+    if (value == "bytes_list") { return eth::EthMessageFieldType::kBytesList; }
+    if (value == "block_hash_entries") { return eth::EthMessageFieldType::kBlockHashEntries; }
+    if (value == "get_block_headers_query") { return eth::EthMessageFieldType::kGetBlockHeadersQuery; }
+    if (value == "block_headers") { return eth::EthMessageFieldType::kBlockHeaders; }
+    if (value == "block_bodies") { return eth::EthMessageFieldType::kBlockBodies; }
+    if (value == "block") { return eth::EthMessageFieldType::kBlock; }
+    if (value == "transactions") { return eth::EthMessageFieldType::kTransactions; }
+    if (value == "receipts") { return eth::EthMessageFieldType::kReceipts; }
+    if (value == "pooled_transactions") { return eth::EthMessageFieldType::kPooledTransactions; }
+    return std::nullopt;
+}
+
+std::optional<size_t> parse_json_size_t(const boost::json::value& value)
+{
+    if (!value.is_int64() || value.as_int64() < 0)
+    {
+        return std::nullopt;
+    }
+    return static_cast<size_t>(value.as_int64());
+}
+
+std::optional<uint8_t> parse_json_u8(const boost::json::value& value)
+{
+    if (!value.is_int64() || value.as_int64() < 0 || value.as_int64() > UINT8_MAX)
+    {
+        return std::nullopt;
+    }
+    return static_cast<uint8_t>(value.as_int64());
+}
+
+std::vector<eth::EthMessageSchema> parse_eth_message_schema_array(const boost::json::value& schemas_value)
+{
+    std::vector<eth::EthMessageSchema> schemas;
+    if (!schemas_value.is_array())
+    {
+        return schemas;
+    }
+
+    for (const auto& schema_value : schemas_value.as_array())
+    {
+        if (!schema_value.is_object())
+        {
+            continue;
+        }
+        const auto& schema_object = schema_value.as_object();
+        const auto* name_value = schema_object.if_contains("name");
+        const auto* id_value = schema_object.if_contains("id");
+        const auto* fields_value = schema_object.if_contains("fields");
+        if (name_value == nullptr || id_value == nullptr || fields_value == nullptr ||
+            !name_value->is_string() || !fields_value->is_array())
+        {
+            continue;
+        }
+        const auto message_id = parse_json_u8(*id_value);
+        if (!message_id.has_value())
+        {
+            continue;
+        }
+
+        eth::EthMessageSchema schema{};
+        const auto& name_string = name_value->as_string();
+        schema.name = std::string(name_string.data(), name_string.size());
+        schema.message_id = *message_id;
+
+        if (const auto* protocol_version_value = schema_object.if_contains("protocolVersion");
+            protocol_version_value != nullptr)
+        {
+            const auto protocol_version = parse_json_u8(*protocol_version_value);
+            if (!protocol_version.has_value())
+            {
+                continue;
+            }
+            schema.protocol_version = *protocol_version;
+        }
+
+        bool valid_schema = true;
+        size_t index = 0U;
+        for (const auto& field_value : fields_value->as_array())
+        {
+            if (!field_value.is_object())
+            {
+                valid_schema = false;
+                break;
+            }
+            const auto& field_object = field_value.as_object();
+            const auto* field_name_value = field_object.if_contains("name");
+            const auto* field_type_value = field_object.if_contains("type");
+            if (field_name_value == nullptr || field_type_value == nullptr ||
+                !field_name_value->is_string() || !field_type_value->is_string())
+            {
+                valid_schema = false;
+                break;
+            }
+
+            const auto& type_string = field_type_value->as_string();
+            const auto field_type = parse_eth_message_field_type(
+                std::string_view(type_string.data(), type_string.size()));
+            if (!field_type.has_value())
+            {
+                valid_schema = false;
+                break;
+            }
+
+            eth::EthMessageFieldSchema field{};
+            const auto& field_name_string = field_name_value->as_string();
+            field.name = std::string(field_name_string.data(), field_name_string.size());
+            field.type = *field_type;
+
+            if (const auto* size_value = field_object.if_contains("size"); size_value != nullptr)
+            {
+                field.size = parse_json_size_t(*size_value);
+                if (!field.size.has_value())
+                {
+                    valid_schema = false;
+                    break;
+                }
+            }
+            if (const auto* offset_value = field_object.if_contains("offset"); offset_value != nullptr)
+            {
+                field.offset = parse_json_size_t(*offset_value);
+                if (!field.offset.has_value())
+                {
+                    valid_schema = false;
+                    break;
+                }
+            }
+            else
+            {
+                field.offset = index;
+            }
+
+            schema.fields.push_back(std::move(field));
+            ++index;
+        }
+
+        if (valid_schema && !schema.fields.empty())
+        {
+            schemas.push_back(std::move(schema));
+        }
+    }
+
+    return schemas;
+}
+
+bool schema_matches_filter(const eth::EthMessageSchema& schema, const boost::json::object& filter)
+{
+    const auto* id_value = filter.if_contains("id");
+    if (id_value != nullptr)
+    {
+        const auto id = parse_json_u8(*id_value);
+        if (!id.has_value() || schema.message_id != *id)
+        {
+            return false;
+        }
+    }
+
+    const auto* protocol_version_value = filter.if_contains("protocolVersion");
+    if (protocol_version_value != nullptr)
+    {
+        const auto protocol_version = parse_json_u8(*protocol_version_value);
+        if (!protocol_version.has_value() ||
+            !schema.protocol_version.has_value() ||
+            *schema.protocol_version != *protocol_version)
+        {
+            return false;
+        }
+    }
+
+    const auto* name_value = filter.if_contains("name");
+    if (name_value != nullptr)
+    {
+        if (!name_value->is_string())
+        {
+            return false;
+        }
+        const auto& name = name_value->as_string();
+        if (schema.name != std::string_view(name.data(), name.size()))
+        {
+            return false;
+        }
+    }
+
+    return id_value != nullptr || protocol_version_value != nullptr || name_value != nullptr;
+}
+
+std::vector<eth::EthMessageSchema> parse_eth_message_schema_set(
+    const boost::json::object& sets,
+    const boost::json::value&  set_value,
+    unsigned                   depth = 0U)
+{
+    if (depth > 8U)
+    {
+        return {};
+    }
+
+    if (set_value.is_array())
+    {
+        return parse_eth_message_schema_array(set_value);
+    }
+    if (!set_value.is_object())
+    {
+        return {};
+    }
+
+    const auto& set_object = set_value.as_object();
+    std::vector<eth::EthMessageSchema> schemas;
+
+    if (const auto* extends_value = set_object.if_contains("extends");
+        extends_value != nullptr && extends_value->is_string())
+    {
+        const auto& extends_string = extends_value->as_string();
+        const auto* base_set = sets.if_contains(std::string(extends_string.data(), extends_string.size()));
+        if (base_set != nullptr)
+        {
+            schemas = parse_eth_message_schema_set(sets, *base_set, depth + 1U);
+        }
+    }
+
+    if (const auto* remove_value = set_object.if_contains("remove");
+        remove_value != nullptr && remove_value->is_array())
+    {
+        for (const auto& filter_value : remove_value->as_array())
+        {
+            if (!filter_value.is_object())
+            {
+                continue;
+            }
+            const auto& filter = filter_value.as_object();
+            schemas.erase(
+                std::remove_if(
+                    schemas.begin(),
+                    schemas.end(),
+                    [&filter](const eth::EthMessageSchema& schema)
+                    {
+                        return schema_matches_filter(schema, filter);
+                    }),
+                schemas.end());
+        }
+    }
+
+    if (const auto* prepend_value = set_object.if_contains("prepend");
+        prepend_value != nullptr && prepend_value->is_array())
+    {
+        auto prepended = parse_eth_message_schema_array(*prepend_value);
+        prepended.insert(prepended.end(), schemas.begin(), schemas.end());
+        schemas = std::move(prepended);
+    }
+
+    if (const auto* append_value = set_object.if_contains("append");
+        append_value != nullptr && append_value->is_array())
+    {
+        auto appended = parse_eth_message_schema_array(*append_value);
+        schemas.insert(schemas.end(), appended.begin(), appended.end());
+    }
+
+    return schemas;
+}
+
+std::vector<eth::EthMessageSchema> parse_eth_message_schemas(
+    const boost::json::value&  parsed,
+    const boost::json::object& chain_object)
+{
+    if (const auto* schemas_value = chain_object.if_contains("ethMessageSchemas");
+        schemas_value != nullptr)
+    {
+        return parse_eth_message_schema_array(*schemas_value);
+    }
+
+    const auto* schema_set_value = chain_object.if_contains("ethMessageSchemaSet");
+    if (schema_set_value == nullptr || !schema_set_value->is_string())
+    {
+        return {};
+    }
+
+    const auto* root = parsed.if_object();
+    if (root == nullptr)
+    {
+        return {};
+    }
+    const auto* sets_value = root->if_contains("_ethMessageSchemaSets");
+    if (sets_value == nullptr || !sets_value->is_object())
+    {
+        return {};
+    }
+
+    const auto& set_name_string = schema_set_value->as_string();
+    const auto* selected_set = sets_value->as_object().if_contains(
+        std::string(set_name_string.data(), set_name_string.size()));
+    if (selected_set == nullptr)
+    {
+        return {};
+    }
+
+    return parse_eth_message_schema_set(sets_value->as_object(), *selected_set);
 }
 
 std::optional<uint64_t> parse_fork_next_value(const boost::json::value& value)
@@ -666,6 +979,7 @@ std::optional<discv4::ChainPeerConfig> parse_chain_peer_config_from_json_value(
         std::make_move_iterator(node_enrs.begin()),
         std::make_move_iterator(node_enrs.end()));
     config.enr_trees = parse_enr_tree_urls(*chain_object);
+    config.eth_message_schemas = parse_eth_message_schemas(parsed, *chain_object);
 
     if (const auto* fork_id_value = chain_object->if_contains("forkId");
         fork_id_value != nullptr && fork_id_value->is_string())

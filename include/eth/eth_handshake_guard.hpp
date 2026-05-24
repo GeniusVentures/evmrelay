@@ -61,7 +61,8 @@ DecodeValidatedStatusMessage(
     uint8_t                        negotiated_eth_offset,
     uint8_t                        negotiated_eth_version,
     uint64_t                       network_id,
-    const Hash256&                 genesis_hash) noexcept;
+    const Hash256&                 genesis_hash,
+    const std::vector<EthMessageSchema>& eth_message_schemas = {}) noexcept;
 
 } // namespace eth
 

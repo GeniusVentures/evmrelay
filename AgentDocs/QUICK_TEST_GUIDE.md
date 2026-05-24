@@ -87,6 +87,43 @@ connection checks should be run manually with `eth_watch --chain ...` because
 public peer reachability is intentionally not part of the deterministic CTest
 suite.
 
+## Live All-Chains Functional Test
+
+The final live functional check runs all configured chains concurrently through
+the production `eth_watch` service path, starts from discovery instead of cached
+peer candidates, requires live ETH Status handshakes, and waits for ETH messages.
+It is opt-in because it uses live DNS, UDP discovery, and TCP RLPx sessions.
+
+```bash
+cd /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay
+cmake --build build/OSX/Debug --target eth_watch_all_chains_live_test
+env EVMRELAY_RUN_LIVE_ALL_CHAINS_TEST=1 \
+    EVMRELAY_LIVE_ALL_CHAINS_JSON=/path/to/chain_enodes.json \
+    ./build/OSX/Debug/test_bin/eth_watch_all_chains_live_test
+```
+
+Defaults:
+
+- chains: ethereum mainnet/testnets, Polygon mainnet/Amoy, BSC mainnet/testnet,
+  Base mainnet/Sepolia, and Gnosis
+- peer selection: `discover-first`
+- runtime: `180` seconds
+- per-chain discovery threshold: at least `1` discovered peer
+- total discovery threshold: at least the number of cached `nodes` reported at
+  startup, while final `cached_peers` must remain `0`
+- connection threshold: at least `10` accepted ETH Status handshakes
+- liveness threshold: at least `5` ETH messages
+
+Useful overrides:
+
+```bash
+EVMRELAY_LIVE_ALL_CHAINS_SECONDS=240
+EVMRELAY_LIVE_ALL_CHAINS_MIN_DISCOVERED_PER_CHAIN=2
+EVMRELAY_LIVE_ALL_CHAINS_MIN_STATUS_ACCEPTED=10
+EVMRELAY_LIVE_ALL_CHAINS_MIN_ETH_MESSAGES=5
+EVMRELAY_LIVE_ALL_CHAINS_JSON=/path/to/chain_enodes.json
+```
+
 ## Public RPC Endpoints (No Auth Required)
 
 **Sepolia:**

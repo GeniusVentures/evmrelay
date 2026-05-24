@@ -8,6 +8,7 @@
 
 #include <discv4/bootstrap_peers.hpp>
 #include <discv4/chain_peers.hpp>
+#include <eth/messages.hpp>
 
 #include <algorithm>
 #include <array>
@@ -464,6 +465,172 @@ TEST_F(ChainPeersTest, LoadChainPeerConfigParsesReadmeSchemaHexForkNext)
     EXPECT_EQ(config->fork_id->fork_hash[2], 0x46);
     EXPECT_EQ(config->fork_id->fork_hash[3], 0x2e);
     EXPECT_EQ(config->fork_id->next_fork, 0x695db057ULL);
+}
+
+TEST_F(ChainPeersTest, LoadChainPeerConfigParsesEthMessageSchemas)
+{
+    const std::string json_text = std::string("{")
+        + "\"polygon-amoy\":{"
+        + "\"networkId\":80002,"
+        + "\"genesisHex\":\"7202b2b53c5a0836e773e319d18922cc756dd67432f9a1f65352b61f4406c697\","
+        + "\"ethMessageSchemas\":[{"
+        + "\"name\":\"Status\","
+        + "\"id\":0,"
+        + "\"protocolVersion\":69,"
+        + "\"fields\":["
+        + "{\"name\":\"protocol_version\",\"type\":\"uint8\",\"offset\":0},"
+        + "{\"name\":\"network_id\",\"type\":\"uint64\",\"offset\":1},"
+        + "{\"name\":\"bor_extra\",\"type\":\"uint32\",\"offset\":2},"
+        + "{\"name\":\"genesis_hash\",\"type\":\"hash32\",\"size\":32,\"offset\":3},"
+        + "{\"name\":\"fork_id\",\"type\":\"forkid\",\"offset\":4},"
+        + "{\"name\":\"earliest_block\",\"type\":\"uint64\",\"offset\":5},"
+        + "{\"name\":\"latest_block\",\"type\":\"uint64\",\"offset\":6},"
+        + "{\"name\":\"latest_block_hash\",\"type\":\"hash32\",\"size\":32,\"offset\":7}"
+        + "]},"
+        + "{\"name\":\"NewBlockHashes\",\"id\":1,\"fields\":[{\"name\":\"entries\",\"type\":\"block_hash_entries\",\"offset\":0}]},"
+        + "{\"name\":\"Transactions\",\"id\":2,\"fields\":[{\"name\":\"transactions\",\"type\":\"transactions\",\"offset\":0}]},"
+        + "{\"name\":\"GetBlockHeaders\",\"id\":3,\"fields\":[{\"name\":\"request_id\",\"type\":\"uint64\",\"offset\":0},{\"name\":\"query\",\"type\":\"get_block_headers_query\",\"offset\":1}]},"
+        + "{\"name\":\"BlockHeaders\",\"id\":4,\"fields\":[{\"name\":\"request_id\",\"type\":\"uint64\",\"offset\":0},{\"name\":\"headers\",\"type\":\"block_headers\",\"offset\":1}]},"
+        + "{\"name\":\"GetBlockBodies\",\"id\":5,\"fields\":[{\"name\":\"request_id\",\"type\":\"uint64\",\"offset\":0},{\"name\":\"block_hashes\",\"type\":\"hash_list\",\"offset\":1}]},"
+        + "{\"name\":\"BlockBodies\",\"id\":6,\"fields\":[{\"name\":\"request_id\",\"type\":\"uint64\",\"offset\":0},{\"name\":\"bodies\",\"type\":\"block_bodies\",\"offset\":1}]},"
+        + "{\"name\":\"NewBlock\",\"id\":7,\"fields\":[{\"name\":\"block\",\"type\":\"block\",\"offset\":0},{\"name\":\"total_difficulty\",\"type\":\"uint256\",\"offset\":1}]},"
+        + "{\"name\":\"NewPooledTransactionHashes\",\"id\":8,\"fields\":[{\"name\":\"types\",\"type\":\"bytes\",\"offset\":0},{\"name\":\"sizes\",\"type\":\"uint32_list\",\"offset\":1},{\"name\":\"hashes\",\"type\":\"hash_list\",\"offset\":2}]},"
+        + "{\"name\":\"GetPooledTransactions\",\"id\":9,\"fields\":[{\"name\":\"request_id\",\"type\":\"uint64\",\"offset\":0},{\"name\":\"transaction_hashes\",\"type\":\"hash_list\",\"offset\":1}]},"
+        + "{\"name\":\"PooledTransactions\",\"id\":10,\"fields\":[{\"name\":\"request_id\",\"type\":\"uint64\",\"offset\":0},{\"name\":\"transactions\",\"type\":\"pooled_transactions\",\"offset\":1}]},"
+        + "{\"name\":\"GetReceipts\",\"id\":15,\"fields\":[{\"name\":\"request_id\",\"type\":\"uint64\",\"offset\":0},{\"name\":\"block_hashes\",\"type\":\"hash_list\",\"offset\":1}]},"
+        + "{\"name\":\"Receipts\",\"id\":16,\"fields\":[{\"name\":\"request_id\",\"type\":\"uint64\",\"offset\":0},{\"name\":\"receipts\",\"type\":\"receipts\",\"offset\":1}]}"
+        + "],"
+        + "\"nodes\":[],"
+        + "\"bootnodes\":[]}}";
+
+    const auto config = discv4::load_chain_peer_config_from_json_text(
+        "polygon-amoy",
+        json_text);
+
+    ASSERT_TRUE(config.has_value());
+    ASSERT_EQ(config->eth_message_schemas.size(), 13U);
+    const auto& schema = config->eth_message_schemas.front();
+    EXPECT_EQ(schema.name, "Status");
+    EXPECT_EQ(schema.message_id, eth::protocol::kStatusMessageId);
+    ASSERT_TRUE(schema.protocol_version.has_value());
+    EXPECT_EQ(*schema.protocol_version, eth::kEthProtocolVersion69);
+    ASSERT_EQ(schema.fields.size(), 8U);
+    EXPECT_EQ(schema.fields[2].name, "bor_extra");
+    EXPECT_EQ(schema.fields[2].type, eth::EthMessageFieldType::kUint32);
+    ASSERT_TRUE(schema.fields[7].size.has_value());
+    EXPECT_EQ(*schema.fields[7].size, 32U);
+
+    const auto has_schema_id = [&config](uint8_t message_id)
+    {
+        return std::any_of(
+            config->eth_message_schemas.begin(),
+            config->eth_message_schemas.end(),
+            [message_id](const eth::EthMessageSchema& item)
+            {
+                return item.message_id == message_id;
+            });
+    };
+
+    EXPECT_TRUE(has_schema_id(eth::protocol::kNewBlockHashesMessageId));
+    EXPECT_TRUE(has_schema_id(eth::protocol::kTransactionsMessageId));
+    EXPECT_TRUE(has_schema_id(eth::protocol::kGetBlockHeadersMessageId));
+    EXPECT_TRUE(has_schema_id(eth::protocol::kBlockHeadersMessageId));
+    EXPECT_TRUE(has_schema_id(eth::protocol::kGetBlockBodiesMessageId));
+    EXPECT_TRUE(has_schema_id(eth::protocol::kBlockBodiesMessageId));
+    EXPECT_TRUE(has_schema_id(eth::protocol::kNewBlockMessageId));
+    EXPECT_TRUE(has_schema_id(eth::protocol::kNewPooledTransactionHashesMessageId));
+    EXPECT_TRUE(has_schema_id(eth::protocol::kGetPooledTransactionsMessageId));
+    EXPECT_TRUE(has_schema_id(eth::protocol::kPooledTransactionsMessageId));
+    EXPECT_TRUE(has_schema_id(eth::protocol::kGetReceiptsMessageId));
+    EXPECT_TRUE(has_schema_id(eth::protocol::kReceiptsMessageId));
+
+    const auto receipts_schema = std::find_if(
+        config->eth_message_schemas.begin(),
+        config->eth_message_schemas.end(),
+        [](const eth::EthMessageSchema& item)
+        {
+            return item.message_id == eth::protocol::kReceiptsMessageId;
+        });
+    ASSERT_NE(receipts_schema, config->eth_message_schemas.end());
+    ASSERT_EQ(receipts_schema->fields.size(), 2U);
+    EXPECT_EQ(receipts_schema->fields[1].type, eth::EthMessageFieldType::kReceipts);
+}
+
+TEST_F(ChainPeersTest, LoadChainPeerConfigResolvesEthMessageSchemaSet)
+{
+    const std::string json_text =
+        "{"
+        "\"_ethMessageSchemaSets\":{"
+        "\"ethereum-default\":[{"
+        "\"name\":\"Status\","
+        "\"id\":0,"
+        "\"protocolVersion\":69,"
+        "\"fields\":["
+        "{\"name\":\"protocol_version\",\"type\":\"uint8\",\"offset\":0},"
+        "{\"name\":\"network_id\",\"type\":\"uint64\",\"offset\":1},"
+        "{\"name\":\"genesis_hash\",\"type\":\"hash32\",\"size\":32,\"offset\":2},"
+        "{\"name\":\"fork_id\",\"type\":\"forkid\",\"offset\":3},"
+        "{\"name\":\"earliest_block\",\"type\":\"uint64\",\"offset\":4},"
+        "{\"name\":\"latest_block\",\"type\":\"uint64\",\"offset\":5},"
+        "{\"name\":\"latest_block_hash\",\"type\":\"hash32\",\"size\":32,\"offset\":6}"
+        "]}"
+        "]},"
+        "\"ethereum-sepolia\":{"
+        "\"networkId\":11155111,"
+        "\"genesisHex\":\"25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9\","
+        "\"ethMessageSchemaSet\":\"ethereum-default\","
+        "\"nodes\":[],"
+        "\"bootnodes\":[]"
+        "}"
+        "}";
+
+    const auto config = discv4::load_chain_peer_config_from_json_text(
+        "ethereum-sepolia",
+        json_text);
+
+    ASSERT_TRUE(config.has_value());
+    ASSERT_EQ(config->eth_message_schemas.size(), 1U);
+    EXPECT_EQ(config->eth_message_schemas.front().name, "Status");
+    ASSERT_EQ(config->eth_message_schemas.front().fields.size(), 7U);
+    EXPECT_EQ(config->eth_message_schemas.front().fields[0].type, eth::EthMessageFieldType::kUint8);
+    EXPECT_EQ(config->eth_message_schemas.front().fields[1].type, eth::EthMessageFieldType::kUint64);
+}
+
+TEST_F(ChainPeersTest, LoadChainPeerConfigResolvesInheritedEthMessageSchemaSet)
+{
+    const std::string json_text =
+        "{"
+        "\"_ethMessageSchemaSets\":{"
+        "\"ethereum-default\":["
+        "{\"name\":\"Status\",\"id\":0,\"protocolVersion\":69,\"fields\":[{\"name\":\"protocol_version\",\"type\":\"uint8\",\"offset\":0}]},"
+        "{\"name\":\"Status\",\"id\":0,\"protocolVersion\":68,\"fields\":[{\"name\":\"protocol_version\",\"type\":\"uint8\",\"offset\":0}]},"
+        "{\"name\":\"BlockRangeUpdate\",\"id\":17,\"protocolVersion\":69,\"fields\":[{\"name\":\"latest_block\",\"type\":\"uint64\",\"offset\":0}]}"
+        "],"
+        "\"bsc68\":{"
+        "\"extends\":\"ethereum-default\","
+        "\"remove\":[{\"id\":0,\"protocolVersion\":69},{\"id\":17}],"
+        "\"append\":[{\"name\":\"UpgradeStatus\",\"id\":11,\"protocolVersion\":68,\"fields\":[{\"name\":\"disable_peer_tx_broadcast\",\"type\":\"bool\",\"offset\":0}]}]"
+        "}"
+        "},"
+        "\"bnb-smart-chain\":{"
+        "\"networkId\":56,"
+        "\"genesisHex\":\"d04d8fb63c73eccf2c6b53f18518ef166f68f535c9f040a972a1b4a86c32a2f5\","
+        "\"ethMessageSchemaSet\":\"bsc68\","
+        "\"nodes\":[],"
+        "\"bootnodes\":[]"
+        "}"
+        "}";
+
+    const auto config = discv4::load_chain_peer_config_from_json_text(
+        "bnb-smart-chain",
+        json_text);
+
+    ASSERT_TRUE(config.has_value());
+    ASSERT_EQ(config->eth_message_schemas.size(), 2U);
+    EXPECT_EQ(config->eth_message_schemas[0].message_id, eth::protocol::kStatusMessageId);
+    ASSERT_TRUE(config->eth_message_schemas[0].protocol_version.has_value());
+    EXPECT_EQ(*config->eth_message_schemas[0].protocol_version, eth::kEthProtocolVersion68);
+    EXPECT_EQ(config->eth_message_schemas[1].message_id, eth::protocol::kUpgradeStatusMessageId);
 }
 
 TEST_F(ChainPeersTest, LoadChainPeersPrefersEnrWhenGeneratedNodeContainsEnrAndEnode)

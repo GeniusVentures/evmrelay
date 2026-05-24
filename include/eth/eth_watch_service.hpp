@@ -14,6 +14,7 @@
 #include <discv4/discv4_client.hpp>
 #include <discv5/discv5_client.hpp>
 #include <discv5/enr_tree.hpp>
+#include <array>
 #include <functional>
 #include <map>
 #include <memory>
@@ -154,6 +155,8 @@ struct EthWatchRuntimeStatsSnapshot
     uint64_t eth_status_sent = 0;
     uint64_t remote_status_accepted = 0;
     uint64_t remote_status_rejected = 0;
+    std::array<uint64_t, 256> remote_status_rejected_disconnect_reasons{};
+    std::array<uint64_t, 4> remote_status_rejected_validation_errors{};
     EthPeerQueueStatsSnapshot peer_queue{};
 };
 
@@ -223,6 +226,9 @@ public:
     /// requests are desired.  Safe to omit if the caller handles receipts
     /// manually via process_receipts().
     void set_send_callback(SendCallback cb) noexcept;
+
+    /// @brief Configure schema-aware runtime decoders for this service/session.
+    void set_eth_message_schemas(std::vector<EthMessageSchema> schemas) noexcept;
 
     /// @brief Register a watch for a specific contract event.
     ///
@@ -332,6 +338,7 @@ private:
     EventWatchId              next_id_     = 1;
     uint64_t                  next_req_id_ = 1;
     WatchStatsSnapshot        stats_{};
+    std::vector<EthMessageSchema> eth_message_schemas_;
 
     /// Outstanding GetReceipts requests keyed by request_id.
     std::map<uint64_t, PendingRequest> pending_requests_;

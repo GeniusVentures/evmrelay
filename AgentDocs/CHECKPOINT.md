@@ -1,5 +1,128 @@
 # Checkpoint Log
 
+## All-chain live C++ functional test and RPC manager handoff - 2026-05-24
+
+### Current State
+
+- Repository: `evmrelay`
+- Branch: `develop`
+- Previous HEAD before this checkpoint commit: `5aeeff5 Add discover-only discovery mode`
+- User correction in this step:
+  - Do not add shell harnesses for evmrelay functional coverage.
+  - Live/functional relay validation should be compiled C++ and registered through CMake/CTest.
+
+### What Changed
+
+- Added `test/eth/eth_watch_all_chains_live_test.cpp`.
+  - Opt-in with `EVMRELAY_RUN_LIVE_ALL_CHAINS_TEST=1`.
+  - Drives `eth::EthWatchService` directly instead of shelling out to `eth_watch`.
+  - Runs all configured chains concurrently in `EthWatchDiscoveryMode::kDiscoverFirst`.
+  - Sets both discv4 and discv5 bind ports to `0` so per-chain discovery clients can run concurrently.
+  - Loads the same `chains_config.json` path used by the built `eth_watch` example by default.
+  - Uses `EVMRELAY_LIVE_ALL_CHAINS_JSON` when a local `chain_enodes.json` path should be forced.
+  - Keeps final `cached_peers=0`, proving cached `nodes` were not used as dial candidates.
+  - Requires total discovered peers to meet or exceed the startup cached peer count unless overridden by `EVMRELAY_LIVE_ALL_CHAINS_MIN_DISCOVERED_TOTAL`.
+  - Requires every selected chain to discover at least one peer unless overridden by `EVMRELAY_LIVE_ALL_CHAINS_MIN_DISCOVERED_PER_CHAIN`.
+  - Requires at least 10 accepted ETH Status handshakes and at least 5 ETH messages by default.
+- Registered `eth_watch_all_chains_live_test` in `test/eth/CMakeLists.txt`.
+- Updated:
+  - `AgentDocs/EVMRELAY_COMPLETION_PLAN.md`
+  - `AgentDocs/QUICK_TEST_GUIDE.md`
+- Removed the mistaken shell harness approach from this work.
+
+### Live Verification
+
+Commands run from `evmrelay/build/OSX/Debug`:
+
+```bash
+cmake --build . --target eth_watch_all_chains_live_test
+
+./test_bin/eth_watch_all_chains_live_test
+
+env EVMRELAY_RUN_LIVE_ALL_CHAINS_TEST=1 \
+  EVMRELAY_LIVE_ALL_CHAINS_JSON=/Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/rlp_enodes/output/chain_enodes.json \
+  ./test_bin/eth_watch_all_chains_live_test
+```
+
+Observed passing live C++ sample:
+
+```text
+startup_cached_peers=723
+final_cached_peers=0
+discovered_peers=2904
+remote_status_accepted=17
+eth_messages=938
+
+ethereum-mainnet discovered_peers=200
+ethereum-sepolia discovered_peers=125
+ethereum-holesky discovered_peers=8
+ethereum-hoodi discovered_peers=137
+polygon-mainnet discovered_peers=372
+polygon-amoy discovered_peers=371
+bnb-smart-chain discovered_peers=550
+bnb-smart-chain-testnet discovered_peers=436
+base-mainnet discovered_peers=68
+base-sepolia discovered_peers=52
+gnosis-chain discovered_peers=585
+```
+
+Static check:
+
+```bash
+git diff --check -- AgentDocs/EVMRELAY_COMPLETION_PLAN.md AgentDocs/QUICK_TEST_GUIDE.md examples/eth_watch/CMakeLists.txt test/eth/CMakeLists.txt test/eth/eth_watch_all_chains_live_test.cpp
+```
+
+### Teardown Note
+
+- The live test intentionally snapshots counters and leaves the live service/io context to process exit.
+- Calling `EthWatchService::stop()` during this GTest live process surfaced `boost::coroutines::detail::forced_unwind` from active Boost coroutine stacks.
+- This is scoped to the opt-in live functional test and avoids changing production teardown behavior.
+
+### Next Work: RPC Manager Sub-library
+
+The next requested feature is likely a separate evmrelay sub-library for RPC-backed verification of RLPx-observed messages.
+
+Suggested shape:
+
+- Add an RPC manager module separate from `EthWatchService` orchestration.
+- Config should support:
+  - optional paid RPC endpoints;
+  - API keys by env var or explicit local config;
+  - chain/canonical-name mapping;
+  - endpoint priority/weight/rate-limit hints;
+  - a configurable number `X` of ChainList verified public RPC endpoints per chain.
+- ChainList integration should:
+  - load from a configured file or URL;
+  - filter for verified endpoints;
+  - reject unsupported schemes and unresolved API-key placeholders unless config supplies credentials;
+  - produce deterministic endpoint selection for tests.
+- Runtime classes should likely be split:
+  - `RpcEndpointConfig`
+  - `ChainlistProvider`
+  - `RpcEndpointPool`
+  - `RpcManager`
+  - `RpcObservedMessageVerifier` / `BloomMessageVerifier`
+- Reuse existing JSON-RPC and receipt-source code where possible:
+  - `include/eth/json_rpc.hpp`
+  - `src/eth/json_rpc.cpp`
+  - `include/eth/rpc_receipt_source.hpp`
+  - `src/eth/rpc_receipt_source.cpp`
+  - `include/eth/eth_receipt_source.hpp`
+  - `src/eth/eth_receipt_source.cpp`
+- The verifier should use block/receipt bloom checks to narrow candidates, then fetch exact receipts/logs through RPC and verify the observed RLPx message/log exactly.
+- Keep bridge finality/quorum policy separate unless explicitly requested.
+
+### Notes For Next Chat
+
+- Do not reintroduce shell test harnesses for evmrelay functional testing.
+- Keep chain names, RPC endpoints, API keys, ChainList URLs, and endpoint counts in config/fixtures, not hardcoded production C++.
+- Existing untracked local artifacts are still intentionally not part of the commit:
+  - `examples/all.json`
+  - `examples/logs/`
+  - `go-ethereum/`
+  - `kelpdao-incident-report.pdf`
+  - `rlp_enodes/`
+
 ## Discover-only producer/consumer mode and Polygon ENR fork-filter policy - 2026-05-21
 
 ### Current State

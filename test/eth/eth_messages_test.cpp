@@ -3,7 +3,9 @@
 
 #include <gtest/gtest.h>
 #include <eth/messages.hpp>
+#include <rlp/rlp_encoder.hpp>
 #include <algorithm>
+#include <array>
 
 namespace {
 
@@ -23,6 +25,40 @@ static std::vector<uint8_t> from_hex(std::string_view hex) {
         out.push_back(static_cast<uint8_t>(std::stoul(std::string(hex.substr(i, 2)), nullptr, 16)));
     }
     return out;
+}
+
+std::vector<eth::EthMessageSchema> make_bor_status_schemas() {
+    using Field = eth::EthMessageFieldSchema;
+    using Type = eth::EthMessageFieldType;
+
+    return {
+        eth::EthMessageSchema{
+            "Status",
+            eth::protocol::kStatusMessageId,
+            eth::kEthProtocolVersion69,
+            {
+                Field{"protocol_version", Type::kUint8, {}, 0U},
+                Field{"network_id", Type::kUint64, {}, 1U},
+                Field{"bor_extra", Type::kUint32, {}, 2U},
+                Field{"genesis_hash", Type::kHash32, 32U, 3U},
+                Field{"fork_id", Type::kForkId, {}, 4U},
+                Field{"earliest_block", Type::kUint64, {}, 5U},
+                Field{"latest_block", Type::kUint64, {}, 6U},
+                Field{"latest_block_hash", Type::kHash32, 32U, 7U},
+            }},
+        eth::EthMessageSchema{
+            "Status",
+            eth::protocol::kStatusMessageId,
+            eth::kEthProtocolVersion69,
+            {
+                Field{"protocol_version", Type::kUint8, {}, 0U},
+                Field{"network_id", Type::kUint64, {}, 1U},
+                Field{"td", Type::kUint256, {}, 2U},
+                Field{"block_hash", Type::kHash32, 32U, 3U},
+                Field{"genesis_hash", Type::kHash32, 32U, 4U},
+                Field{"fork_id", Type::kForkId, {}, 5U},
+            }},
+    };
 }
 
 } // namespace
@@ -107,6 +143,72 @@ TEST(EthMessagesGoEthVectors, StatusEth69RoundTripPreservesWireFormat) {
     auto reencoded = eth::protocol::encode_status(decoded.value());
     ASSERT_TRUE(reencoded.has_value());
     EXPECT_EQ(reencoded.value(), wire);
+}
+
+TEST(EthMessagesGoEthVectors, StatusEth69AcceptsLegacyBorStatusShape) {
+    eth::Hash256 blockhash{};
+    blockhash.fill(0x11);
+    eth::Hash256 genesis{};
+    genesis.fill(0x22);
+
+    rlp::RlpEncoder encoder;
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.add(static_cast<uint8_t>(eth::kEthProtocolVersion69)));
+    ASSERT_TRUE(encoder.add(static_cast<uint64_t>(80002)));
+    ASSERT_TRUE(encoder.add(intx::uint256{123456789}));
+    ASSERT_TRUE(encoder.add(rlp::ByteView(blockhash.data(), blockhash.size())));
+    ASSERT_TRUE(encoder.add(rlp::ByteView(genesis.data(), genesis.size())));
+    ASSERT_TRUE(encoder.BeginList());
+    const std::array<uint8_t, 4> fork_hash{0x8b, 0x7e, 0x41, 0x75};
+    ASSERT_TRUE(encoder.add(rlp::ByteView(fork_hash.data(), fork_hash.size())));
+    ASSERT_TRUE(encoder.add(static_cast<uint64_t>(0)));
+    ASSERT_TRUE(encoder.EndList());
+    ASSERT_TRUE(encoder.EndList());
+
+    auto encoded = encoder.MoveBytes();
+    ASSERT_TRUE(encoded.has_value());
+    const auto schemas = make_bor_status_schemas();
+    auto decoded = eth::protocol::decode_status(
+        rlp::ByteView(encoded.value().data(), encoded.value().size()),
+        schemas);
+    ASSERT_TRUE(decoded.has_value()) << "decode_status() should tolerate Bor peers that negotiate eth/69 but send legacy status fields";
+
+    const auto* msg69 = std::get_if<eth::StatusMessage69>(&decoded.value());
+    ASSERT_NE(msg69, nullptr);
+    EXPECT_EQ(msg69->protocol_version, eth::kEthProtocolVersion69);
+    EXPECT_EQ(msg69->network_id, 80002U);
+    EXPECT_EQ(msg69->genesis_hash, genesis);
+    EXPECT_EQ(msg69->fork_id.fork_hash, fork_hash);
+    EXPECT_EQ(msg69->fork_id.next_fork, 0U);
+    EXPECT_EQ(msg69->earliest_block, 0U);
+    EXPECT_EQ(msg69->latest_block, 0U);
+    EXPECT_EQ(msg69->latest_block_hash, blockhash);
+}
+
+TEST(EthMessagesGoEthVectors, StatusEth69AcceptsBorExtendedStatusShape) {
+    auto wire = from_hex(
+        "f859"
+        "45"
+        "83013882"
+        "840aa41494"
+        "a07202b2b53c5a0836e773e319d18922cc756dd67432f9a1f65352b61f4406c697"
+        "c6848b7e417580"
+        "80"
+        "840231016a"
+        "a0ded939a9c1496168516bdfff5d9e9ce79e4091adee907ab8978fd86270983056");
+
+    const auto schemas = make_bor_status_schemas();
+    auto decoded = eth::protocol::decode_status(rlp::ByteView(wire.data(), wire.size()), schemas);
+    ASSERT_TRUE(decoded.has_value()) << "decode_status() should tolerate Bor's extended ETH/69 status fields";
+
+    const auto* msg69 = std::get_if<eth::StatusMessage69>(&decoded.value());
+    ASSERT_NE(msg69, nullptr);
+    EXPECT_EQ(msg69->protocol_version, eth::kEthProtocolVersion69);
+    EXPECT_EQ(msg69->network_id, 80002U);
+    EXPECT_EQ(msg69->fork_id.fork_hash, (std::array<uint8_t, 4>{0x8b, 0x7e, 0x41, 0x75}));
+    EXPECT_EQ(msg69->fork_id.next_fork, 0U);
+    EXPECT_EQ(msg69->earliest_block, 0U);
+    EXPECT_EQ(msg69->latest_block, 36766058U);
 }
 
 
@@ -300,6 +402,8 @@ TEST(EthMessagesTest, NewBlockHashesRoundtrip) {
 
 TEST(EthMessagesTest, NewPooledTransactionHashesRoundtrip) {
     eth::NewPooledTransactionHashesMessage original;
+    original.types = {0x02, 0x02};
+    original.sizes = {128, 256};
     original.hashes.push_back(make_filled<eth::Hash256>(0xA0));
     original.hashes.push_back(make_filled<eth::Hash256>(0xB0));
 
@@ -310,9 +414,204 @@ TEST(EthMessagesTest, NewPooledTransactionHashesRoundtrip) {
     ASSERT_TRUE(decoded.has_value());
 
     const auto& result = decoded.value();
+    ASSERT_EQ(result.types.size(), original.types.size());
+    ASSERT_EQ(result.sizes.size(), original.sizes.size());
     ASSERT_EQ(result.hashes.size(), original.hashes.size());
+    EXPECT_EQ(result.types[0], original.types[0]);
+    EXPECT_EQ(result.types[1], original.types[1]);
+    EXPECT_EQ(result.sizes[0], original.sizes[0]);
+    EXPECT_EQ(result.sizes[1], original.sizes[1]);
     EXPECT_EQ(result.hashes[0], original.hashes[0]);
     EXPECT_EQ(result.hashes[1], original.hashes[1]);
+}
+
+TEST(EthMessagesTest, NewPooledTransactionHashesDecodesLegacyHashList) {
+    rlp::RlpEncoder encoder;
+    ASSERT_TRUE(encoder.BeginList());
+    const auto hash = make_filled<eth::Hash256>(0xC0);
+    ASSERT_TRUE(encoder.add(rlp::ByteView(hash.data(), hash.size())));
+    ASSERT_TRUE(encoder.EndList());
+    auto wire = encoder.GetBytes();
+    ASSERT_TRUE(wire.has_value());
+
+    auto decoded = eth::protocol::decode_new_pooled_tx_hashes(
+        rlp::ByteView(wire.value()->data(), wire.value()->size()));
+    ASSERT_TRUE(decoded.has_value());
+
+    EXPECT_TRUE(decoded.value().types.empty());
+    EXPECT_TRUE(decoded.value().sizes.empty());
+    ASSERT_EQ(decoded.value().hashes.size(), 1U);
+    EXPECT_EQ(decoded.value().hashes[0], hash);
+}
+
+TEST(EthMessagesTest, BlockRangeUpdateRoundtrip) {
+    eth::BlockRangeUpdateMessage original;
+    original.earliest_block = 10;
+    original.latest_block = 20;
+    original.latest_block_hash = make_filled<eth::Hash256>(0xD0);
+
+    auto encoded = eth::protocol::encode_block_range_update(original);
+    ASSERT_TRUE(encoded.has_value());
+
+    auto decoded = eth::protocol::decode_block_range_update(
+        rlp::ByteView(encoded.value().data(), encoded.value().size()));
+    ASSERT_TRUE(decoded.has_value());
+
+    EXPECT_EQ(decoded.value().earliest_block, original.earliest_block);
+    EXPECT_EQ(decoded.value().latest_block, original.latest_block);
+    EXPECT_EQ(decoded.value().latest_block_hash, original.latest_block_hash);
+}
+
+TEST(EthMessagesTest, UpgradeStatusRoundtrip) {
+    eth::UpgradeStatusMessage original;
+    original.disable_peer_tx_broadcast = true;
+
+    auto encoded = eth::protocol::encode_upgrade_status(original);
+    ASSERT_TRUE(encoded.has_value());
+
+    auto decoded = eth::protocol::decode_upgrade_status(
+        rlp::ByteView(encoded.value().data(), encoded.value().size()));
+    ASSERT_TRUE(decoded.has_value());
+
+    EXPECT_TRUE(decoded.value().disable_peer_tx_broadcast);
+}
+
+TEST(EthMessagesTest, DecodeGetReceiptsEth70Envelope) {
+    rlp::RlpEncoder encoder;
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.add(uint64_t{7}));
+    ASSERT_TRUE(encoder.add(uint64_t{3}));
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.EndList());
+    ASSERT_TRUE(encoder.EndList());
+    auto wire = encoder.GetBytes();
+    ASSERT_TRUE(wire.has_value());
+
+    const std::vector<eth::EthMessageSchema> schemas{
+        eth::EthMessageSchema{
+            "GetReceipts",
+            eth::protocol::kGetReceiptsMessageId,
+            std::nullopt,
+            {
+                eth::EthMessageFieldSchema{"request_id", eth::EthMessageFieldType::kUint64, {}, 0U},
+                eth::EthMessageFieldSchema{"first_block_receipt_index", eth::EthMessageFieldType::kUint64, {}, 1U},
+                eth::EthMessageFieldSchema{"block_hashes", eth::EthMessageFieldType::kHashList, {}, 2U},
+            }},
+    };
+
+    auto decoded = eth::protocol::decode_get_receipts(
+        rlp::ByteView(wire.value()->data(), wire.value()->size()),
+        schemas);
+    ASSERT_TRUE(decoded.has_value());
+    ASSERT_TRUE(decoded.value().request_id.has_value());
+    EXPECT_EQ(*decoded.value().request_id, 7U);
+    EXPECT_TRUE(decoded.value().block_hashes.empty());
+}
+
+TEST(EthMessagesTest, DecodeReceiptsEth70Envelope) {
+    rlp::RlpEncoder encoder;
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.add(uint64_t{9}));
+    ASSERT_TRUE(encoder.add(false));
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.EndList());
+    ASSERT_TRUE(encoder.EndList());
+    auto wire = encoder.GetBytes();
+    ASSERT_TRUE(wire.has_value());
+
+    const std::vector<eth::EthMessageSchema> schemas{
+        eth::EthMessageSchema{
+            "Receipts",
+            eth::protocol::kReceiptsMessageId,
+            std::nullopt,
+            {
+                eth::EthMessageFieldSchema{"request_id", eth::EthMessageFieldType::kUint64, {}, 0U},
+                eth::EthMessageFieldSchema{"last_block_incomplete", eth::EthMessageFieldType::kBool, {}, 1U},
+                eth::EthMessageFieldSchema{"receipts", eth::EthMessageFieldType::kReceipts, {}, 2U},
+            }},
+    };
+
+    auto decoded = eth::protocol::decode_receipts(
+        rlp::ByteView(wire.value()->data(), wire.value()->size()),
+        schemas);
+    ASSERT_TRUE(decoded.has_value());
+    ASSERT_TRUE(decoded.value().request_id.has_value());
+    EXPECT_EQ(*decoded.value().request_id, 9U);
+    EXPECT_TRUE(decoded.value().receipts.empty());
+}
+
+TEST(EthMessagesTest, BlockBodiesDecodeSkipsWithdrawalsAndSidecarsTail) {
+    rlp::RlpEncoder encoder;
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.add(uint64_t{11}));
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.EndList());
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.EndList());
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.EndList());
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.EndList());
+    ASSERT_TRUE(encoder.EndList());
+    ASSERT_TRUE(encoder.EndList());
+    ASSERT_TRUE(encoder.EndList());
+    auto wire = encoder.GetBytes();
+    ASSERT_TRUE(wire.has_value());
+
+    auto decoded = eth::protocol::decode_block_bodies(
+        rlp::ByteView(wire.value()->data(), wire.value()->size()));
+    ASSERT_TRUE(decoded.has_value());
+    ASSERT_TRUE(decoded.value().request_id.has_value());
+    EXPECT_EQ(*decoded.value().request_id, 11U);
+    ASSERT_EQ(decoded.value().bodies.size(), 1U);
+    EXPECT_TRUE(decoded.value().bodies[0].transactions.empty());
+    EXPECT_TRUE(decoded.value().bodies[0].ommers.empty());
+}
+
+TEST(EthMessagesTest, NewBlockDecodeSkipsBlockAndOuterSidecarsTail) {
+    eth::codec::BlockHeader header;
+    header.parent_hash = make_filled<eth::Hash256>(0x01);
+    header.ommers_hash = make_filled<eth::Hash256>(0x02);
+    header.beneficiary = make_filled<eth::Address>(0x03);
+    header.state_root = make_filled<eth::Hash256>(0x04);
+    header.transactions_root = make_filled<eth::Hash256>(0x05);
+    header.receipts_root = make_filled<eth::Hash256>(0x06);
+    header.logs_bloom = make_filled<eth::Bloom>(0x07);
+    header.number = 123;
+    header.gas_limit = 30'000'000;
+    header.timestamp = 42;
+    header.mix_hash = make_filled<eth::Hash256>(0x08);
+    header.nonce = make_filled<std::array<uint8_t, 8>>(0x09);
+
+    auto encoded_header = eth::codec::encode_block_header(header);
+    ASSERT_TRUE(encoded_header.has_value());
+
+    rlp::RlpEncoder encoder;
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.AddRaw(rlp::ByteView(encoded_header.value().data(), encoded_header.value().size())));
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.EndList());
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.EndList());
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.EndList());
+    ASSERT_TRUE(encoder.EndList());
+    ASSERT_TRUE(encoder.add(intx::uint256{0}));
+    ASSERT_TRUE(encoder.BeginList());
+    ASSERT_TRUE(encoder.EndList());
+    ASSERT_TRUE(encoder.EndList());
+    auto wire = encoder.GetBytes();
+    ASSERT_TRUE(wire.has_value());
+
+    auto decoded = eth::protocol::decode_new_block(
+        rlp::ByteView(wire.value()->data(), wire.value()->size()));
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(decoded.value().header.number, 123U);
+    EXPECT_TRUE(decoded.value().transactions.empty());
+    EXPECT_TRUE(decoded.value().ommers.empty());
 }
 
 TEST(EthMessagesTest, GetBlockHeadersRoundtripByHash) {

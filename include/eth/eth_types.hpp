@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <variant>
 #include <vector>
 #include <rlp/intx.hpp>
@@ -69,6 +70,49 @@ using StatusMessage = std::variant<StatusMessage68, StatusMessage69>;
 /// @brief Extract fields common to both ETH/68 and ETH/69 Status messages.
 [[nodiscard]] CommonStatusFields get_common_fields(const StatusMessage& msg) noexcept;
 
+enum class EthMessageFieldType
+{
+    kUint8,
+    kUint16,
+    kUint32,
+    kUint64,
+    kUint256,
+    kHash32,
+    kHash4,
+    kForkId,
+    kBytes,
+    kBool,
+    kHashOrNumber,
+    kHashList,
+    kUintList,
+    kUint32List,
+    kBytesList,
+    kBlockHashEntries,
+    kGetBlockHeadersQuery,
+    kBlockHeaders,
+    kBlockBodies,
+    kBlock,
+    kTransactions,
+    kReceipts,
+    kPooledTransactions
+};
+
+struct EthMessageFieldSchema
+{
+    std::string         name;
+    EthMessageFieldType type = EthMessageFieldType::kBytes;
+    std::optional<size_t> size;
+    std::optional<size_t> offset;
+};
+
+struct EthMessageSchema
+{
+    std::string                        name;
+    uint8_t                            message_id = 0;
+    std::optional<uint8_t>             protocol_version;
+    std::vector<EthMessageFieldSchema> fields;
+};
+
 /// @brief Errors returned by validate_status(), mirroring go-ethereum's
 ///        readStatus error values from eth/protocols/eth/handshake.go.
 enum class StatusValidationError {
@@ -88,7 +132,19 @@ struct NewBlockHashesMessage {
 };
 
 struct NewPooledTransactionHashesMessage {
+    std::vector<uint8_t> types;
+    std::vector<uint32_t> sizes;
     std::vector<Hash256> hashes;
+};
+
+struct BlockRangeUpdateMessage {
+    uint64_t earliest_block = 0;
+    uint64_t latest_block = 0;
+    Hash256 latest_block_hash{};
+};
+
+struct UpgradeStatusMessage {
+    bool disable_peer_tx_broadcast = false;
 };
 
 struct GetBlockHeadersMessage {

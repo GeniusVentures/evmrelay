@@ -37,6 +37,10 @@ on:
         type: boolean
         default: true
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   prepare-matrix:
     runs-on: ubuntu-latest
@@ -63,14 +67,14 @@ jobs:
                   "runner": ["self-hosted", "X64", "Linux"],
                   "abi": "x86_64",
                   "build-type": "Release",
-                  "container": "ghcr.io/geniusventures/debian-bullseye:latest",
-              },
-              {
-                  "target": "Linux",
-                  "runner": "sg-arm-linux",
-                  "abi": "aarch64",
-                  "build-type": "Release",
-                  "container": "ghcr.io/geniusventures/debian-bullseye:latest",
+              "container": "ghcr.io/geniusventures/debian-bullseye:latest",  # TODO: pin by digest (@sha256:...) for supply-chain integrity
+          },
+          {
+              "target": "Linux",
+              "runner": "sg-arm-linux",
+              "abi": "aarch64",
+              "build-type": "Release",
+              "container": "ghcr.io/geniusventures/debian-bullseye:latest",  # TODO: pin by digest (@sha256:...) for supply-chain integrity
               },
               {
                   "target": "Windows",
@@ -118,9 +122,11 @@ jobs:
 
   build:
     needs: prepare-matrix
+    permissions:
+      contents: read
+      packages: read
     env:
       GRPC_BUILD_ENABLE_CCACHE: "ON"
-      GH_TOKEN: ${{ secrets.GNUS_TOKEN_1 }}
       REPO_NAME: ${{ github.event.repository.name }}
 
     runs-on: ${{ matrix.runner }}
@@ -201,7 +207,7 @@ jobs:
         with:
           path: "${{ env.REPO_NAME }}"
           submodules: "recursive"
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Set build directory
         shell: bash
@@ -252,6 +258,8 @@ jobs:
       - name: Download thirdparty release
         working-directory: ${{ github.workspace }}
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GNUS_TOKEN_1 }}
         run: |
           mkdir thirdparty && cd thirdparty
           if [ "$IS_TAG" == "true" ]; then
@@ -272,6 +280,8 @@ jobs:
       - name: Download zkLLVM release
         working-directory: ${{ github.workspace }}
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GNUS_TOKEN_1 }}
         run: |
           mkdir zkLLVM && cd zkLLVM
 

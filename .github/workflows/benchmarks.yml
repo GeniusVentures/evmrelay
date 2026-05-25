@@ -4,8 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  packages: read
+  contents: read
 
 jobs:
   benchmark:

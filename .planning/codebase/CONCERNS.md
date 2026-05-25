@@ -23,7 +23,16 @@
 
 - **Risk:** The release CI workflow (`cmake-multi-platform.yml`) sets `GH_TOKEN: ${{ secrets.GNUS_TOKEN_1 }}` at job scope (exposed to all steps), uses self-hosted runners with `IPC_LOCK` capability and broad destructive cleanup, pins container images by `:latest` tag not digest, and pins third-party actions by tag rather than commit SHA.
 - **Files:** `.github/workflows/cmake-multi-platform.yml` (lines 66, 73, 123, 132), `.github/workflows/sanitizers.yml`
-- **Recommendations:** Move privileged tokens to step-level scope, pin container images by digest, pin third-party actions by commit SHA, add explicit `permissions:` blocks, require review for workflow changes. See `AgentDocs/EVMRELAY_SECURITY_HARDENING_PLAN.md` Phase 7 for the full hardening list.
+- **Status (2026-05-25): PARTIALLY FIXED**
+  - ✅ `GH_TOKEN` moved from job scope to step-level (`env:` only on "Download thirdparty release" and "Download zkLLVM release" steps)
+  - ✅ Explicit `permissions: contents: read, packages: read` added at top-level and job-level
+  - ✅ `permissions:` blocks added to all workflows (`sanitizers.yml`, `benchmarks.yml`, `fuzz.yml`, `valgrind.yml`)
+  - ✅ `persist-credentials: false` set on all `actions/checkout` steps
+  - ✅ `actions/checkout` and `actions/upload-artifact` already pinned by commit SHA
+  - ⚠️ Container images still `:latest` — TODO to pin by digest (`@sha256:...`) when digest is known
+  - ⚠️ `IPC_LOCK` capability still required for Android builds
+  - ⚠️ Self-hosted runner cleanup (`sudo rm -rf`) remains operationally necessary
+  - See `AgentDocs/EVMRELAY_SECURITY_HARDENING_PLAN.md` Phase 7 for the full hardening list.
 
 ### No Durable Relay State Machine
 

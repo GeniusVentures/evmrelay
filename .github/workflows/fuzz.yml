@@ -10,8 +10,7 @@ on:
         type: string
 
 permissions:
-  contents: write
-  packages: read
+  contents: read
 
 jobs:
   fuzz-short:
@@ -28,13 +27,13 @@ jobs:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
         submodules: recursive
-        persist-credentials: true
-    
+        persist-credentials: false
+
     - name: Install Clang
       run: |
         sudo apt-get update
         sudo apt-get install -y clang cmake ninja-build curl
-    
+
     - name: Configure CMake with Fuzzing
       run: |
         cmake -B build/Linux/fuzz \
@@ -45,15 +44,15 @@ jobs:
           -DENABLE_FUZZING=ON \
           -DENABLE_ASAN=ON \
           -S build/Linux
-    
+
     - name: Build fuzz targets
       run: cmake --build build/Linux/fuzz --target ${{ matrix.target }}
-    
+
     - name: Create corpus directories
       run: |
         mkdir -p build/Linux/fuzz/corpus_${{ matrix.target }}
         mkdir -p build/Linux/fuzz/crashes_${{ matrix.target }}
-    
+
     - name: Run fuzzer (short duration)
       working-directory: build/Linux/fuzz
       timeout-minutes: 10
@@ -98,13 +97,13 @@ jobs:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
         submodules: recursive
-        persist-credentials: true
-    
+        persist-credentials: false
+
     - name: Install Clang
       run: |
         sudo apt-get update
         sudo apt-get install -y clang cmake ninja-build curl
-    
+
     - name: Configure CMake with Fuzzing
       run: |
         cmake -B build/Linux/fuzz \
@@ -115,10 +114,10 @@ jobs:
           -DENABLE_FUZZING=ON \
           -DENABLE_ASAN=ON \
           -S build/Linux
-    
+
     - name: Build fuzz targets
       run: cmake --build build/Linux/fuzz --target ${{ matrix.target }}
-    
+
     - name: Restore corpus from cache
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
       with:

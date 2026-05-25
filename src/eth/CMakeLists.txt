@@ -17,6 +17,9 @@ add_library(eth OBJECT
         ${CMAKE_CURRENT_LIST_DIR}/finality_policy.cpp
         ${CMAKE_CURRENT_LIST_DIR}/json_rpc.cpp
         ${CMAKE_CURRENT_LIST_DIR}/rpc_receipt_source.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/rpc_manager_config.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/rpc_manager.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/rpc_http_transport.cpp
         ${CMAKE_CURRENT_LIST_DIR}/eth_watch_runner.cpp
 )
 
@@ -28,6 +31,8 @@ target_include_directories(eth PUBLIC
 
 target_link_libraries(eth PUBLIC
         libsecp256k1::secp256k1
+        OpenSSL::SSL
+        OpenSSL::Crypto
         spdlog::spdlog
 )
 

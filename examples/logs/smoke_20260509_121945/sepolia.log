@@ -1,0 +1,52 @@
+[2026-05-09 12:19:45][info][eth_watch] Loaded 0 local bootstrap peers for chain 'sepolia' from /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/examples/../rlp_enodes/output/chain_enodes.json
+Running discv4 peer discovery...
+[2026-05-09 12:19:45][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:19:46][warning][eth_watch] ETH Status: network_id mismatch (peer=137, ours=11155111)
+[2026-05-09 12:19:46][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:19:46][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:19:46][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:19:46][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:19:46][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:19:46][warning][eth_watch] ETH Status: network_id mismatch (peer=137, ours=11155111)
+[2026-05-09 12:19:46][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 12:19:46][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 12:19:46][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 12:19:46][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 12:19:46][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:19:46][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:19:46][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:19:46][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:19:46][warning][eth_watch] ETH Status: network_id mismatch (peer=9745, ours=11155111)
+[2026-05-09 12:19:46][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 12:19:46][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 12:19:46][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 12:19:46][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:19:46][warning][eth_watch] ETH Status: network_id mismatch (peer=137, ours=11155111)
+[2026-05-09 12:19:53][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:19:53][warning][eth_watch] ETH Status: network_id mismatch (peer=137, ours=11155111)
+[2026-05-09 12:19:53][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:19:53][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 12:19:53][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:19:53][warning][eth_watch] ETH Status: network_id mismatch (peer=9745, ours=11155111)
+[2026-05-09 12:19:59][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:19:59][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 12:20:00][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:20:00][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 12:20:00][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:20:00][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 12:20:17][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:20:17][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:20:18][warning][eth_watch] ETH Status: network_id mismatch (peer=137, ours=11155111)
+[2026-05-09 12:20:19][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:20:20][warning][eth_watch] ETH Status: network_id mismatch (peer=1, ours=11155111)
+[2026-05-09 12:20:23][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:20:23][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 12:20:25][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:20:25][warning][eth_watch] ETH Status: network_id mismatch (peer=6666665, ours=11155111)
+[2026-05-09 12:20:25][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:20:25][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:20:26][warning][eth_watch] ETH Status: network_id mismatch (peer=6666665, ours=11155111)
+[2026-05-09 12:20:26][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 12:20:26][warning][eth_watch] ETH Status: network_id mismatch (peer=12082025, ours=11155111)
+[2026-05-09 12:20:26][warning][eth_watch] ETH Status: network_id mismatch (peer=9745, ours=11155111)
+libc++abi: terminating due to uncaught exception of type boost::coroutines::detail::forced_unwind

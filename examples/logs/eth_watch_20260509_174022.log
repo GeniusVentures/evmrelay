@@ -1,0 +1,14 @@
+Running discv4 peer discovery...
+discv4 error: Send error: No route to host
+discv4 error: Send error: Host is down
+discv4 error: Send error: Host is down
+discv4 error: Send error: Host is down
+discv4 error: Send error: Host is down
+discv4 error: Send error: Host is down
+discv4 error: Send error: Host is down
+discv4 error: Send error: Host is down
+discv4 error: Send error: Host is down
+discv4 error: Send error: Host is down
+discv4 error: Send error: Host is down
+discv4 error: Send error: Host is down
+libc++abi: terminating due to uncaught exception of type boost::coroutines::detail::forced_unwind

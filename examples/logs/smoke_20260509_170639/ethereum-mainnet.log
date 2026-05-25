@@ -1,0 +1,37 @@
+[2026-05-09 17:06:40][info][eth_watch] Remote bootstrap refresh for chain 'ethereum-mainnet' from https://enodes.gnus.ai/chain_enodes.json.gz => unchanged (/Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/examples/../build/OSX/Debug/examples/eth_watch/chain_enodes.json)
+[2026-05-09 17:06:40][info][eth_watch] Loaded 41 local bootstrap peers for chain 'ethereum-mainnet' from /Users/Shared/SSDevelopment/Development/GeniusVentures/GeniusNetwork/SuperGenius/evmrelay/examples/../build/OSX/Debug/examples/eth_watch/chain_enodes.json
+Running discv4 peer discovery...
+[2026-05-09 17:06:40][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x614577036F0a024DBC1C88BA616b394DD65d105a
+[2026-05-09 17:06:40][info][eth_watch] ETH Status: network_id=1 protocol=68 latest_block=0
+[2026-05-09 17:06:40][info][eth_watch] Connected. Watching for events...
+[2026-05-09 17:06:40][info][eth_watch] Watch stats: eth_messages=0 new_block_hashes=0 new_blocks=0 receipts_messages=0 decode_failures=0 receipts_requested=0 receipts_processed=0 logs_seen=0 matched_logs=0 discarded_logs=0 subscriptions=1
+[2026-05-09 17:06:40][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x614577036F0a024DBC1C88BA616b394DD65d105a
+[2026-05-09 17:06:40][info][eth_watch] ETH Status: network_id=1 protocol=68 latest_block=0
+[2026-05-09 17:06:40][info][eth_watch] Connected. Watching for events...
+[2026-05-09 17:06:40][info][eth_watch] Watch stats: eth_messages=0 new_block_hashes=0 new_blocks=0 receipts_messages=0 decode_failures=0 receipts_requested=0 receipts_processed=0 logs_seen=0 matched_logs=0 discarded_logs=0 subscriptions=1
+[2026-05-09 17:06:40][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x614577036F0a024DBC1C88BA616b394DD65d105a
+[2026-05-09 17:06:40][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x614577036F0a024DBC1C88BA616b394DD65d105a
+[2026-05-09 17:06:40][info][eth_watch] ETH Status: network_id=1 protocol=68 latest_block=0
+[2026-05-09 17:06:40][info][eth_watch] Connected. Watching for events...
+[2026-05-09 17:06:40][info][eth_watch] Watch stats: eth_messages=0 new_block_hashes=0 new_blocks=0 receipts_messages=0 decode_failures=0 receipts_requested=0 receipts_processed=0 logs_seen=0 matched_logs=0 discarded_logs=0 subscriptions=1
+[2026-05-09 17:06:41][info][eth_watch] ETH Status: network_id=1 protocol=68 latest_block=0
+[2026-05-09 17:06:41][info][eth_watch] Connected. Watching for events...
+[2026-05-09 17:06:41][info][eth_watch] Watch stats: eth_messages=0 new_block_hashes=0 new_blocks=0 receipts_messages=0 decode_failures=0 receipts_requested=0 receipts_processed=0 logs_seen=0 matched_logs=0 discarded_logs=0 subscriptions=1
+[2026-05-09 17:06:41][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x614577036F0a024DBC1C88BA616b394DD65d105a
+[2026-05-09 17:06:41][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x614577036F0a024DBC1C88BA616b394DD65d105a
+[2026-05-09 17:06:41][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x614577036F0a024DBC1C88BA616b394DD65d105a
+[2026-05-09 17:06:41][info][eth_watch] ETH Status: network_id=1 protocol=68 latest_block=0
+[2026-05-09 17:06:41][info][eth_watch] Connected. Watching for events...
+[2026-05-09 17:06:41][info][eth_watch] Watch stats: eth_messages=0 new_block_hashes=0 new_blocks=0 receipts_messages=0 decode_failures=0 receipts_requested=0 receipts_processed=0 logs_seen=0 matched_logs=0 discarded_logs=0 subscriptions=1
+[2026-05-09 17:06:41][info][eth_watch] ETH Status: network_id=1 protocol=68 latest_block=0
+[2026-05-09 17:06:41][info][eth_watch] Connected. Watching for events...
+[2026-05-09 17:06:41][info][eth_watch] Watch stats: eth_messages=0 new_block_hashes=0 new_blocks=0 receipts_messages=0 decode_failures=0 receipts_requested=0 receipts_processed=0 logs_seen=0 matched_logs=0 discarded_logs=0 subscriptions=1
+[2026-05-09 17:06:41][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x614577036F0a024DBC1C88BA616b394DD65d105a
+[2026-05-09 17:06:41][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x614577036F0a024DBC1C88BA616b394DD65d105a
+[2026-05-09 17:06:41][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=1)
+[2026-05-09 17:06:41][warning][eth_watch] ETH Status: network_id mismatch (peer=9745, ours=1)
+[2026-05-09 17:06:41][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x614577036F0a024DBC1C88BA616b394DD65d105a
+[2026-05-09 17:06:42][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=1)
+[2026-05-09 17:06:42][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x614577036F0a024DBC1C88BA616b394DD65d105a
+[2026-05-09 17:06:42][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=1)
+libc++abi: terminating due to uncaught exception of type boost::coroutines::detail::forced_unwind

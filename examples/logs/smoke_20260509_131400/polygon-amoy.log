@@ -1,0 +1,4 @@
+Running discv4 peer discovery...
+[2026-05-09 13:15:02][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0xeC20bDf2f9f77dc37Ee8313f719A3cbCFA0CD1eB
+[2026-05-09 13:15:02][warning][eth_watch] ETH Status: network_id mismatch (peer=137, ours=80002)
+libc++abi: terminating due to uncaught exception of type boost::coroutines::detail::forced_unwind

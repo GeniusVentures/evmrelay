@@ -1,0 +1,61 @@
+Running discv4 peer discovery...
+[2026-05-09 13:14:21][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:21][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:21][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:21][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:21][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 13:14:21][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 13:14:21][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 13:14:21][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 13:14:22][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:22][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 13:14:23][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:23][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 13:14:23][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:24][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 13:14:26][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:26][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 13:14:26][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:26][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 13:14:29][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:29][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 13:14:34][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:34][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 13:14:35][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:35][warning][eth_watch] ETH Status: network_id mismatch (peer=1, ours=11155111)
+[2026-05-09 13:14:35][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:36][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 13:14:37][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:37][warning][eth_watch] ETH Status: network_id mismatch (peer=6666665, ours=11155111)
+[2026-05-09 13:14:37][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:37][warning][eth_watch] ETH Status: network_id mismatch (peer=9745, ours=11155111)
+[2026-05-09 13:14:37][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:38][warning][eth_watch] ETH Status: network_id mismatch (peer=6666665, ours=11155111)
+[2026-05-09 13:14:38][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:38][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 13:14:38][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:38][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:38][warning][eth_watch] ETH Status: network_id mismatch (peer=6666665, ours=11155111)
+[2026-05-09 13:14:39][warning][eth_watch] ETH Status: network_id mismatch (peer=6666665, ours=11155111)
+[2026-05-09 13:14:39][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:39][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:39][warning][eth_watch] ETH Status: network_id mismatch (peer=6666665, ours=11155111)
+[2026-05-09 13:14:39][warning][eth_watch] ETH Status: network_id mismatch (peer=9745, ours=11155111)
+[2026-05-09 13:14:39][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:39][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:40][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:40][warning][eth_watch] ETH Status: network_id mismatch (peer=9745, ours=11155111)
+[2026-05-09 13:14:40][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:40][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 13:14:40][warning][eth_watch] ETH Status: network_id mismatch (peer=6666665, ours=11155111)
+[2026-05-09 13:14:40][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:40][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 13:14:40][warning][eth_watch] ETH Status: network_id mismatch (peer=369, ours=11155111)
+[2026-05-09 13:14:40][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:40][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:40][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+[2026-05-09 13:14:41][warning][eth_watch] ETH Status: network_id mismatch (peer=6666665, ours=11155111)
+[2026-05-09 13:14:41][warning][eth_watch] ETH Status: network_id mismatch (peer=6666665, ours=11155111)
+[2026-05-09 13:14:41][warning][eth_watch] ETH Status: network_id mismatch (peer=6666665, ours=11155111)
+[2026-05-09 13:14:41][info][eth_watch] Watching: Transfer(address,address,uint256) on contract 0x9af8050220D8C355CA3c6dC00a78B474cd3e3c70
+libc++abi: terminating due to uncaught exception of type boost::coroutines::detail::forced_unwind

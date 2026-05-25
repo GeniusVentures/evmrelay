@@ -2,92 +2,130 @@
 // SPDX-License-Identifier: MIT
 
 #include <eth/json_rpc.hpp>
+#include <base/json_utility.hpp>
 #include <base/parse_utility.hpp>
 
 namespace eth::rpc {
 
 namespace {
 
-[[nodiscard]] std::optional<uint64_t> parse_quantity_value(const boost::json::value& value)
+namespace json = rlp::base::json;
+
+[[nodiscard]] std::optional<uint64_t> parse_quantity_value(std::string_view value)
 {
-    const auto* string_value = value.if_string();
-    if (string_value == nullptr)
-    {
-        return std::nullopt;
-    }
-    return rlp::base::parse::uint64_hex(std::string_view(string_value->data(), string_value->size()));
+    return rlp::base::parse::uint64_hex(value);
 }
 
 template <size_t N>
-[[nodiscard]] std::optional<std::array<uint8_t, N>> parse_fixed_hex_value(const boost::json::value& value)
+[[nodiscard]] std::optional<std::array<uint8_t, N>> parse_fixed_hex_value(std::string_view value)
 {
     std::array<uint8_t, N> out{};
-    const auto* string_value = value.if_string();
-    if (string_value == nullptr)
-    {
-        return std::nullopt;
-    }
-    if (!rlp::base::parse::hex_array(std::string_view(string_value->data(), string_value->size()), out))
+    if (!rlp::base::parse::hex_array(value, out))
     {
         return std::nullopt;
     }
     return out;
 }
 
-[[nodiscard]] std::optional<codec::ByteBuffer> parse_bytes_value(const boost::json::value& value)
+[[nodiscard]] std::optional<codec::ByteBuffer> parse_bytes_value(std::string_view value)
 {
-    const auto* string_value = value.if_string();
-    if (string_value == nullptr)
+    return rlp::base::parse::hex_bytes(value);
+}
+
+[[nodiscard]] const json::JsonSchemaObject& block_result_schema()
+{
+    static const json::JsonSchemaObject kSchema{{
+        {"number", json::JsonFieldType::kString, true, std::nullopt, nullptr, nullptr}
+    }};
+    return kSchema;
+}
+
+[[nodiscard]] const json::JsonSchemaArray& log_topics_schema()
+{
+    static const json::JsonSchemaArray kSchema{json::JsonFieldType::kString, nullptr, nullptr};
+    return kSchema;
+}
+
+[[nodiscard]] const json::JsonSchemaObject& rpc_log_schema()
+{
+    static const json::JsonSchemaObject kSchema{{
+        {"address", json::JsonFieldType::kString, true, std::nullopt, nullptr, nullptr},
+        {"topics", json::JsonFieldType::kArray, true, std::nullopt, nullptr, &log_topics_schema()},
+        {"data", json::JsonFieldType::kString, true, std::nullopt, nullptr, nullptr},
+        {"blockNumber", json::JsonFieldType::kString, true, std::nullopt, nullptr, nullptr},
+        {"blockHash", json::JsonFieldType::kString, true, std::nullopt, nullptr, nullptr},
+        {"transactionHash", json::JsonFieldType::kString, true, std::nullopt, nullptr, nullptr},
+        {"logIndex", json::JsonFieldType::kString, true, std::nullopt, nullptr, nullptr}
+    }};
+    return kSchema;
+}
+
+[[nodiscard]] const json::JsonSchemaArray& logs_schema()
+{
+    static const json::JsonSchemaArray kSchema{json::JsonFieldType::kObject, &rpc_log_schema(), nullptr};
+    return kSchema;
+}
+
+[[nodiscard]] const json::JsonSchemaObject& logs_response_schema()
+{
+    static const json::JsonSchemaObject kSchema{{
+        {"result", json::JsonFieldType::kArray, true, std::nullopt, nullptr, &logs_schema()}
+    }};
+    return kSchema;
+}
+
+[[nodiscard]] const json::JsonSchemaObject& block_response_schema()
+{
+    static const json::JsonSchemaObject kSchema{{
+        {"result", json::JsonFieldType::kObject, true, std::nullopt, &block_result_schema(), nullptr}
+    }};
+    return kSchema;
+}
+
+[[nodiscard]] const json::JsonSchemaObject& receipt_result_schema()
+{
+    static const json::JsonSchemaObject kSchema{{
+        {"status", json::JsonFieldType::kString, true, std::nullopt, nullptr, nullptr},
+        {"blockNumber", json::JsonFieldType::kString, true, std::nullopt, nullptr, nullptr},
+        {"blockHash", json::JsonFieldType::kString, true, std::nullopt, nullptr, nullptr},
+        {"transactionHash", json::JsonFieldType::kString, true, std::nullopt, nullptr, nullptr},
+        {"logs", json::JsonFieldType::kArray, true, std::nullopt, nullptr, &logs_schema()}
+    }};
+    return kSchema;
+}
+
+[[nodiscard]] const json::JsonSchemaObject& receipt_response_schema()
+{
+    static const json::JsonSchemaObject kSchema{{
+        {"result", json::JsonFieldType::kObject, true, std::nullopt, &receipt_result_schema(), nullptr}
+    }};
+    return kSchema;
+}
+
+[[nodiscard]] std::optional<RpcLog> parse_rpc_log(const json::JsonParsedObject& object)
+{
+    const auto address_value = json::get_parsed_string(object, "address");
+    const auto topics_value = json::get_parsed_array(object, "topics");
+    const auto data_value = json::get_parsed_string(object, "data");
+    const auto block_number_value = json::get_parsed_string(object, "blockNumber");
+    const auto block_hash_value = json::get_parsed_string(object, "blockHash");
+    const auto tx_hash_value = json::get_parsed_string(object, "transactionHash");
+    const auto log_index_value = json::get_parsed_string(object, "logIndex");
+    if (!address_value || !topics_value || !data_value || !block_number_value ||
+        !block_hash_value || !tx_hash_value || !log_index_value)
     {
         return std::nullopt;
     }
 
-    return rlp::base::parse::hex_bytes(
-        std::string_view(string_value->data(), string_value->size()));
-}
-
-[[nodiscard]] const boost::json::object* response_result_object(const boost::json::value& parsed)
-{
-    const auto* root = parsed.if_object();
-    if (root == nullptr)
-    {
-        return nullptr;
-    }
-
-    const auto* result = root->if_contains("result");
-    if (result == nullptr)
-    {
-        return nullptr;
-    }
-    return result->if_object();
-}
-
-[[nodiscard]] std::optional<RpcLog> parse_rpc_log(const boost::json::object& object)
-{
-    const auto* address_value = object.if_contains("address");
-    const auto* topics_value = object.if_contains("topics");
-    const auto* data_value = object.if_contains("data");
-    const auto* block_number_value = object.if_contains("blockNumber");
-    const auto* block_hash_value = object.if_contains("blockHash");
-    const auto* tx_hash_value = object.if_contains("transactionHash");
-    const auto* log_index_value = object.if_contains("logIndex");
-    if (address_value == nullptr || topics_value == nullptr || data_value == nullptr
-        || block_number_value == nullptr || block_hash_value == nullptr
-        || tx_hash_value == nullptr || log_index_value == nullptr)
-    {
-        return std::nullopt;
-    }
-
-    const auto address = parse_fixed_hex_value<20>(*address_value);
-    const auto data = parse_bytes_value(*data_value);
-    const auto block_number = parse_quantity_value(*block_number_value);
-    const auto block_hash = parse_fixed_hex_value<32>(*block_hash_value);
-    const auto tx_hash = parse_fixed_hex_value<32>(*tx_hash_value);
-    const auto log_index = parse_quantity_value(*log_index_value);
-    const auto* topics_array = topics_value->if_array();
+    const auto address = parse_fixed_hex_value<20>(address_value.value());
+    const auto data = parse_bytes_value(data_value.value());
+    const auto block_number = parse_quantity_value(block_number_value.value());
+    const auto block_hash = parse_fixed_hex_value<32>(block_hash_value.value());
+    const auto tx_hash = parse_fixed_hex_value<32>(tx_hash_value.value());
+    const auto log_index = parse_quantity_value(log_index_value.value());
     if (!address.has_value() || !data.has_value() || !block_number.has_value()
         || !block_hash.has_value() || !tx_hash.has_value() || !log_index.has_value()
-        || topics_array == nullptr || *log_index > UINT32_MAX)
+        || *log_index > UINT32_MAX)
     {
         return std::nullopt;
     }
@@ -100,26 +138,20 @@ template <size_t N>
     parsed.tx_hash = *tx_hash;
     parsed.log_index = static_cast<uint32_t>(*log_index);
 
-    parsed.log.topics.reserve(topics_array->size());
-    for (const auto& topic_value : *topics_array)
+    parsed.log.topics.reserve(topics_value.value()->values.size());
+    for (const auto& topic_value : topics_value.value()->values)
     {
-        auto topic = parse_fixed_hex_value<32>(topic_value);
+        const auto* topic_string = std::get_if<std::string>(&topic_value.value);
+        if (topic_string == nullptr)
+        {
+            return std::nullopt;
+        }
+        auto topic = parse_fixed_hex_value<32>(*topic_string);
         if (!topic.has_value())
         {
             return std::nullopt;
         }
         parsed.log.topics.push_back(*topic);
-    }
-    return parsed;
-}
-
-[[nodiscard]] std::optional<boost::json::value> parse_json(std::string_view json_text)
-{
-    boost::system::error_code ec;
-    auto parsed = boost::json::parse(json_text, ec);
-    if (ec)
-    {
-        return std::nullopt;
     }
     return parsed;
 }
@@ -213,62 +245,49 @@ boost::json::object make_get_transaction_receipt_request(
 
 std::optional<uint64_t> parse_block_number_response(std::string_view json_text)
 {
-    const auto parsed = parse_json(json_text);
-    if (!parsed.has_value())
+    const auto parsed = json::parse_schema_object(json_text, block_response_schema());
+    if (!parsed)
     {
         return std::nullopt;
     }
 
-    const auto* result = response_result_object(*parsed);
-    if (result == nullptr)
+    const auto result = json::get_parsed_object(parsed.value(), "result");
+    if (!result)
     {
         return std::nullopt;
     }
-
-    const auto* number = result->if_contains("number");
-    if (number == nullptr)
+    const auto number = json::get_parsed_string(*result.value(), "number");
+    if (!number)
     {
         return std::nullopt;
     }
-    return parse_quantity_value(*number);
+    return parse_quantity_value(number.value());
 }
 
 std::optional<std::vector<RpcLog>> parse_get_logs_response(std::string_view json_text)
 {
-    const auto parsed = parse_json(json_text);
-    if (!parsed.has_value())
+    const auto parsed = json::parse_schema_object(json_text, logs_response_schema());
+    if (!parsed)
     {
         return std::nullopt;
     }
 
-    const auto* root = parsed->if_object();
-    if (root == nullptr)
-    {
-        return std::nullopt;
-    }
-
-    const auto* result = root->if_contains("result");
-    if (result == nullptr)
-    {
-        return std::nullopt;
-    }
-
-    const auto* logs = result->if_array();
-    if (logs == nullptr)
+    const auto logs = json::get_parsed_array(parsed.value(), "result");
+    if (!logs)
     {
         return std::nullopt;
     }
 
     std::vector<RpcLog> parsed_logs;
-    parsed_logs.reserve(logs->size());
-    for (const auto& log_value : *logs)
+    parsed_logs.reserve(logs.value()->values.size());
+    for (const auto& log_value : logs.value()->values)
     {
-        const auto* log_object = log_value.if_object();
-        if (log_object == nullptr)
+        const auto* log_object = std::get_if<json::JsonParsedObjectPtr>(&log_value.value);
+        if (log_object == nullptr || *log_object == nullptr)
         {
             return std::nullopt;
         }
-        auto log = parse_rpc_log(*log_object);
+        auto log = parse_rpc_log(**log_object);
         if (!log.has_value())
         {
             return std::nullopt;
@@ -280,36 +299,34 @@ std::optional<std::vector<RpcLog>> parse_get_logs_response(std::string_view json
 
 std::optional<ReceiptResult> parse_transaction_receipt_response(std::string_view json_text)
 {
-    const auto parsed = parse_json(json_text);
-    if (!parsed.has_value())
+    const auto parsed = json::parse_schema_object(json_text, receipt_response_schema());
+    if (!parsed)
     {
         return std::nullopt;
     }
 
-    const auto* receipt_object = response_result_object(*parsed);
-    if (receipt_object == nullptr)
+    const auto receipt_object = json::get_parsed_object(parsed.value(), "result");
+    if (!receipt_object)
     {
         return std::nullopt;
     }
 
-    const auto* status_value = receipt_object->if_contains("status");
-    const auto* block_number_value = receipt_object->if_contains("blockNumber");
-    const auto* block_hash_value = receipt_object->if_contains("blockHash");
-    const auto* tx_hash_value = receipt_object->if_contains("transactionHash");
-    const auto* logs_value = receipt_object->if_contains("logs");
-    if (status_value == nullptr || block_number_value == nullptr || block_hash_value == nullptr
-        || tx_hash_value == nullptr || logs_value == nullptr)
+    const auto status_value = json::get_parsed_string(*receipt_object.value(), "status");
+    const auto block_number_value = json::get_parsed_string(*receipt_object.value(), "blockNumber");
+    const auto block_hash_value = json::get_parsed_string(*receipt_object.value(), "blockHash");
+    const auto tx_hash_value = json::get_parsed_string(*receipt_object.value(), "transactionHash");
+    const auto logs = json::get_parsed_array(*receipt_object.value(), "logs");
+    if (!status_value || !block_number_value || !block_hash_value || !tx_hash_value || !logs)
     {
         return std::nullopt;
     }
 
-    const auto status = parse_quantity_value(*status_value);
-    const auto block_number = parse_quantity_value(*block_number_value);
-    const auto block_hash = parse_fixed_hex_value<32>(*block_hash_value);
-    const auto tx_hash = parse_fixed_hex_value<32>(*tx_hash_value);
-    const auto* logs = logs_value->if_array();
+    const auto status = parse_quantity_value(status_value.value());
+    const auto block_number = parse_quantity_value(block_number_value.value());
+    const auto block_hash = parse_fixed_hex_value<32>(block_hash_value.value());
+    const auto tx_hash = parse_fixed_hex_value<32>(tx_hash_value.value());
     if (!status.has_value() || !block_number.has_value() || !block_hash.has_value()
-        || !tx_hash.has_value() || logs == nullptr)
+        || !tx_hash.has_value())
     {
         return std::nullopt;
     }
@@ -319,17 +336,17 @@ std::optional<ReceiptResult> parse_transaction_receipt_response(std::string_view
     result.block_number = *block_number;
     result.block_hash = *block_hash;
     result.tx_hash = *tx_hash;
-    result.receipt.logs.reserve(logs->size());
-    result.log_indices.reserve(logs->size());
+    result.receipt.logs.reserve(logs.value()->values.size());
+    result.log_indices.reserve(logs.value()->values.size());
 
-    for (const auto& log_value : *logs)
+    for (const auto& log_value : logs.value()->values)
     {
-        const auto* log_object = log_value.if_object();
-        if (log_object == nullptr)
+        const auto* log_object = std::get_if<json::JsonParsedObjectPtr>(&log_value.value);
+        if (log_object == nullptr || *log_object == nullptr)
         {
             return std::nullopt;
         }
-        auto log = parse_rpc_log(*log_object);
+        auto log = parse_rpc_log(**log_object);
         if (!log.has_value())
         {
             return std::nullopt;

@@ -3,6 +3,9 @@ name: Memory Safety - Valgrind
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   valgrind:
     name: Valgrind Memcheck

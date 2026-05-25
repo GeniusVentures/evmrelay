@@ -3,6 +3,9 @@ name: Memory Safety - Sanitizers
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   # AddressSanitizer + UndefinedBehaviorSanitizer
   asan-ubsan:

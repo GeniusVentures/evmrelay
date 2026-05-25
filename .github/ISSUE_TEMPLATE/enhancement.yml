@@ -1,0 +1,89 @@
+name: Enhancement
+description: Propose an improvement to an existing feature
+title: "[Enhancement]: "
+labels: ["enhancement", "needs-review"]
+body:
+  - type: checkboxes
+    id: pre-submission
+    attributes:
+      label: Pre-Submission Checklist
+      description: Complete these checks before submitting
+      options:
+        - label: I have searched existing issues and this enhancement has not been requested
+          required: true
+        - label: I have tested the current behavior and can reproduce it
+          required: true
+        - label: This enhancement improves an existing feature (not a new feature request)
+          required: true
+        - label: I am prepared to contribute test coverage if this is approved
+          required: true
+  - type: input
+    id: what-is-improved
+    attributes:
+      label: What Is Being Improved
+      description: Identify the specific existing feature or component
+    validations:
+      required: true
+  - type: textarea
+    id: current-behavior
+    attributes:
+      label: Current Behavior
+      description: Describe current behavior with code examples or logs
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-behavior
+    attributes:
+      label: Proposed Behavior
+      description: Describe the desired behavior with code examples or expected output
+    validations:
+      required: true
+  - type: textarea
+    id: reason-and-benefit
+    attributes:
+      label: Reason and Benefit
+      description: Why is this improvement needed? Who benefits and how?
+    validations:
+      required: true
+  - type: textarea
+    id: scope-of-changes
+    attributes:
+      label: Scope of Changes
+      description: List files to modify and systems affected
+    validations:
+      required: true
+  - type: dropdown
+    id: breaking-changes
+    attributes:
+      label: Breaking Changes Assessment
+      options:
+        - "None"
+        - "Minor — affects internal APIs only"
+        - "Moderate — affects public headers"
+        - "Major — changes public API signatures"
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives-considered
+    attributes:
+      label: Alternatives Considered
+      description: What alternatives were evaluated?
+    validations:
+      required: true
+  - type: dropdown
+    id: area-affected
+    attributes:
+      label: Area Affected
+      options:
+        - RLP serialization
+        - RLPx transport / crypto
+        - Discv4 discovery
+        - Discv5 discovery
+        - ETH protocol
+        - Bridge / relay logic
+        - RPC / JSON-RPC
+        - Build system / CMake
+        - Testing infrastructure
+        - Documentation
+    validations:
+      required: true

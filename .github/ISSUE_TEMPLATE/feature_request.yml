@@ -1,0 +1,123 @@
+name: Feature Request
+description: Propose a new feature for evmrelay
+title: "[Feature]: "
+labels: ["enhancement", "needs-review"]
+body:
+  - type: checkboxes
+    id: pre-submission
+    attributes:
+      label: Pre-Submission Checklist
+      description: Complete these checks before submitting
+      options:
+        - label: I have searched existing issues and this feature has not been requested
+          required: true
+        - label: I have read the architecture documentation relevant to this feature
+          required: true
+        - label: This feature aligns with the project's scope (EVM bridge relay)
+          required: true
+        - label: I am prepared to contribute test coverage if this is approved
+          required: true
+  - type: input
+    id: feature-name
+    attributes:
+      label: Feature Name
+      description: Short, descriptive name for this feature
+    validations:
+      required: true
+  - type: dropdown
+    id: type-of-addition
+    attributes:
+      label: Type of Addition
+      options:
+        - New library / module
+        - New class / component within existing module
+        - New protocol / wire format support
+        - Build system / tooling improvement
+        - Documentation only
+    validations:
+      required: true
+  - type: textarea
+    id: problem-statement
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve? Why is it needed?
+    validations:
+      required: true
+  - type: textarea
+    id: what-is-being-added
+    attributes:
+      label: What Is Being Added
+      description: Describe the feature with examples. Include expected API surface, new files, and integration points.
+    validations:
+      required: true
+  - type: textarea
+    id: scope-of-changes
+    attributes:
+      label: Full Scope of Changes
+      description: List all files to be created, modified, and systems/components affected
+      value: |
+        Files created:
+        - include/...
+        - src/...
+        - test/...
+
+        Files modified:
+        - ...
+
+        Systems affected:
+        - ...
+    validations:
+      required: true
+  - type: textarea
+    id: user-stories
+    attributes:
+      label: User Stories
+      description: Minimum 2 user stories describing who benefits and how
+      value: |
+        1. As a [role], I want [capability] so that [benefit].
+        2. As a [role], I want [capability] so that [benefit].
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: Testable conditions that must be met
+      value: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+    validations:
+      required: true
+  - type: input
+    id: applicable-runtimes
+    attributes:
+      label: Applicable Runtimes
+      description: Comma-separated list (OSX, Linux, Windows, Android, iOS)
+      value: "OSX, Linux, Windows"
+    validations:
+      required: true
+  - type: dropdown
+    id: breaking-changes
+    attributes:
+      label: Breaking Changes Assessment
+      options:
+        - "None — fully additive"
+        - "Minor — affects internal APIs only"
+        - "Moderate — affects public headers, needs migration path"
+        - "Major — renames or removes public APIs"
+    validations:
+      required: true
+  - type: textarea
+    id: maintenance-burden
+    attributes:
+      label: Maintenance Burden
+      description: Describe ongoing maintenance expected (test updates, protocol changes, dependency management)
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives-considered
+    attributes:
+      label: Alternatives Considered
+      description: What alternatives were evaluated? Why is this approach preferred?
+    validations:
+      required: true

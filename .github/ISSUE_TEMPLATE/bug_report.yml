@@ -1,0 +1,83 @@
+name: Bug Report
+description: Report a bug in evmrelay
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: textarea
+    id: version
+    attributes:
+      label: GSD Version / Build Info
+      description: Build type, platform, commit SHA if known
+    validations:
+      required: true
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Runtime / Platform
+      options:
+        - OSX (macOS)
+        - Linux (x86_64)
+        - Linux (aarch64)
+        - Windows
+        - Android
+        - iOS
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS Version
+      description: macOS 14.5, Ubuntu 22.04, Windows 11, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What Happened?
+      description: Describe the bug — what did you observe?
+    validations:
+      required: true
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Exact steps, commands, and configuration to reproduce
+      value: |
+        1. Build with: cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Debug
+        2. Run: ./example_binary --flag ...
+        3. Observe: ...
+    validations:
+      required: true
+  - type: input
+    id: frequency
+    attributes:
+      label: Frequency
+      description: Always / Sometimes / Rarely / Once
+    validations:
+      required: true
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity / Impact
+      options:
+        - Critical — data loss, security, crash
+        - High — feature broken, no workaround
+        - Medium — degraded but workable
+        - Low — cosmetic or edge case
+    validations:
+      required: true
+  - type: checkboxes
+    id: pii-check
+    attributes:
+      label: PII / Sensitive Data
+      description: Confirm logs and reproduction steps contain no private keys, tokens, or PII
+      options:
+        - label: I confirm this report contains no secrets, keys, or PII
+          required: true

@@ -1,0 +1,74 @@
+name: Chore
+description: Maintenance task (no user-facing changes)
+title: "[Chore]: "
+labels: ["needs-triage"]
+body:
+  - type: checkboxes
+    id: pre-submission
+    attributes:
+      label: Pre-Submission Confirmation
+      description: Chores are maintenance-only — no user-facing feature changes
+      options:
+        - label: This is a pure maintenance task (no user-facing API or behavior changes)
+          required: true
+  - type: textarea
+    id: maintenance-task
+    attributes:
+      label: Maintenance Task
+      description: Describe the maintenance task
+    validations:
+      required: true
+  - type: dropdown
+    id: type-of-maintenance
+    attributes:
+      label: Type of Maintenance
+      options:
+        - Dependency update
+        - Build system / CMake improvement
+        - CI/CD pipeline change
+        - Code cleanup / refactor (no behavior change)
+        - Test infrastructure improvement
+        - Documentation update
+        - Security hardening (no feature change)
+    validations:
+      required: true
+  - type: textarea
+    id: current-state
+    attributes:
+      label: Current State
+      description: Describe the current state with specifics (files, versions, metrics)
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-work
+    attributes:
+      label: Proposed Work
+      description: List specific tasks to perform
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      value: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+    validations:
+      required: true
+  - type: dropdown
+    id: area-affected
+    attributes:
+      label: Area Affected
+      options:
+        - RLP library
+        - RLPx / transport
+        - Discovery (discv4/discv5)
+        - ETH protocol
+        - Bridge / relay
+        - RPC / JSON-RPC
+        - Build / CMake
+        - CI/CD
+        - Tests
+        - Documentation
+    validations:
+      required: true

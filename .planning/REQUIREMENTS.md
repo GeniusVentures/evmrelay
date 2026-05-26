@@ -55,6 +55,8 @@ None deferred — all scope is committed for evmrelay finalization handoff.
 
 ## Traceability
 
+See [ROADMAP.md](ROADMAP.md) for per-phase goal statements and success criteria.
+
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | CHNL-01 | Phase 1 | Pending |

@@ -192,3 +192,141 @@ TEST(RpcManagerTest, ManagerBuildsPoolsPerChain)
 
     EXPECT_FALSE(manager.pool("missing-chain", 1).has_value());
 }
+
+TEST(RpcManagerTest, EndpointBackoffAfterSingleFailure)
+{
+    std::vector<eth::rpc::RpcEndpoint> endpoints;
+
+    eth::rpc::RpcEndpoint ep;
+    ep.chain_name = "test";
+    ep.chain_id = 1;
+    ep.url = "https://test.example";
+    ep.state = eth::rpc::RpcEndpointState::kAvailable;
+    endpoints.push_back(ep);
+
+    eth::rpc::RpcEndpointPool pool(std::move(endpoints));
+
+    pool.mark_temporary_failure("https://test.example");
+
+    const auto& eps = pool.endpoints();
+    ASSERT_EQ(eps.size(), 1U);
+    EXPECT_EQ(eps[0].state, eth::rpc::RpcEndpointState::kTemporarilyFailed);
+    EXPECT_EQ(eps[0].failure_count, 1U);
+    EXPECT_GT(eps[0].backoff_until, std::chrono::steady_clock::now());
+}
+
+TEST(RpcManagerTest, BackoffExponentialGrowth)
+{
+    std::vector<eth::rpc::RpcEndpoint> endpoints;
+
+    eth::rpc::RpcEndpoint ep;
+    ep.chain_name = "test";
+    ep.chain_id = 1;
+    ep.url = "https://test.example";
+    ep.state = eth::rpc::RpcEndpointState::kAvailable;
+    endpoints.push_back(ep);
+
+    eth::rpc::RpcEndpointPool pool(std::move(endpoints));
+
+    pool.mark_temporary_failure("https://test.example");
+    pool.mark_temporary_failure("https://test.example");
+
+    const auto& eps = pool.endpoints();
+    ASSERT_EQ(eps.size(), 1U);
+    EXPECT_EQ(eps[0].failure_count, 2U);
+    EXPECT_GT(eps[0].backoff_until, std::chrono::steady_clock::now() + std::chrono::seconds(1));
+}
+
+TEST(RpcManagerTest, EscalatesToDisabledAfterThreeConsecutiveFailures)
+{
+    std::vector<eth::rpc::RpcEndpoint> endpoints;
+
+    eth::rpc::RpcEndpoint ep;
+    ep.chain_name = "test";
+    ep.chain_id = 1;
+    ep.url = "https://test.example";
+    ep.state = eth::rpc::RpcEndpointState::kAvailable;
+    endpoints.push_back(ep);
+
+    eth::rpc::RpcEndpointPool pool(std::move(endpoints));
+
+    pool.mark_temporary_failure("https://test.example");
+    pool.mark_temporary_failure("https://test.example");
+    pool.mark_temporary_failure("https://test.example");
+
+    const auto& eps = pool.endpoints();
+    ASSERT_EQ(eps.size(), 1U);
+    EXPECT_EQ(eps[0].state, eth::rpc::RpcEndpointState::kDisabled);
+    EXPECT_EQ(eps[0].failure_count, 3U);
+}
+
+TEST(RpcManagerTest, ResetTemporaryFailuresClearsBackoffState)
+{
+    std::vector<eth::rpc::RpcEndpoint> endpoints;
+
+    eth::rpc::RpcEndpoint ep;
+    ep.chain_name = "test";
+    ep.chain_id = 1;
+    ep.url = "https://test.example";
+    ep.state = eth::rpc::RpcEndpointState::kAvailable;
+    endpoints.push_back(ep);
+
+    eth::rpc::RpcEndpointPool pool(std::move(endpoints));
+
+    pool.mark_temporary_failure("https://test.example");
+    pool.reset_temporary_failures();
+
+    const auto& eps = pool.endpoints();
+    ASSERT_EQ(eps.size(), 1U);
+    EXPECT_EQ(eps[0].state, eth::rpc::RpcEndpointState::kAvailable);
+    EXPECT_EQ(eps[0].failure_count, 0U);
+    EXPECT_EQ(eps[0].backoff_until.time_since_epoch().count(), 0);
+}
+
+TEST(RpcManagerTest, BackoffMaxesAtSixtySeconds)
+{
+    std::vector<eth::rpc::RpcEndpoint> endpoints;
+
+    eth::rpc::RpcEndpoint ep;
+    ep.chain_name = "test";
+    ep.chain_id = 1;
+    ep.url = "https://test.example";
+    ep.state = eth::rpc::RpcEndpointState::kAvailable;
+    endpoints.push_back(ep);
+
+    eth::rpc::RpcEndpointPool pool(std::move(endpoints));
+
+    for (int i = 0; i < 10; ++i)
+    {
+        pool.mark_temporary_failure("https://test.example");
+    }
+
+    const auto& eps = pool.endpoints();
+    ASSERT_EQ(eps.size(), 1U);
+    EXPECT_EQ(eps[0].state, eth::rpc::RpcEndpointState::kDisabled);
+    const auto backoff_dur = eps[0].backoff_until - std::chrono::steady_clock::now();
+    EXPECT_LE(backoff_dur, eth::rpc::RpcEndpointPool::kMaxBackoff);
+}
+
+TEST(RpcManagerTest, MakeReceiptSourceReturnsNulloptForMissingChain)
+{
+    eth::rpc::RpcManagerConfig config;
+    eth::rpc::RpcManager manager(std::move(config));
+
+    const auto source = eth::rpc::make_receipt_source(manager, "missing", 1);
+    EXPECT_FALSE(source.has_value());
+}
+
+TEST(RpcManagerTest, MakeReceiptSourceReturnsHandleForValidChain)
+{
+    eth::rpc::RpcManagerConfig config;
+    config.endpoints.push_back(make_endpoint("ethereum-mainnet", 1, "https://eth.example", 1, 1));
+
+    eth::rpc::RpcManager manager(std::move(config));
+
+    const auto source = eth::rpc::make_receipt_source(manager, "ethereum-mainnet", 1);
+    ASSERT_TRUE(source.has_value());
+    ASSERT_NE(source->transport, nullptr);
+    ASSERT_NE(source->source, nullptr);
+    EXPECT_EQ(source->source->last_processed_block(), 0U);
+}

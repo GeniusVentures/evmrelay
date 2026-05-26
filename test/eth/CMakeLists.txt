@@ -120,6 +120,9 @@ target_link_libraries(bridge_observation_test
 addtest(bridge_event_e2e_test
     bridge_event_e2e_test.cpp
 )
+target_link_libraries(bridge_event_e2e_test
+    evmrelay
+)
 
 # ChainList provider tests
 addtest(chainlist_provider_test
@@ -230,5 +233,13 @@ addtest(eth_watch_mock_peer_test
     eth_watch_mock_peer_test.cpp
 )
 target_link_libraries(eth_watch_mock_peer_test
+    evmrelay
+)
+
+# RPC config audit tests
+addtest(rpc_config_audit_test
+    rpc_config_audit_test.cpp
+)
+target_link_libraries(rpc_config_audit_test
     evmrelay
 )

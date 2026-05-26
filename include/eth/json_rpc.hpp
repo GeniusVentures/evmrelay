@@ -50,6 +50,9 @@ struct RpcLog
     const Hash256& tx_hash,
     uint64_t       id);
 
+[[nodiscard]] boost::json::object make_eth_chain_id_request(uint64_t id);
+[[nodiscard]] std::optional<uint64_t> parse_chain_id_response(std::string_view json_text);
+
 [[nodiscard]] std::optional<uint64_t> parse_block_number_response(std::string_view json_text);
 [[nodiscard]] std::optional<std::vector<RpcLog>> parse_get_logs_response(std::string_view json_text);
 [[nodiscard]] std::optional<ReceiptResult> parse_transaction_receipt_response(std::string_view json_text);

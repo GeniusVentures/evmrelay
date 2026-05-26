@@ -1,5 +1,17 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
+//
+// eth_watch — example CLI for the EthWatchService.
+//
+// The --direct-enode flag is an example-local convenience for single-peer
+// diagnostic connections. It is NOT a production API. Production deployment
+// should use the standard discovery pipeline (EthPeerQueue + Discv5) or the
+// ChainList-based RPC path (evmrelay RpcManager).
+//
+// Do NOT promote --direct-enode to include/eth/ without first adding:
+//  - timeout / retry / backoff
+//  - structured error diagnostics
+//  - unit tests covering peer lifecycle
 
 #include <atomic>
 #include <functional>

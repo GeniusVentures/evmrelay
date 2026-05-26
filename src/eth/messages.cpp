@@ -1,5 +1,14 @@
 // Copyright 2026 Genius Ventures, Inc.
 // SPDX-License-Identifier: MIT
+//
+// TODO(CODE-03): Split this file (2137 lines) into per-message-group files:
+//   src/eth/messages_block.cpp       — NewBlockHashes, GetBlockHeaders, BlockHeaders
+//   src/eth/messages_transaction.cpp  — Transactions, PooledTransactions
+//   src/eth/messages_receipt.cpp      — GetReceipts, Receipts
+//   src/eth/messages_status.cpp       — Status, NewPooledTransactionHashes
+// Retain shared helper functions in messages.cpp (BOOST_OUTCOME_TRY, encode/decode
+// primitives) so compilation units stay decoupled.  Backward-compatible: no API
+// changes to messages.hpp.
 
 #include <eth/messages.hpp>
 #include <rlp/rlp_decoder.hpp>

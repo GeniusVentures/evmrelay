@@ -237,11 +237,32 @@ std::optional<std::reference_wrapper<const RpcEndpoint>> RpcEndpointPool::next_e
 
 void RpcEndpointPool::mark_temporary_failure(std::string_view url)
 {
+    const auto now = std::chrono::steady_clock::now();
+
     for (auto& endpoint : endpoints_)
     {
         if (endpoint.url == url)
         {
+            if ( endpoint.failure_count > 0
+                 && ( now - endpoint.last_failure_time ) > kEscalationWindow )
+            {
+                endpoint.failure_count = 0;
+            }
+
             endpoint.state = RpcEndpointState::kTemporarilyFailed;
+            endpoint.last_failure_time = now;
+            ++endpoint.failure_count;
+
+            const auto backoff_seconds = std::chrono::seconds(
+                std::min<uint64_t>(
+                    (1ULL << (endpoint.failure_count - 1)),
+                    kMaxBackoff.count() ) );
+            endpoint.backoff_until = now + backoff_seconds;
+
+            if ( endpoint.failure_count >= kEscalationThreshold )
+            {
+                endpoint.state = RpcEndpointState::kDisabled;
+            }
         }
     }
 }
@@ -264,13 +285,24 @@ void RpcEndpointPool::reset_temporary_failures()
         if (endpoint.state == RpcEndpointState::kTemporarilyFailed)
         {
             endpoint.state = RpcEndpointState::kAvailable;
+            endpoint.failure_count = 0;
+            endpoint.backoff_until = {};
         }
     }
 }
 
 bool RpcEndpointPool::is_usable(const RpcEndpoint& endpoint) noexcept
 {
-    return endpoint.state == RpcEndpointState::kAvailable;
+    if ( endpoint.state == RpcEndpointState::kAvailable )
+    {
+        return true;
+    }
+    if ( endpoint.state == RpcEndpointState::kTemporarilyFailed
+         && std::chrono::steady_clock::now() >= endpoint.backoff_until )
+    {
+        return true;
+    }
+    return false;
 }
 
 RpcManager::RpcManager(RpcManagerConfig config, RpcEnvLookup env_lookup)
@@ -316,6 +348,35 @@ std::optional<std::reference_wrapper<const RpcEndpointPool>> RpcManager::pool(
 std::string RpcManager::make_chain_key(std::string_view chain_name, uint64_t chain_id)
 {
     return chain_key(chain_name, chain_id);
+}
+
+std::optional<RpcReceiptSourceHandle> make_receipt_source(
+    RpcManager&    manager,
+    std::string    chain_name,
+    uint64_t       chain_id,
+    FinalityPolicy finality_policy)
+{
+    auto pool = manager.pool(chain_name, chain_id);
+    if (!pool.has_value())
+    {
+        return std::nullopt;
+    }
+
+    auto endpoint = pool->get().next_endpoint();
+    if (!endpoint.has_value())
+    {
+        return std::nullopt;
+    }
+
+    auto transport = std::make_unique<RpcHttpTransport>(endpoint->get().url);
+    auto source = std::make_unique<RpcReceiptSource>(
+        *transport,
+        finality_policy);
+
+    RpcReceiptSourceHandle handle;
+    handle.transport = std::move(transport);
+    handle.source = std::move(source);
+    return handle;
 }
 
 } // namespace eth::rpc

@@ -6,9 +6,13 @@
 
 #include <eth/finality_policy.hpp>
 #include <eth/rpc_manager_config.hpp>
+#include <eth/rpc_receipt_source.hpp>
+#include <eth/rpc_http_transport.hpp>
 #include <boost/outcome/result.hpp>
 
+#include <chrono>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -52,6 +56,10 @@ struct RpcEndpoint
     bool        is_public = true;
     bool        verified = false;
     RpcEndpointState state = RpcEndpointState::kAvailable;
+
+    std::chrono::steady_clock::time_point last_failure_time{};
+    uint32_t                               failure_count = 0;
+    std::chrono::steady_clock::time_point backoff_until{};
 };
 
 struct RpcEndpointGroup
@@ -85,6 +93,11 @@ using RpcEnvLookup = std::function<std::optional<std::string>(std::string_view)>
 class RpcEndpointPool
 {
 public:
+    static constexpr auto kMaxBackoff = std::chrono::seconds(60);
+    static constexpr auto kBaseBackoff = std::chrono::seconds(1);
+    static constexpr auto kEscalationWindow = std::chrono::minutes(5);
+    static constexpr uint32_t kEscalationThreshold = 3;
+
     RpcEndpointPool() = default;
     explicit RpcEndpointPool(std::vector<RpcEndpoint> endpoints);
 
@@ -142,6 +155,18 @@ private:
     std::vector<RpcEndpointGroup> groups_;
     std::vector<PoolEntry>        pools_;
 };
+
+struct RpcReceiptSourceHandle
+{
+    std::unique_ptr<RpcHttpTransport>  transport;
+    std::unique_ptr<RpcReceiptSource>  source;
+};
+
+[[nodiscard]] std::optional<RpcReceiptSourceHandle> make_receipt_source(
+    RpcManager&   manager,
+    std::string   chain_name,
+    uint64_t      chain_id,
+    FinalityPolicy finality_policy = {});
 
 } // namespace eth::rpc
 

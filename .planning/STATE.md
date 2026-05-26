@@ -1,3 +1,17 @@
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+current_phase: Phase 1 — ChainList Provider & intx Documentation
+status: unknown
+last_updated: "2026-05-26T01:28:24.832Z"
+progress:
+  total_phases: 4
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+---
+
 # Project State: evmrelay
 
 **Current Phase:** Phase 1 — ChainList Provider & intx Documentation

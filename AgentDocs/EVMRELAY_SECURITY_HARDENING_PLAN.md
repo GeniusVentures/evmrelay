@@ -1,445 +1,722 @@
 # EVM Relay Security Hardening Plan
 
-Source prompt: LayerZero/KelpDAO-style incident where a compromised developer session, poisoned RPC/process state, and external provider DoS caused a bridge path to trust forged chain data.
+Source document: `evmrelay/AgentDocs/EVMRELAY_SECURITY_HARDENING_PLAN.md`
 
-Scope: `evmrelay` event watching, receipt acquisition, validator vote evidence, peer/cache configuration, CI, and operator controls. `evmrelay` observes EVM chain state; SuperGenius validators independently verify the event through multiple RPC paths; bridge mint consensus occurs through reputation-weighted validator voting; and outbound UTXO-to-EVM exits are contained by the EVM exit contract review/throttle window.
+Audit scope:
+
+- `evmrelay` on `develop`: event watching, receipt acquisition, bridge event claims, RLPx/RPC receipt paths.
+- parent SuperGenius workspace: bridge consensus adapter, validator quorum, mint transaction routing, UTXO state, CI.
+
+Do not implement a generic bridge service. Use the files listed below as the source of truth.
 
 ## Current Architecture Snapshot
 
-- `EthWatchService` owns P2P chain watching, peer discovery, RLPx/ETH sessions, event filtering, and decoded event callbacks.
-- `IEthReceiptSource` is the transport-neutral receipt interface. It currently exposes receipts and batches without quorum metadata.
-- `RpcReceiptSource` reads block heads, logs, and receipts through one `JsonRpcTransport`.
-- Bridge event evidence binds source chain, destination chain, block number/hash, tx hash, log index, bridge contract, event topic/data, sender, nonce/amount, recipient, observed time, finality depth, and RPC quorum metadata.
-- SuperGenius bridge mint authorization should require high-threshold validator consensus. The genesis node may have high initial reputation weight, but it must not be able to satisfy bridge mint consensus by itself.
-- The UTXO-to-EVM exit path has the strongest containment control: review windows, outbound transfer throttles, pause, and burn/recovery controls on the EVM exit contract.
-- The release workflow uses self-hosted runners, broad token exposure in job env, unpinned container tags, and unpinned actions.
+Status: partially implemented.
+
+Real files and classes:
+
+- `evmrelay/include/eth/eth_watch_service.hpp`, `evmrelay/src/eth/eth_watch_service.cpp`: `eth::EthWatchService`, `eth::WatchEventNotification`, RLPx ETH receipt watching.
+- `evmrelay/include/eth/eth_receipt_source.hpp`, `evmrelay/src/eth/eth_receipt_source.cpp`: `eth::IEthReceiptSource`, `eth::ReceiptResult`, `eth::ReceiptBatch`, `eth::EthReceiptSourceBridge`.
+- `evmrelay/include/eth/rpc_receipt_source.hpp`, `evmrelay/src/eth/rpc_receipt_source.cpp`: `eth::rpc::RpcReceiptSource` using one `JsonRpcTransport`.
+- `evmrelay/include/eth/bridge_event.hpp`, `evmrelay/src/eth/bridge_event.cpp`: `eth::BridgeEventClaim`, `eth::BridgeEventObservation`, `eth::EventDeduper`, `verify_receipt_log`.
+- `evmrelay/include/eth/bridge_observation.hpp`, `evmrelay/src/eth/bridge_observation.cpp`: canonical bridge event payload, claim hash, watcher signature verification.
+- `src/account/BridgeConsensusAdapter.hpp`, `src/account/BridgeConsensusAdapter.cpp`: bridge-owned consensus subject helpers for `gnus.bridge_event.v1`.
+- `src/blockchain/Consensus.hpp`, `src/blockchain/Consensus.cpp`: generic weighted consensus using `ValidatorRegistry`.
+- `src/blockchain/ValidatorRegistry.hpp`, `src/blockchain/ValidatorRegistry.cpp`: role/reputation weights and generic quorum threshold.
+- `src/account/TransactionManager.hpp`, `src/account/TransactionManager.cpp`: registers bridge subject/certificate handlers and routes finalized bridge claims to `MintFunds`.
+- `src/account/InputValidators.hpp`, `src/account/InputValidators.cpp`: `PublicChainInputValidator` currently accepts placeholder public-chain verification.
+- `src/account/MintTransactionV2.hpp`, `src/account/MintTransactionV2.cpp`: UTXO-aware bridge/public-chain mint transaction.
+- `src/account/UTXOManager.hpp`, `src/account/UTXOManager.cpp`: local UTXO storage, consumption, checkpoints.
+
+Current tests:
+
+- `evmrelay/test/eth/bridge_event_test.cpp`
+- `evmrelay/test/eth/bridge_observation_test.cpp`
+- `evmrelay/test/eth/eth_receipt_source_test.cpp`
+- `evmrelay/test/eth/rpc_receipt_source_test.cpp`
+- `test/src/blockchain/bridge_consensus_adapter_test.cpp`
+- `test/src/blockchain/consensus_certificate_test.cpp`
+- `test/src/account/utxo_manager_test.cpp`
+
+Current behavior:
+
+- evmrelay can build, sign, decode, and verify canonical bridge event claims.
+- evmrelay can verify a claim against a single receipt with exact block hash, tx hash, log index, contract, topic, topics, and data matching.
+- `RpcReceiptSource` still trusts one `JsonRpcTransport`.
+- parent consensus can carry an opaque bridge payload under `gnus.bridge_event.v1`.
+- `TransactionManager` approves bridge consensus subjects when they decode and map to a mint request.
+- On finalized bridge certificate, `TransactionManager::OnBridgeEventConsensusCertificate` calls `MintFunds`.
+- `MintFunds` creates `MintTransactionV2` with a public-chain input reference and mints to the claim recipient.
+- `PublicChainInputValidator::VerifyPublicChainSmartContract` is a placeholder that returns `true`.
+- Generic consensus quorum still uses `ValidatorRegistry` weights; bridge-specific quorum, effective bridge-weight caps, minimum validator count, and trust-domain diversity are missing.
+
+Security risk:
+
+- A single RPC/provider path can still produce the source evidence that validators later package into a bridge claim.
+- A validly encoded bridge claim can pass parent subject handling without local multi-RPC quorum evidence.
+- Bridge mints use generic validator reputation weights, so a high-weight genesis/full node can be too influential for bridge mint finality.
+- Public-chain mint validation has an explicit placeholder.
+
+Proposed change:
+
+- Keep evmrelay focused on observation and canonical source-event evidence.
+- Add quorum evidence and a source-event decision record in evmrelay before bridge claims are proposed.
+- Add bridge-specific consensus policy in parent SuperGenius before bridge certificates can mint.
+- Replace `PublicChainInputValidator` placeholder behavior with validation against finalized bridge certificate/source-decision metadata.
+- Keep bridge parsing outside core consensus through `BridgeConsensusAdapter`.
+
+Risk level: critical.
+
+Estimated complexity: large.
 
 ## Primary Security Goal
 
-No single RPC provider, RLPx peer, cached peer file, process, developer credential, validator key, CI job, admin key, validator, or high-reputation genesis node can cause a production bridge mint or EVM exit by itself.
+Status: partially implemented.
 
-The relay and validators must fail closed when independent observations are unavailable, divergent, stale, or insufficiently bound to the bridge event. The system should be designed so forged EVM state requires either source-contract compromise, validator quorum compromise, shared verifier/config/build failure, voting-weight/governance compromise, or severe finality failure.
+Current behavior:
+
+- Domain-bound bridge payloads exist in evmrelay and are carried as opaque consensus subjects in parent code.
+- No code currently enforces the full goal that one RPC provider, one validator, one genesis node, one cached peer file, or one CI credential cannot cause a production bridge mint.
+
+Security risk:
+
+- The system can reject malformed payloads, but it cannot yet prove independent source-chain observation or bridge-specific consensus diversity.
+
+Proposed change:
+
+- Define a production bridge channel as valid only when it has:
+  - evmrelay multi-RPC quorum evidence;
+  - a source-event decision record bound to the source event;
+  - a parent bridge consensus policy that caps per-validator effective bridge weight;
+  - minimum distinct validator count;
+  - minimum operator/trust-domain diversity;
+  - durable replay protection for source chain id + tx hash + log index + block hash.
+
+Tests to add:
+
+- evmrelay: quorum decision cannot be created from one provider in production profile.
+- parent: bridge certificate with generic quorum but missing bridge-specific policy is rejected for mint routing.
+- parent: genesis-only bridge certificate cannot route to `MintFunds`.
+
+Implementation order: after Phase 1 quorum and before enabling production bridge mint routing.
+
+Risk level: critical.
+
+Estimated complexity: medium.
 
 ## Bridge-Specific Consensus Model
 
-The bridge path should be stricter than normal SuperGenius reputation consensus because one false positive can create credit or release external liquidity, while a false negative usually delays a user.
+Status: missing.
 
-Recommended bridge mint rule:
+Real files and classes:
 
-```text
-Mint allowed only if:
-  each voting validator independently verifies the source event
-  each validator uses local multi-RPC quorum
-  effective bridge voting weight >= bridge threshold
-  distinct validator count >= minimum count
-  trust-domain/operator diversity >= minimum diversity
-  genesis node cannot satisfy threshold alone
-  source event is domain-bound and replay-protected
-```
+- `src/blockchain/Consensus.hpp/.cpp`: existing generic `ConsensusManager::TallyVotes` and `CreateCertificate`.
+- `src/blockchain/ValidatorRegistry.hpp/.cpp`: generic validator weights and `IsQuorum`.
+- `src/account/BridgeConsensusAdapter.hpp/.cpp`: bridge payload adapter, correct place to keep bridge-specific subject helpers.
+- `src/account/TransactionManager.cpp`: current bridge subject and bridge certificate handlers.
 
-Initial bridge thresholds should be near-total but not literal 100%, so one offline validator cannot halt the bridge:
+Current behavior:
 
-```text
-Initial / low validator count:
-  >= 90% effective bridge voting weight
-  AND >= 3 independent validators
-  AND >= 2 or 3 infrastructure/trust domains
-  AND genesis node cannot satisfy threshold alone
+- `ConsensusManager::TallyVotes` sums registry weights and calls `ValidatorRegistry::IsQuorum`.
+- `ValidatorRegistry::WeightConfig` gives `GENESIS` validators high weight by default.
+- Bridge claims use the same consensus certificate path as other subjects.
+- No bridge-only quorum policy exists.
 
-High-value or anomalous bridge mints:
-  >= 95% effective bridge voting weight
-  AND stricter monitoring / delayed outbound liquidity
-```
+Security risk:
 
-Use an effective bridge-weight cap even if normal reputation gives one node much higher weight:
+- Normal reputation-weighted consensus is not strict enough for bridge mints.
+- A genesis or high-reputation validator can contribute too much effective bridge weight.
+- Consensus certificates do not expose operator/trust-domain diversity.
 
-```text
-max_effective_bridge_weight_per_validator = 33% to 40%
-```
+Proposed change:
 
-This keeps the genesis node important at bootstrap without making it a bridge single point of failure.
+- Add a bridge-owned policy layer in parent code, not inside evmrelay:
+  - a bridge-specific policy/tally implementation in `src/account` or `src/blockchain`, using local naming chosen during implementation;
+  - configured fields for `threshold_numerator`, `threshold_denominator`, `min_distinct_validators`, `min_trust_domains`, `max_effective_weight_per_validator`, and `genesis_cannot_satisfy_alone`;
+  - effective bridge weight computed from a `ConsensusCertificate` and `ValidatorRegistry::Registry`.
+  - Keep generic `ConsensusManager` reusable; do not fork core consensus unless tests show the bridge policy cannot be enforced at certificate handling time.
+- Enforce this policy in `TransactionManager::OnBridgeEventConsensusCertificate` before `MintFunds`.
+- Add operator/trust-domain metadata to the bridge policy config. Do not invent a network service; keep this as local config/data consumed by the bridge certificate handler.
+
+Tests to add:
+
+- `test/src/blockchain/bridge_consensus_adapter_test.cpp` or a new parent bridge policy test:
+  - generic quorum reached but bridge threshold not reached rejects mint routing;
+  - one high-weight genesis validator cannot satisfy bridge policy;
+  - effective bridge weight is capped per validator;
+  - minimum distinct validators is enforced;
+  - minimum trust domains is enforced;
+  - malformed or missing policy rejects in production mode.
+
+Implementation order: Phase 3, before certificate-to-mint routing can be considered production-ready.
+
+Risk level: critical.
+
+Estimated complexity: large.
 
 ## Outbound Rollout Policy
 
-SuperGenius-to-EVM bridging should be rolled out in stages while the exit path hardens.
+Status: missing in this repo.
 
-```text
-Stage 0:
-  EVM exits target testnets only.
-  Mainnet exits are manually handled outside the automatic bridge.
+Real files and classes:
 
-Stage 1:
-  Manual review for all SuperGenius-to-EVM exits.
+- No EVM exit transaction submitter or EVM exit contract integration was found in this workspace.
+- Parent code currently covers incoming bridge mint routing through `TransactionManager::OnBridgeEventConsensusCertificate`.
+- `MintTransactionV2` and `UTXOManager` create internal UTXO value after an EVM-origin event.
 
-Stage 2:
-  Automatic exits for <= $100.
-  Manual review for > $100.
+Current behavior:
 
-Stage 3:
-  Automatic exits for <= $250.
-  Manual review for > $250.
+- There is no SuperGenius-to-EVM exit path implementation in the audited code.
+- There is no rollout-stage config for mainnet/testnet exits, review windows, or outbound value caps.
 
-Stage 4:
-  Automatic exits with cool-off / review window.
-  Higher-value or anomalous exits stay manual or require elevated review.
-```
+Security risk:
 
-Each stage should require explicit governance/config activation, a rollback plan, metrics, alerts, and a cap on aggregate 24-hour outbound value per token and chain.
+- The original plan assumed an exit submitter and contract controls that are not present here.
+- If an exit path is later added without rollout gates, forged internal value could leave to EVM too quickly.
+
+Proposed change:
+
+- Keep outbound exit hardening as a parent SuperGenius task only when exit code exists.
+- Add a production config requirement now that fails closed when an exit channel is configured without:
+  - rollout stage;
+  - manual review threshold;
+  - 24-hour outbound cap;
+  - pause flag;
+  - destination chain allowlist.
+- Do not add fake exit submitter classes.
+
+Tests to add:
+
+- Config audit rejects `utxo_to_evm` production channel unless rollout stage and review policy are explicit.
+- Config audit rejects mainnet automatic exit stage unless explicitly enabled.
+
+Implementation order: after bridge mint consensus policy, before any automatic outbound exit work.
+
+Risk level: high.
+
+Estimated complexity: medium once config audit exists; unknown for exit contract integration because it is not present.
 
 ## UTXO And EVM Exit Containment
 
-The system bridges from EVM into SuperGenius UTXO, then later bridges from SuperGenius UTXO out to EVM. The EVM exit contract has the review/throttle window, so the most important containment point is the UTXO-to-EVM exit.
+Status: partially implemented for UTXO accounting; missing for bridge provenance.
 
-Policy:
+Real files and classes:
 
-- EVM-to-UTXO minting still requires high bridge consensus because it creates internal value.
-- Bridge-originated UTXO value should retain provenance until EVM exit.
-- UTXO-to-EVM withdrawals should include enough source/provenance references for the EVM exit contract and operators to review risk.
-- EVM exit review windows, outbound transfer throttles, pause, and burn/recovery controls provide the final containment layer.
+- `src/account/MintTransactionV2.hpp/.cpp`
+- `src/account/TransferTransaction.hpp/.cpp`
+- `src/account/UTXOStructs.hpp/.cpp`
+- `src/account/UTXOManager.hpp/.cpp`
+- `src/account/proto/SGTransaction.proto`
 
-If bridge-originated UTXO value can be transferred internally, provenance must not be lost. Splits, merges, transfers, or conversions should preserve a proportional bridge-origin tag, message id, or risk marker where practical. The goal is to prevent bad EVM-to-UTXO credit from becoming indistinguishable from ordinary value before exit review.
+Current behavior:
+
+- `MintTransactionV2` carries `chain_id`, `token_id`, `amount`, and `UTXOTxParams`.
+- `MintFunds` uses the bridge claim hash as `transaction_hash` and creates a public-chain input reference.
+- UTXO records store owner, state, epochs, and optional spent-by tx id.
+- UTXO outputs do not carry bridge provenance, source chain id, source tx hash, log index, block hash, or bridge risk marker.
+- Transfers can consume bridge-minted UTXOs without preserving a bridge-origin tag.
+
+Security risk:
+
+- Once bridge-originated value is minted into UTXOs, provenance can be lost during internal movement.
+- A later exit review path would not be able to distinguish bridge-originated value from ordinary value.
+
+Proposed change:
+
+- Extend UTXO metadata in `src/account/proto/SGTransaction.proto` with bridge provenance fields using additive protobuf fields.
+- Add a parent-owned provenance type in `src/account/UTXOStructs.hpp` if needed by existing style.
+- On `TransactionManager::OnBridgeEventConsensusCertificate`, bind minted outputs to:
+  - source chain id;
+  - destination chain id;
+  - bridge contract;
+  - tx hash;
+  - log index;
+  - block hash;
+  - claim hash/security decision id.
+- Update transfer/mint processing so bridge provenance is preserved proportionally through splits and merges.
+- Do not change unrelated UTXO selection or storage behavior except where provenance propagation requires it.
+
+Tests to add before production logic:
+
+- `test/src/account/utxo_manager_test.cpp`: UTXO record round-trips bridge provenance.
+- transfer tests: split preserves provenance on all outputs.
+- transfer tests: merge of bridge and non-bridge value preserves proportional bridge-origin amount or rejects until policy is defined.
+- bridge certificate test: minted output includes source event provenance.
+
+Implementation order: after bridge certificate policy and before enabling outbound exits.
+
+Risk level: high.
+
+Estimated complexity: large.
 
 ## Phase 0: Inventory And Cut Lines
 
-1. Classify every event callback and bridge evidence consumer as one of:
-   - observational only;
-   - creates an off-chain alert or metric;
-   - creates validator vote evidence;
-   - contributes to SuperGenius bridge mint consensus;
-   - submits or triggers UTXO-to-EVM exit action.
-2. Identify where reputation-weighted bridge consensus is enforced and where genesis-node voting weight is capped for bridge operations.
-3. Identify how bridge-originated UTXO provenance is preserved through transfers, splits, merges, and exits.
-4. Define production versus development/test profile flags. Production should refuse startup unless quorum, confirmation, peer, validator-threshold, provenance, exit-review, and admin policies are explicit.
+Status: partially implemented.
 
-Deliverables:
+Current behavior:
 
-- Code owners for RPC observation, bridge vote evidence, validator consensus, UTXO provenance, EVM exit controls, config validation, CI, and deployment hardening.
-- Threat-model note in `SECURITY.md` or `AgentDocs`.
-- A list of all production bridge channels and whether this repository observes, generates validator vote evidence, contributes to mint consensus, or submits exit transactions.
+- Bridge evidence producers are in evmrelay.
+- Bridge consensus subject creation/decoding is in parent `BridgeConsensusAdapter`.
+- Bridge certificate-to-mint routing is in `TransactionManager`.
+- No production/development bridge profile boundary exists.
+
+Security risk:
+
+- The code has no explicit cut line between observation, validator vote evidence, bridge consensus, mint execution, UTXO provenance, and future exit handling.
+
+Concrete implementation tasks:
+
+1. Document the bridge path in `AgentDocs/BRIDGE_MINT_PLAN.md` or a new `AgentDocs/BRIDGE_SECURITY_MODEL.md` using only these real paths:
+   - evmrelay observation: `eth::BridgeEventClaim`
+   - parent consensus subject: `CreateBridgeEventConsensusSubject`
+   - parent subject validation: `TransactionManager::HandleBridgeEventConsensusSubject`
+   - parent certificate routing: `TransactionManager::OnBridgeEventConsensusCertificate`
+   - mint execution: `TransactionManager::MintFunds`
+   - public-chain input validation: `PublicChainInputValidator`
+2. Add production/development bridge profile config in the parent repo and evmrelay config entry points that actually exist.
+3. Add a startup/config audit path before production bridge channels are allowed.
+4. Identify code owners for:
+   - evmrelay RPC/receipt quorum;
+   - parent bridge vote policy;
+   - parent mint routing;
+   - UTXO provenance;
+   - CI workflow hardening.
+
+Tests to add:
+
+- Config audit rejects production bridge profile with missing quorum policy.
+- Config audit rejects production bridge profile with missing bridge consensus policy.
+
+Risk level: high.
+
+Estimated complexity: small.
 
 ## Phase 1: RPC Quorum And Fail-Closed Receipt Evidence
 
-Current gap: `RpcReceiptSource` has a single `JsonRpcTransport` and trusts one RPC response path for `eth_getBlockByNumber`, `eth_getLogs`, and `eth_getTransactionReceipt`.
+Status: missing.
 
-Implement:
+Real files and tests:
 
-- `RpcProviderId` with name, URL redaction label, provider family, trust domain, and internal/external classification.
-- `RpcQuorumPolicy` with `min_providers`, `min_trust_domains`, `threshold`, required block tag policy, max skew, and `fail_closed` behavior.
-- `RpcQuorumClient` that queries providers independently and returns `QuorumResult<T>`.
-- `ProviderVote<T>` with provider id, latency, success/error, normalized response hash, block number, block hash, chain id when applicable, and response-specific fields.
-- Explicit degraded states: `Healthy`, `Divergent`, `QuorumUnavailable`, `ProviderDoS`, `Paused`.
+- Implement in `evmrelay/include/eth` and `evmrelay/src/eth`.
+- Existing seam: `eth::rpc::JsonRpcTransport` and `eth::rpc::RpcReceiptSource`.
+- Existing tests: `evmrelay/test/eth/rpc_receipt_source_test.cpp`, `evmrelay/test/eth/bridge_event_test.cpp`, `evmrelay/test/eth/json_rpc_test.cpp`.
 
-Apply quorum to:
+Current behavior:
 
-- finality head selection;
-- `eth_getLogs` ranges;
-- `eth_getTransactionReceipt`;
-- re-check by exact block hash before a validator votes;
-- destination confirmation checks if this repo later submits UTXO-to-EVM exit transactions.
+- `RpcReceiptSource` calls one transport for `eth_getBlockByNumber`, `eth_getLogs`, and `eth_getTransactionReceipt`.
+- `ReceiptResult` has receipt, tx hash, block number/hash, and log indexes, but no provider votes or quorum metadata.
 
-Fail closed on:
+Security risk:
 
-- insufficient provider count;
-- only one trust domain available;
-- provider disagreement on block hash, receipt status, tx hash, log index, emitter, event topics/data, chain id, or finality head;
-- external outage that would otherwise leave internal-only data;
-- internal outage that would otherwise leave one external provider.
+- A single compromised RPC provider can supply a relayable event.
+- Provider DoS can collapse verification to the remaining provider unless fail-closed behavior is explicit.
 
-Tests:
+Concrete implementation tasks:
 
-- providers disagree on block hash;
-- providers disagree on receipt status;
-- providers disagree on event logs;
-- external providers unavailable while internal provider returns a relayable event;
-- internal providers unavailable while one external provider returns a relayable event;
-- only one provider available in production mode;
-- provider returns wrong chain id;
+1. Add provider identity, quorum policy, provider vote, and quorum result data structures under `evmrelay/include/eth`; these are new and are not present today.
+2. Add a small quorum layer that uses the existing `JsonRpcTransport` seam; do not replace `RpcReceiptSource` with unrelated RPC infrastructure.
+3. Normalize and compare:
+   - block head by number/tag;
+   - logs by tx hash/log index/block hash/address/topics/data;
+   - transaction receipt by status, tx hash, block hash, log index, address, topics, data.
+4. Extend or wrap `IEthReceiptSource` so production bridge evidence receives quorum metadata without breaking current tests.
+5. Keep single-provider `RpcReceiptSource` available for development tests only.
+6. Fail closed on provider disagreement, missing block hash/log index, wrong chain id, one trust domain, or insufficient provider count.
+
+Tests to add before production logic:
+
+- providers disagree on block hash.
+- providers disagree on receipt status.
+- providers disagree on event logs.
+- only internal provider remains available.
+- only one external provider remains available.
+- one provider returns wrong chain id.
 - provider omits block hash or log index.
+- development profile can still use existing single-provider tests.
 
-## Phase 2: SecurityDecision Object
+Risk level: critical.
 
-Current gap: the receipt interfaces return receipts/batches, but not a decision object proving how a validator concluded an event is safe to vote on.
+Estimated complexity: large.
 
-Add `SecurityDecision` as the object passed from observation to validator voting:
+## Phase 2: Source-Event Decision Record
 
-- source chain id;
-- destination chain id;
-- source bridge contract;
-- destination bridge contract or configured receiver;
-- tx hash;
-- log index;
-- block number;
-- block hash;
-- required confirmation depth;
-- finality head kind and block number;
-- payload hash;
-- message nonce;
-- event topic0 and normalized log hash;
-- quorum policy id;
-- provider vote summary;
-- degraded state;
-- decision timestamp;
-- relay channel/profile id.
+Status: missing.
 
-Rules:
+Real files and tests:
 
-- Build validator vote evidence only from a `SecurityDecision`.
-- Persist the decision before voting.
-- Re-check the source receipt by exact block hash immediately before voting.
-- Include enough metadata in logs to reconstruct the decision without logging secrets.
+- Add to evmrelay near `eth::BridgeEventClaim`; choose filenames during implementation to match evmrelay style.
+- Use in parent bridge subject creation through `src/account/BridgeConsensusAdapter.hpp/.cpp` only after serialization format is defined.
+- Existing tests to extend: `evmrelay/test/eth/bridge_observation_test.cpp`, `test/src/blockchain/bridge_consensus_adapter_test.cpp`.
 
-Tests:
+Current behavior:
 
-- decision cannot be constructed without block hash, tx hash, log index, source chain, destination chain, and quorum metadata;
-- decision hash changes when any domain field changes;
-- stale finality depth is rejected;
-- divergent decision cannot enter validator voting state.
+- `BridgeEventClaim` binds source/destination chain, block number/hash, tx hash, log index, bridge contract, topics/data, sender, token/nonce, amount, recipient, observed time, and finality depth.
+- It does not bind quorum policy id, provider vote summary, degraded state, or re-check metadata.
 
-## Phase 3: ValidatorVotePolicy And Consensus Thresholds
+Security risk:
 
-Current gap: production validator voting needs an explicit policy gate. A validator should vote only after local multi-RPC quorum and local bridge policy checks.
+- Parent validators can approve a bridge claim without proof of how source-chain safety was decided.
+- Logs cannot reconstruct whether the claim came from healthy independent observations.
 
-Implement:
+Concrete implementation tasks:
 
-- `ValidatorVotePolicy` with configured source peers, destination receivers, required confirmation depths, allowed event topics, nonce policy, replay store, quorum policy, and bridge consensus policy.
-- `ValidatorVoteRequest` containing `SecurityDecision`, normalized bridge event evidence, validator identity, effective bridge weight, and local vote metadata.
-- `ValidatorVotePolicy::validate(request)` returning structured accept/reject reasons.
-- A checked vote entrypoint as the only production path for producing validator vote evidence or submitting a validator vote transaction.
-- Structured logs for every rejected vote attempt.
+1. Add a decision record with:
+   - all current `BridgeEventClaim` fields;
+   - quorum policy id;
+   - provider vote summary;
+   - degraded state;
+   - finality head kind/block number;
+   - decision timestamp;
+   - relay channel/profile id;
+   - normalized payload/log hash.
+2. Add construction validation: reject missing chain ids, block hash, tx hash, log index, source contract, topic0, finality depth, and quorum metadata.
+3. Add deterministic decision hash.
+4. Require bridge claim creation/signing for production to come from a healthy source-event decision record.
+5. Persist the decision before parent vote proposal creation. Use the existing CRDT/storage style only after choosing the storage owner.
 
-Production validator voting must reject:
+Tests to add:
 
-- missing quorum evidence;
-- degraded state other than `Healthy`;
-- unknown source peer or destination receiver;
-- wrong chain id;
-- unknown event topic;
-- stale finality;
-- nonce gap or replay;
-- unsafe 1-of-1 validator/verifier threshold;
-- bridge consensus that genesis can satisfy alone;
-- bridge consensus without minimum distinct validator and trust-domain counts;
-- policy/profile mismatch.
+- cannot construct without required domain fields.
+- decision hash changes when any domain field changes.
+- stale finality depth is rejected.
+- degraded decision cannot create production bridge vote evidence.
+- bridge consensus adapter rejects payloads missing decision/quorum metadata once the payload format is upgraded.
 
-Consensus target:
+Risk level: critical.
 
-- Normal SuperGenius reputation consensus can remain reputation-weighted.
-- Bridge mint consensus should use stricter bridge-specific thresholds.
-- Cap effective bridge voting weight per validator so the genesis node or any high-reputation node cannot mint by itself.
-- High-value or anomalous bridge mints require around 95% effective bridge voting weight or manual/operator review before outbound liquidity is made available.
+Estimated complexity: medium.
 
-Tests:
+## Phase 3: Bridge Certificate Policy And Consensus Thresholds
 
-- vote request without quorum evidence;
-- vote request with a single provider vote;
-- vote request from unknown bridge contract;
-- vote request with stale confirmation depth;
-- replayed tx hash/log index;
-- nonce gap;
-- production config with 1-of-1 validator threshold;
-- production config where genesis alone can satisfy bridge mint threshold;
-- bridge threshold reduction without governance protection.
+Status: missing.
+
+Real files and tests:
+
+- Parent implementation: `src/account/BridgeConsensusAdapter.hpp/.cpp`, `src/account/TransactionManager.cpp`, `src/blockchain/Consensus.hpp/.cpp`, `src/blockchain/ValidatorRegistry.hpp/.cpp`.
+- Tests: `test/src/blockchain/bridge_consensus_adapter_test.cpp`, `test/src/blockchain/consensus_certificate_test.cpp`.
+
+Current behavior:
+
+- `TransactionManager::HandleBridgeEventConsensusSubject` checks only nonzero chain ids and mappability to `BridgeEventMintRequest`.
+- `TransactionManager::OnBridgeEventConsensusCertificate` mints after certificate handling and `MintFunds`.
+- `PublicChainInputValidator::VerifyPublicChainSmartContract` returns `true`.
+
+Security risk:
+
+- A bridge subject can be approved without local multi-RPC quorum evidence or bridge policy.
+- Generic quorum can authorize bridge mints with unsafe effective validator concentration.
+
+Concrete implementation tasks:
+
+1. Add parent bridge-specific policy and tally code using the existing `ConsensusCertificate` and `ValidatorRegistry` data.
+2. Validate `BridgeEventClaim` or the source-event decision record against configured bridge channels:
+   - source chain id;
+   - destination chain id;
+   - source bridge contract;
+   - allowed topic;
+   - required finality depth;
+   - relay profile id/quorum policy id when Phase 2 exists.
+3. Add durable replay check keyed by source chain id, tx hash, log index, and block hash.
+4. Add bridge certificate policy validation before `MintFunds`.
+5. Replace `PublicChainInputValidator::VerifyPublicChainSmartContract` placeholder with validation that the transaction references an accepted bridge certificate/source-event decision.
+
+Tests to add:
+
+- vote/subject without quorum evidence rejects.
+- unknown bridge contract rejects.
+- wrong chain id rejects.
+- stale finality rejects.
+- replayed tx hash/log index rejects.
+- bridge certificate with unsafe threshold rejects.
+- bridge certificate where genesis alone satisfies generic quorum rejects.
+- `PublicChainInputValidator` rejects when no accepted bridge certificate backs the public-chain mint.
+
+Risk level: critical.
+
+Estimated complexity: large.
 
 ## Phase 4: Durable Relay State Machine
 
-Current gap: `EventDeduper` is in-memory. That is not sufficient for crash recovery or replay protection around irreversible bridge actions.
+Status: missing.
 
-Implement a durable `RelayStateMachine`:
+Real files and tests:
 
-```text
-Discovered
-QuorumPending
-QuorumVerified
-VoteRejected
-Voted
-MintConsensusReached
-ExitSubmitted
-ExitReviewPending
-ExitConfirmed
-Finalized
-Rejected
-Paused
-```
+- evmrelay currently has only `eth::EventDeduper` in `evmrelay/include/eth/bridge_event.hpp`.
+- Parent replay/transaction state lives in `src/account/TransactionManager.cpp`, `src/account/UTXOManager.cpp`, and consensus certificate storage in `src/blockchain/Consensus.cpp`.
 
-State identity:
+Current behavior:
 
-- source chain id;
-- destination chain id;
-- source bridge contract;
-- tx hash;
-- log index;
-- block hash;
-- message nonce or payload hash;
-- bridge-origin provenance id when the value enters SuperGenius UTXO.
+- evmrelay dedupes bridge events in memory by source chain id, tx hash, and log index.
+- Parent transaction replay protection is account nonce/certificate oriented, not source-event oriented.
 
-Rules:
+Security risk:
 
-- Every state transition is explicit and persisted.
-- Replays are idempotent and cannot re-enter voting after terminal states.
-- Reorgs move affected messages to `Rejected` or `Paused`.
-- Do not mark EVM exit complete until destination confirmation is quorum verified and the exit review window has passed or been explicitly approved.
-- Bridge-originated UTXO provenance follows splits, merges, transfers, and exits.
+- Crash/restart can lose bridge event dedupe state.
+- A reorg or changed block hash for the same tx/log id is not represented as a durable rejected/paused state.
+- Certificate-to-mint routing can be retried without a bridge-specific idempotency record.
 
-Tests:
+Concrete implementation tasks:
 
-- crash/restart after `QuorumVerified` does not duplicate validator voting;
-- crash/restart after `Voted` does not submit duplicate votes;
-- reorg removes previously observed event;
-- block hash changes for same tx/log id;
-- destination confirmation mismatch;
-- bridge-originated UTXO split/merge preserves provenance;
-- disputed provenance pauses or rejects EVM exit.
+1. Add a durable bridge event state store using the existing persistence style selected by the owning component.
+2. State identity:
+   - source chain id;
+   - destination chain id;
+   - bridge contract;
+   - tx hash;
+   - log index;
+   - block hash;
+   - claim/decision hash.
+3. States:
+   - `Discovered`
+   - `QuorumVerified`
+   - `VoteRejected`
+   - `Voted`
+   - `MintConsensusReached`
+   - `MintSubmitted`
+   - `Finalized`
+   - `Rejected`
+   - `Paused`
+4. Keep outbound exit states out until exit code exists.
+5. Make `TransactionManager::OnBridgeEventConsensusCertificate` idempotent for a finalized bridge event.
+
+Tests to add:
+
+- restart after quorum verified does not duplicate vote proposal.
+- restart after certificate does not duplicate mint.
+- same tx/log with changed block hash is rejected or paused.
+- finalized event cannot re-enter mint routing.
+
+Risk level: high.
+
+Estimated complexity: large.
 
 ## Phase 5: Production Configuration Validation
 
-Add strict production validation:
+Status: missing.
 
-- explicit chain id, canonical name, source bridge contract, destination receiver, event topic, confirmation depth, quorum policy, provider trust domains, validator set, effective bridge-weight caps, bridge threshold, admin policy, provenance policy, exit review policy, rollout stage, per-stage value thresholds, and replay store;
-- no mutable defaults in production;
-- no production startup with `confirmation_depth = 0`;
-- no startup with one provider, one trust domain, or one validator for high-value channels;
-- no startup where genesis or any single validator can satisfy bridge mint threshold alone;
-- no silent fallback from quorum to single provider;
-- startup security summary emitted as structured logs.
+Real files and tests:
 
-Suggested command:
+- evmrelay config entry points: `evmrelay/include/eth/eth_watch_cli.hpp`, `evmrelay/include/eth/eth_watch_service.hpp`.
+- parent likely needs a new bridge config component near `src/account` or existing application config once selected.
+- Workflow/config tests should be added alongside the implementation owner.
 
-```bash
-evmrelay --dry-run-config-audit --profile production --config <path>
-```
+Current behavior:
 
-Tests:
+- evmrelay `EthWatchServiceConfig` configures watches, chains, discovery, and connection counts.
+- No production bridge profile validates provider quorum, trust domains, validator thresholds, provenance, or exit policy.
 
-- missing quorum policy fails;
-- missing peer mapping fails;
-- threshold reduction fails;
-- confirmation-depth reduction fails;
-- 1-of-1 validator set fails;
-- genesis-alone threshold fails;
-- missing UTXO provenance policy fails for bridge channels;
-- missing EVM exit review policy fails for UTXO-to-EVM channels;
-- outbound mainnet exit enabled before approved rollout stage fails;
-- automatic exit threshold above the active rollout limit fails;
-- development profile still allows local single-provider tests.
+Security risk:
+
+- Production can start with dev/test-style defaults.
+- Missing quorum or threshold fields can silently degrade bridge safety.
+
+Concrete implementation tasks:
+
+1. Add explicit production bridge profile validation.
+2. Required fields:
+   - chain id and canonical name;
+   - source bridge contract;
+   - destination chain id/receiver;
+   - event topic;
+   - confirmation/finality depth;
+   - quorum policy;
+   - provider trust domains;
+   - bridge consensus policy;
+   - validator trust-domain mapping;
+   - replay store;
+   - provenance policy.
+3. Reject production startup when:
+   - confirmation depth is zero;
+   - one provider/trust domain is configured;
+   - bridge policy permits 1-of-1 or genesis-only quorum;
+   - quorum fallback to single provider is enabled;
+   - bridge provenance policy is missing;
+   - outbound exit config exists without rollout/review policy.
+4. Emit a structured startup security summary.
+
+Tests to add:
+
+- missing quorum policy fails.
+- missing bridge contract mapping fails.
+- threshold reduction fails.
+- confirmation-depth reduction fails.
+- 1-of-1 validator policy fails.
+- genesis-alone policy fails.
+- development profile still allows current single-provider tests.
+
+Risk level: critical.
+
+Estimated complexity: medium.
 
 ## Phase 6: Logging, Metrics, And Alerts
 
-For each relay decision, log:
+Status: partially implemented for generic logs; missing bridge security telemetry.
 
-- source/destination chain id;
-- source/destination contract;
-- tx hash;
-- log index;
-- block number/hash;
-- confirmation depth;
-- provider vote summary;
-- quorum result;
-- validator id / observer address;
-- effective bridge voting weight;
-- message hash;
-- bridge-origin provenance id where applicable;
-- state transition;
-- rejection reason if rejected.
+Real files:
 
-Add metrics and alerts for:
+- evmrelay: `EthWatchService` stats in `evmrelay/include/eth/eth_watch_service.hpp`.
+- parent: logging in `TransactionManager.cpp`, `Consensus.cpp`, `ValidatorRegistry.cpp`.
 
-- RPC provider divergence;
-- quorum unavailable;
-- internal-only or external-only degraded operation;
-- unsafe failover;
-- new validator/admin address;
-- threshold reduction;
-- confirmation-depth reduction;
-- unknown contract emitting a watched topic;
-- repeated rejected vote attempts;
-- genesis or one operator approaching bridge threshold alone;
-- high-value mint request;
-- UTXO-to-EVM exit entering review;
-- outbound rollout stage change;
-- manual review threshold change;
-- exit review override, pause, burn, or throttle change;
-- log export gaps;
-- state machine stuck in `QuorumPending`, `Voted`, `MintConsensusReached`, `ExitSubmitted`, or `ExitReviewPending`.
+Current behavior:
 
-Do not log:
+- evmrelay exposes counters for ETH messages, receipts, logs, matched logs, discarded logs, and decode failures.
+- parent logs bridge certificate routing but does not log quorum/provider/bridge policy details.
 
-- private keys;
-- bearer tokens;
-- session tokens;
-- raw provider URLs with embedded credentials.
+Security risk:
+
+- Operators cannot reconstruct why a bridge event was accepted.
+- Unsafe config or threshold changes have no bridge-specific alert surface.
+
+Concrete implementation tasks:
+
+1. Add structured logs for:
+   - source/destination chain id;
+   - bridge contract;
+   - tx hash;
+   - log index;
+   - block number/hash;
+   - finality depth;
+   - quorum policy id;
+   - provider vote summary;
+   - decision hash;
+   - bridge effective vote tally;
+   - mint transaction hash;
+   - rejection reason.
+2. Add metrics counters for:
+   - provider divergence;
+   - quorum unavailable;
+   - degraded decision rejected;
+   - bridge policy reject reason;
+   - replay reject;
+   - genesis/high-weight validator cap hit;
+   - bridge mint routed.
+3. Do not log private keys, provider URLs with credentials, bearer tokens, or session tokens.
+
+Tests to add:
+
+- unit tests for redaction helpers if provider identifiers include URLs.
+- bridge policy rejection logs include reason codes without secrets.
+
+Risk level: medium.
+
+Estimated complexity: medium.
 
 ## Phase 7: CI/CD And Supply Chain
 
-Current gaps observed in `.github/workflows`:
+Status: partially implemented with known gaps.
 
-- release workflow uses `GH_TOKEN: secrets.GNUS_TOKEN_1` at job scope;
-- third-party actions are version-pinned by tag, not commit SHA;
-- container image uses `:latest`;
-- container grants `IPC_LOCK`;
-- workflow changes are ignored by the release workflow path filter;
-- self-hosted runner cleanup performs broad destructive operations.
+Real files:
 
-Hardening tasks:
+- `.github/workflows/cmake.yml`
+- `.github/workflows/build-release-tags.yml`
 
-- Add explicit workflow `permissions:` with least privilege.
-- Move privileged tokens to the steps that need them.
-- Replace long-lived `GNUS_TOKEN_1` with OIDC or scoped release/download tokens where feasible.
-- Pin third-party actions by commit SHA.
-- Pin container images by digest.
-- Require review for `.github/workflows/**`.
-- Ensure PR workflows cannot access production secrets.
-- Add provenance/SBOM generation for release artifacts.
-- Sign release archives and verify signatures in deployment.
-- Separate build, staging, and production credentials.
-- Add CI check for suspicious lifecycle scripts and unexpected workflow permission broadening.
+Current behavior:
+
+- `GH_TOKEN: ${{ secrets.GNUS_TOKEN_1 }}` is set at job scope.
+- containers use `ghcr.io/geniusventures/debian-bullseye:latest`.
+- `cmake.yml` grants `--cap-add=IPC_LOCK`.
+- third-party actions are tag-pinned, e.g. `actions/checkout@v6`.
+- self-hosted cleanup uses broad `rm -rf` patterns.
+- workflow path filters ignore `.github/workflows/**` in at least `cmake.yml`.
+
+Security risk:
+
+- Compromised job step gets broad token access.
+- Mutable action/container tags can change build behavior.
+- Self-hosted runner state can affect builds or leak secrets.
+
+Concrete implementation tasks:
+
+1. Add explicit least-privilege `permissions:` to both workflows.
+2. Move privileged tokens from job scope to the specific steps that need them.
+3. Replace long-lived `GNUS_TOKEN_1` for release/download flows where OIDC or scoped tokens are feasible.
+4. Pin actions by commit SHA.
+5. Pin containers by digest.
+6. Remove `IPC_LOCK` unless a tested build step requires it.
+7. Require review for `.github/workflows/**`; do not path-ignore workflow changes.
+8. Replace broad cleanup with scoped workspace cleanup that cannot escape expected directories.
+9. Add SBOM/provenance/signature generation for release artifacts.
+
+Tests/checks to add:
+
+- workflow lint/check that fails on `:latest`, job-scope `GH_TOKEN`, unpinned third-party actions, broad workflow permissions, and workflow path-ignore.
+
+Risk level: high.
+
+Estimated complexity: medium.
 
 ## Phase 8: Runtime And Developer Controls
 
-Runtime:
+Status: missing in repo documentation/config.
 
-- run non-root;
-- read-only root filesystem where practical;
-- drop Linux capabilities;
-- block privileged containers;
-- restrict `ptrace` and debug tooling;
-- monitor unexpected shared libraries, memory maps, shell execution, core dumps, and config drift;
-- restart from clean images after suspected tampering.
+Real files:
 
-Developer workstation and repository handling:
+- No deployment manifests were found in the audited paths.
+- Add documentation under `AgentDocs` or `SECURITY.md`.
 
-- add `SECURITY.md` guidance for cloning untrusted repos only in disposable containers/VMs;
-- avoid running unknown install scripts on privileged workstations;
-- require hardware-backed MFA for GitHub/cloud;
-- avoid long-lived local cloud credentials;
-- document token rotation and developer compromise response.
+Current behavior:
 
-## Suggested Implementation Order
+- No repo-level runtime hardening profile for bridge relay operators was found.
+- No developer compromise response doc was found in the audited paths.
 
-1. Add `RpcQuorumPolicy`, `QuorumResult`, and tests around normalized receipt/log/block comparisons.
-2. Add `RpcQuorumClient` and wire it behind `IEthReceiptSource` without removing existing test seams.
-3. Add `SecurityDecision` and require it for validator vote construction.
-4. Add `ValidatorVotePolicy` and enforce bridge-specific thresholds, effective weight caps, minimum validator counts, and trust-domain diversity.
-5. Add durable relay/bridge state, replay tests, and UTXO provenance tracking requirements.
-6. Add EVM exit review/throttle rollout policy validation and alerts.
-7. Add production config audit and startup validation.
-8. Add structured security logs and alert hooks.
-9. Harden CI workflows and add `SECURITY.md`.
-10. Add deployment/runtime hardening manifests once production deployment target is known.
+Security risk:
+
+- A compromised developer session or runner can poison config/build/runtime state without a standard response.
+
+Concrete implementation tasks:
+
+1. Add `SECURITY.md` or `AgentDocs/SECURITY_HARDENING.md` with:
+   - disposable VM/container guidance for untrusted repos;
+   - token rotation steps;
+   - hardware-backed MFA requirement;
+   - local cloud credential handling;
+   - bridge relay compromise response.
+2. When deployment manifests exist, harden them with:
+   - non-root runtime;
+   - read-only root filesystem where practical;
+   - dropped Linux capabilities;
+   - no privileged containers;
+   - restricted debug tooling;
+   - clean-image restart after suspected tampering.
+
+Tests/checks to add:
+
+- Deployment manifest checks only after manifests exist.
+- Documentation presence check can be added to CI if desired.
+
+Risk level: medium.
+
+Estimated complexity: small for docs; unknown for deployment manifests because they are not present.
+
+## Implementation Order
+
+1. Add tests for evmrelay RPC quorum failure cases in `evmrelay/test/eth/rpc_receipt_source_test.cpp`.
+2. Implement evmrelay `RpcQuorumPolicy`, provider votes, quorum result, and fail-closed comparisons.
+3. Add evmrelay source-event decision record tests and implementation.
+4. Upgrade bridge claim/proposal flow to require a healthy source-event decision record in production.
+5. Add parent bridge policy tests for threshold, caps, distinct validators, trust domains, and genesis-alone rejection.
+6. Implement parent bridge policy and enforce it in `TransactionManager::OnBridgeEventConsensusCertificate` before `MintFunds`.
+7. Replace `PublicChainInputValidator::VerifyPublicChainSmartContract` placeholder with certificate/security-decision-backed validation.
+8. Add durable bridge event replay/state storage.
+9. Add UTXO bridge provenance tests and additive protobuf fields.
+10. Implement provenance propagation through bridge mint and transfer.
+11. Add production config audit for evmrelay and parent bridge profile.
+12. Add bridge logs/metrics/rejection reason codes.
+13. Harden GitHub workflows.
+14. Add runtime/developer security documentation.
 
 ## Definition Of Done
 
-- A single RPC provider cannot produce a production validator vote.
-- RPC/provider DoS cannot collapse verification into single-provider trust.
-- Validators reject vote requests without quorum evidence and policy approval.
-- Chain id, block hash, emitter contract, tx hash, log index, peer, nonce, payload hash, and quorum policy are bound into the validator decision.
-- Bridge mint consensus requires high effective voting weight, minimum distinct validators, and trust-domain diversity.
+- One RPC provider cannot produce a production bridge vote or mint.
+- RPC/provider DoS cannot degrade production bridge verification into single-provider trust.
+- Bridge claims bind source chain id, destination chain id, bridge contract, tx hash, log index, block hash, event topic/data, finality, quorum policy, and provider vote summary.
+- Parent bridge certificate routing rejects missing or degraded quorum evidence.
+- Bridge mint consensus uses bridge-specific effective weight, minimum distinct validators, and trust-domain diversity.
 - Genesis or any one high-reputation validator cannot satisfy bridge mint consensus alone.
-- Bridge-originated UTXO value preserves provenance through internal movement until EVM exit.
-- UTXO-to-EVM exits are subject to review windows, throttles, pause, and recovery controls.
-- Reorgs move affected messages to a safe state.
-- Replays are durably rejected.
-- Unsafe production configs fail startup validation.
-- Threshold reductions require protected governance or are rejected.
-- Logs reconstruct every relay decision.
-- Alerts cover divergence, unsafe failover, validator/admin changes, config reductions, high-value bridge activity, exit review events, and runtime tampering indicators.
-- Tests cover normal relay flow and adversarial failure modes.
+- `PublicChainInputValidator` no longer returns unconditional success for public-chain bridge mints.
+- Source event replay is durably rejected.
+- Reorg/block-hash changes move bridge events to rejected or paused state.
+- Bridge-originated UTXO value preserves provenance through internal movement.
+- Unsafe production bridge configs fail startup.
+- Logs reconstruct every accepted and rejected bridge decision without leaking secrets.
+- CI workflows avoid mutable action/container tags, broad job-scope secrets, and unsafe self-hosted cleanup.

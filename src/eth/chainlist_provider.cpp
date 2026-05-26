@@ -6,7 +6,7 @@
 #include <base/json_utility.hpp>
 
 #include <boost/json.hpp>
-#include <rlp/rlp-logger.hpp>
+#include <base/rlp-logger.hpp>
 
 #include <algorithm>
 #include <string>
@@ -65,12 +65,12 @@ template <typename T>
         }
     }
 
-    if ( url.starts_with( "wss://" ) || url.starts_with( "ws://" ) )
+    if ( url.find( "wss://" ) == 0 || url.find( "ws://" ) == 0 )
     {
         return true;
     }
 
-    if ( !url.starts_with( "https://" ) && !url.starts_with( "http://" ) )
+    if ( url.find( "https://" ) != 0 && url.find( "http://" ) != 0 )
     {
         return true;
     }

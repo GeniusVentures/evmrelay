@@ -1,6 +1,9 @@
 // intx: extended precision integer library.
 // Copyright 2019 Pawel Bylica.
 // Licensed under the Apache License, Version 2.0.
+//
+// Vendored from: https://github.com/chfast/intx
+// Upstream commit: TODO — track vendored SHA/tag
 
 #ifndef EVMRELAY_INCLUDE_RLP_INTX_HPP
 #define EVMRELAY_INCLUDE_RLP_INTX_HPP

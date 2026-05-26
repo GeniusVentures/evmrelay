@@ -94,6 +94,40 @@ TEST(JsonRpcTest, ParsesGetLogsResponse)
     ASSERT_EQ((*parsed)[0].log.topics.size(), 1U);
 }
 
+TEST(JsonRpcTest, BuildsEthChainIdRequest)
+{
+    const auto request = eth::rpc::make_eth_chain_id_request(1);
+    const auto serialized = boost::json::serialize(request);
+
+    EXPECT_NE(serialized.find("\"method\":\"eth_chainId\""), std::string::npos);
+    EXPECT_NE(serialized.find("\"id\":1"), std::string::npos);
+    EXPECT_NE(serialized.find("\"jsonrpc\":\"2.0\""), std::string::npos);
+}
+
+TEST(JsonRpcTest, ParsesChainIdResponse)
+{
+    const auto parsed = eth::rpc::parse_chain_id_response(
+        R"({"jsonrpc":"2.0","id":1,"result":"0x1"})");
+
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(*parsed, 1U);
+}
+
+TEST(JsonRpcTest, ParsesChainIdResponseLargeValue)
+{
+    const auto parsed = eth::rpc::parse_chain_id_response(
+        R"({"jsonrpc":"2.0","id":1,"result":"0x89"})");
+
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(*parsed, 137U);
+}
+
+TEST(JsonRpcTest, RejectsInvalidChainIdResponse)
+{
+    EXPECT_FALSE(eth::rpc::parse_chain_id_response("not json").has_value());
+    EXPECT_FALSE(eth::rpc::parse_chain_id_response("{}").has_value());
+}
+
 TEST(JsonRpcTest, ParsesTransactionReceiptResponseWithExplicitLogIndexes)
 {
     const std::string json =

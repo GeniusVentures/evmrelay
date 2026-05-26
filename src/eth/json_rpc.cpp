@@ -182,6 +182,30 @@ boost::json::object make_json_rpc_request(
     return request;
 }
 
+boost::json::object make_eth_chain_id_request(uint64_t id)
+{
+    boost::json::array params;
+    return make_json_rpc_request("eth_chainId", std::move(params), id);
+}
+
+std::optional<uint64_t> parse_chain_id_response(std::string_view json_text)
+{
+    static const json::JsonSchemaObject kChainIdResponseSchema{{
+        {"result", json::JsonFieldType::kString, true, std::nullopt, nullptr, nullptr}
+    }};
+    const auto parsed = json::parse_schema_object(json_text, kChainIdResponseSchema);
+    if (!parsed)
+    {
+        return std::nullopt;
+    }
+    const auto chain_id_hex = json::get_parsed_string(parsed.value(), "result");
+    if (!chain_id_hex)
+    {
+        return std::nullopt;
+    }
+    return parse_quantity_value(chain_id_hex.value());
+}
+
 boost::json::object make_get_block_by_number_request(RpcBlockTag tag, uint64_t id)
 {
     boost::json::array params;

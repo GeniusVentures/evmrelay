@@ -21,6 +21,8 @@ add_library(eth OBJECT
         ${CMAKE_CURRENT_LIST_DIR}/rpc_manager.cpp
         ${CMAKE_CURRENT_LIST_DIR}/rpc_http_transport.cpp
         ${CMAKE_CURRENT_LIST_DIR}/chainlist_provider.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/rpc_probe.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/rpc_config_audit.cpp
         ${CMAKE_CURRENT_LIST_DIR}/eth_watch_runner.cpp
 )
 

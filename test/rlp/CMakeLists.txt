@@ -122,6 +122,14 @@ target_link_libraries(rlp_profiling_tests
     evmrelay
 )
 
+# RLP fuzz tests
+addtest(rlp_fuzz_tests
+    rlp_fuzz_tests.cpp
+)
+target_link_libraries(rlp_fuzz_tests
+    evmrelay
+)
+
 # Suppress nodiscard warnings in test code for cleaner output
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set(RLP_TEST_TARGETS
@@ -140,6 +148,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         rlp_streaming_simple_api_demo
         rlp_ethereum_real_world_examples
         rlp_profiling_tests
+        rlp_fuzz_tests
     )
     foreach(target ${RLP_TEST_TARGETS})
         target_compile_options(${target} PRIVATE -Wno-unused-result)

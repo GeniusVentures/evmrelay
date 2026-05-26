@@ -116,6 +116,19 @@ target_link_libraries(bridge_observation_test
     evmrelay
 )
 
+# End-to-end bridge event pipeline tests
+addtest(bridge_event_e2e_test
+    bridge_event_e2e_test.cpp
+)
+
+# ChainList provider tests
+addtest(chainlist_provider_test
+    chainlist_provider_test.cpp
+)
+target_link_libraries(chainlist_provider_test
+    evmrelay
+)
+
 # Secp256k1 utility tests
 addtest(secp256k1_utility_test
     secp256k1_utility_test.cpp

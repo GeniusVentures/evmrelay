@@ -137,3 +137,87 @@ TEST(BridgeEventTest, VerifyReceiptLogUsesExplicitRpcLogIndexes)
     const auto result = eth::verify_receipt_log(receipt, claim);
     EXPECT_TRUE(result);
 }
+
+TEST(BridgeEventTest, ComputeBridgeMessageIdIsDeterministic)
+{
+    const auto claim = make_claim();
+    const auto id1 = eth::bridge_message_id(claim);
+    const auto id2 = eth::bridge_message_id(claim);
+    EXPECT_EQ(id1, id2);
+    EXPECT_FALSE(id1 == eth::Hash256{});
+}
+
+TEST(BridgeEventTest, ComputeBridgeMessageIdMatchesFreeFunction)
+{
+    const auto claim = make_claim();
+    const auto from_claim = eth::bridge_message_id(claim);
+    const auto from_fn = eth::compute_bridge_message_id(
+        claim.src_chain_id, claim.bridge_contract, claim.tx_hash, claim.log_index);
+    EXPECT_EQ(from_claim, from_fn);
+}
+
+TEST(BridgeEventTest, ComputeBridgeMessageIdChangesWithDifferentChainId)
+{
+    auto claim = make_claim();
+    const auto id1 = eth::bridge_message_id(claim);
+    claim.src_chain_id = 56;
+    const auto id2 = eth::bridge_message_id(claim);
+    EXPECT_NE(id1, id2);
+}
+
+TEST(BridgeEventTest, ComputeBridgeMessageIdChangesWithDifferentContract)
+{
+    auto claim = make_claim();
+    const auto id1 = eth::bridge_message_id(claim);
+    claim.bridge_contract = make_filled<eth::Address>(0xAA);
+    const auto id2 = eth::bridge_message_id(claim);
+    EXPECT_NE(id1, id2);
+}
+
+TEST(BridgeEventTest, ComputeBridgeMessageIdChangesWithDifferentTxHash)
+{
+    auto claim = make_claim();
+    const auto id1 = eth::bridge_message_id(claim);
+    claim.tx_hash = make_filled<eth::Hash256>(0xBB);
+    const auto id2 = eth::bridge_message_id(claim);
+    EXPECT_NE(id1, id2);
+}
+
+TEST(BridgeEventTest, ComputeBridgeMessageIdChangesWithDifferentLogIndex)
+{
+    auto claim = make_claim();
+    const auto id1 = eth::bridge_message_id(claim);
+    claim.log_index = 5;
+    const auto id2 = eth::bridge_message_id(claim);
+    EXPECT_NE(id1, id2);
+}
+
+TEST(BridgeEventTest, ComputeBridgeMessageIdIgnoresNonCanonicalFields)
+{
+    auto claim = make_claim();
+    const auto id1 = eth::bridge_message_id(claim);
+
+    claim.amount = intx::uint256(99999);
+    claim.block_number = 55555;
+    claim.observed_at = 77777;
+    claim.finality_depth = 32;
+
+    const auto id2 = eth::bridge_message_id(claim);
+    EXPECT_EQ(id1, id2);
+}
+
+TEST(BridgeEventTest, ComputeBridgeMessageIdProducesValidHashWithZeroFields)
+{
+    eth::BridgeEventClaim zero_claim;
+    const auto id = eth::bridge_message_id(zero_claim);
+    EXPECT_FALSE(id == eth::Hash256{});
+}
+
+TEST(BridgeEventTest, ComputeBridgeMessageIdNearCollisionDifferentDestChain)
+{
+    auto claim = make_claim();
+    const auto id1 = eth::bridge_message_id(claim);
+    claim.dest_chain_id = 999;
+    const auto id2 = eth::bridge_message_id(claim);
+    EXPECT_EQ(id1, id2);
+}

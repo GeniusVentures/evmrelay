@@ -54,6 +54,39 @@ struct BridgeEventKey
 [[nodiscard]] bool operator<(const BridgeEventKey& lhs, const BridgeEventKey& rhs) noexcept;
 [[nodiscard]] BridgeEventKey bridge_event_key(const BridgeEventClaim& claim) noexcept;
 
+/**
+ * @brief Canonical message identifier for an EVM bridge source event.
+ *
+ * Computed as keccak256 over a deterministic big-endian encoding of:
+ *   src_chain_id (8 bytes) || bridge_contract (20 bytes) || tx_hash (32 bytes) || log_index (4 bytes)
+ *
+ * This identifier is stable across observers, replay attempts, and consensus rounds.
+ * It is used for deduplication, processing-state tracking, slot-key assignment,
+ * and anti-double-mint persistence.
+ *
+ * @param[in] src_chain_id     Numeric source chain ID.
+ * @param[in] bridge_contract  Bridge contract address on the source chain.
+ * @param[in] tx_hash          Transaction hash containing the event log.
+ * @param[in] log_index        Log index within the transaction receipt.
+ * @return 32-byte keccak-256 hash serving as the canonical message_id.
+ */
+[[nodiscard]] Hash256 compute_bridge_message_id(
+    uint64_t         src_chain_id,
+    const Address&   bridge_contract,
+    const Hash256&   tx_hash,
+    uint32_t         log_index) noexcept;
+
+/**
+ * @brief Convenience overload that extracts canonical fields from a claim.
+ * @param[in] claim  Bridge event claim with populated source identity fields.
+ * @return Canonical message_id for the claim.
+ */
+[[nodiscard]] inline Hash256 bridge_message_id(const BridgeEventClaim& claim) noexcept
+{
+    return compute_bridge_message_id(
+        claim.src_chain_id, claim.bridge_contract, claim.tx_hash, claim.log_index);
+}
+
 /// @brief In-memory event deduper keyed by source chain, transaction hash, and log index.
 class EventDeduper
 {

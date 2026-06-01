@@ -243,3 +243,11 @@ addtest(rpc_config_audit_test
 target_link_libraries(rpc_config_audit_test
     evmrelay
 )
+
+# Live RPC bridge event detection → receipt verification test
+addtest(rpc_bridge_live_test
+    rpc_bridge_live_test.cpp
+)
+target_link_libraries(rpc_bridge_live_test
+    evmrelay
+)

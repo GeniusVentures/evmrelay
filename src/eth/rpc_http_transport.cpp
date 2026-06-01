@@ -70,10 +70,32 @@ constexpr auto kHttpVersion = 11;
     }
 
     ssl::context ssl_ctx(ssl::context::tls_client);
+
     ssl_ctx.set_default_verify_paths(ec);
-    if (ec)
+
     {
-        return std::nullopt;
+        const char* env_cert_file = std::getenv("SSL_CERT_FILE");
+        if (env_cert_file != nullptr && env_cert_file[0] != '\0')
+        {
+            boost::system::error_code load_ec;
+            ssl_ctx.load_verify_file(env_cert_file, load_ec);
+        }
+    }
+
+    {
+        static const char* kFallbackCaPaths[] = {
+            "/etc/ssl/cert.pem",
+            "/opt/homebrew/etc/openssl@3/cert.pem",
+            "/opt/homebrew/etc/ca-certificates/cert.pem",
+            "/usr/local/etc/openssl@3/cert.pem",
+            "/usr/local/etc/openssl/cert.pem",
+            "/etc/ssl/certs/ca-certificates.crt",
+        };
+        for (const auto* ca_path : kFallbackCaPaths)
+        {
+            boost::system::error_code load_ec;
+            ssl_ctx.load_verify_file(ca_path, load_ec);
+        }
     }
 
     ssl::stream<beast::tcp_stream> stream(io, ssl_ctx);

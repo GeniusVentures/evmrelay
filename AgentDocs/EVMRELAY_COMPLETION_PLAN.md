@@ -300,6 +300,19 @@ Remaining work:
 - ~~Document the discovery-to-dialer pipeline: discovery seeds produce discovered peer candidates, peer candidates enter a bounded dial queue, and RLPx/ETH sessions consume from that queue.~~
 - ~~Document `examples/eth_watch/eth_watch.cpp` as an example CLI over the production `EthWatchService` APIs, not as the implementation home for relay behavior.~~
 
+--- 
+
+## Scope Boundary: evmrelay vs SuperGenius
+
+**evmrelay** provides public RPC endpoint infrastructure, endpoint health/backoff, receipt source factory, and single-endpoint receipt verification (`verify_receipt_log()`, `eth_chainId` probing). It does NOT build multi-provider quorum comparison, `SecurityDecision`, or bridge consensus — those are SuperGenius concerns.
+
+| Scope | Tasks |
+|-------|-------|
+| **evmrelay** | 7, 8a (endpoint health, receipt source factory), 13-17 |
+| **SuperGenius** | 8b (quorum verifier, SecurityDecision), 9-10, 18-23 |
+
+---
+
 ### 7. ChainList / Ethereum-Lists RPC Metadata Ingestion
 
 Goal: create a normalized list of EVM-compatible chains and public RPC nodes that can be loaded into `rpc_manager`. CSV generation is out of scope for this plan.
@@ -403,37 +416,29 @@ Tests:
 - validates `eth_chainId` success, wrong-chain response, invalid hex response, timeout, and provider error through a mock transport;
 - produces `RpcEndpointConfig` candidates without checking any API key into fixtures.
 
-### 8. RPC Manager Finalization For Bridge Verification
+### 8. RPC Manager Finalization (evmrelay scope)
 
 The `RPC_MANAGER_HANDOFF.md` foundation should be completed before parent watcher integration relies on it.
 
-Implement:
+Implement (evmrelay):
 
 - Finish endpoint health state in `RpcEndpointPool`: available, temporarily failed, disabled, with retry/backoff metadata.
 - Add `RpcReceiptSourceFactory` or an equivalent adapter that creates chain-scoped receipt sources from `RpcManager`.
-- Add a `RpcReceiptVerifier` or `RpcObservedMessageVerifier` that accepts an observed bridge event/log and verifies it through multiple configured RPC endpoints.
-- Apply RPC checks to:
+- Apply single-endpoint RPC checks to:
   - `eth_chainId`;
   - finality head / confirmation depth;
   - `eth_getTransactionReceipt`;
   - exact `blockHash` re-check;
-  - log index, emitter address, topic0, topics, data, tx hash, block number, block hash, and status;
-  - bridge/burn amount/value, source sender, destination recipient, nonce/message id, and configured source/destination domain fields after ABI decoding.
-- Return a `SecurityDecision`-compatible result rather than a bare boolean.
-- Fail closed when quorum is unavailable, trust domains are insufficient, endpoints disagree, the chain id is wrong, finality is stale, or required receipt/log fields are missing.
+  - log index, emitter address, topic0, topics, data, tx hash, block number, block hash, and status.
+- Fail closed when the endpoint is unavailable, chain id is wrong, finality is stale, or required receipt/log fields are missing.
 
-Tests:
+**SuperGenius scope (NOT evmrelay):**
+- Multi-provider quorum comparison (`RpcQuorumClient`, `ProviderVote<T>`)
+- `SecurityDecision` structured evidence object
+- `RpcReceiptVerifier` / `RpcObservedMessageVerifier` that orchestrates across multiple endpoints
+- Trust domain diversity checks, quorum policy
 
-- endpoint failure marks only that endpoint unhealthy;
-- chain with no usable endpoint fails closed;
-- wrong chain id fails closed;
-- providers disagree on block hash;
-- providers disagree on receipt status;
-- providers disagree on event log contents;
-- external-only or internal-only provider availability fails in production policy when diversity is required;
-- bridge/burn event with mismatched value, recipient, nonce, contract, topic, or chain domain is rejected.
-
-### 9. Parent Project Watcher Integration
+### 9. Parent Project Watcher Integration **▶ SuperGenius scope**
 
 Goal: move the parent EVM watcher from single-endpoint websocket forwarding to `evmrelay` observation plus RPC-backed verification.
 
@@ -469,7 +474,7 @@ Parent integration tests:
 - stopWatching shuts down service and RPC work cleanly;
 - websocket/raw mode, if retained, is diagnostic-only and marked non-consensus.
 
-### 10. Bridge Mint Consensus Integration Criteria
+### 10. Bridge Mint Consensus Integration Criteria **▶ SuperGenius scope**
 
 This plan should finish with a production bridge path that cannot mint from one source of truth.
 
@@ -486,23 +491,17 @@ Completion criteria:
 
 ## Suggested Implementation Order
 
-1. Lock schema filename and documentation examples.
-2. ~~Add failing C++ tests for `nodes` vs `bootnodes` separation.~~
-3. ~~Update `bootstrap_peers` to parse `bootnodes`.~~
-4. ~~Treat `chain_enodes.json.gz` as the startup pre-cache: load `nodes` for immediate dialing and `bootnodes` for discovery seeding.~~
-5. ~~Add or formalize the discovery-to-dialer queue adapter and backpressure policy under `include/eth` / `src/eth`.~~
-6. ~~Implement discv4 fallback for chains without usable pre-cached `nodes`, with Gnosis Chain as the first target.~~
-7. ~~Move reusable scheduler/discovery orchestration out of `examples/eth_watch/eth_watch.cpp` and into `EthWatchService` production code.~~
-8. ~~Add chain config support for both arrays without changing direct peer behavior.~~
-9. ~~Update `eth_watch` peer selection so direct mode, cache-first mode, bootnode discovery fallback, and hybrid mode are explicit through production service APIs. Cache-first and bootnode fallback now use production service APIs; direct mode remains an example-local manual helper.~~
-10. ~~Add EIP-1459 / ENR tree source support and tests for discovery seed generation for chains that support it, with Ethereum/Polygon defaulting to ENR-tree discovery and other chains defaulting to discv4.~~
-11. ~~Run focused discv4, discv5, eth, and eth_watch tests.~~
-12. ~~Refresh docs and smoke-test commands.~~
+### evmrelay scope (this repo)
+
+1-12. ~~Completed~~ (see task list above)
 13. Add ChainList / ethereum-lists parser fixtures and normalize chain metadata plus HTTP(S)/WSS endpoint lists.
 14. Add ChainList downloader/fallback path: `chainid.network/chains.json` first, then ethereum-lists `_data/chains/*.json` parsing.
 15. Convert normalized ChainList RPC endpoints into `RpcEndpointConfig` candidates loaded by `rpc_manager`.
 16. Add optional endpoint probing with `eth_chainId`, wrong-chain rejection, endpoint diagnostics, and availability marking.
 17. Finish `RpcEndpointPool` health/backoff and `RpcReceiptSourceFactory` from `RpcManager`.
+
+### SuperGenius scope (parent repo — `src/watcher/`, `src/account/`)
+
 18. Implement RPC verification for observed bridge/burn events, including receipt/log/block/finality checks and decoded value/domain checks.
 19. Add `SecurityDecision` or equivalent verified evidence object and make verifier output the only bridge-mintable watcher payload.
 20. Replace `src/watcher/impl/evm_messaging_watcher.*` websocket-only behavior with a parent-project adapter over `EthWatchService` plus RPC verification.

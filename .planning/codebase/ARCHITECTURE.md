@@ -1,7 +1,19 @@
 <!-- refreshed: 2026-05-25 -->
 # Architecture
 
-**Analysis Date:** 2026-05-25
+**Analysis Date:** 2026-05-25 (updated 2026-05-25)
+
+## Scope & Consumer Boundary
+
+**evmrelay** is a C++17 static library with three core responsibilities:
+
+1. **Watcher Service** — Ethereum P2P peer discovery (discv4/discv5), RLPx encrypted transport, ETH subprotocol event watching (Bloom prefilter, receipt request, log match, ABI decode), and bridge event normalization.
+2. **Public RPC List Provider** — Ingestion of public RPC endpoint metadata from chain lists (`chainid.network/chains.json`), endpoint discovery, and metadata curation.
+3. **RPC Connection Maker** — Multi-endpoint RPC pool management (`RpcManager`), HTTP transport (`RpcHttpTransport`), endpoint health tracking, rate limiting, and receipt fetching via JSON-RPC.
+
+**Consumer:** The **SuperGenius** parent repository (`src/watcher/`) consumes evmrelay as a library. `src/watcher/` is the **bridge orchestrator** — it receives verified observations from evmrelay, manages the message handling lifecycle, and coordinates mint verification. `src/account/` code uses evmrelay RPC endpoints to verify stored messages before constructing mint transactions.
+
+**What evmrelay does NOT do:** evmrelay does not decide what happens with observed events (minting, escrow release, validator voting). It does not construct transactions, manage UTXO state, or maintain bridge consensus state machines. These concerns belong to the SuperGenius parent repository.
 
 ## System Overview
 
@@ -58,12 +70,16 @@
 | DialScheduler | Per-chain connection slot management with two-level resource cap | `include/discv4/dial_scheduler.hpp` |
 | EthPeerSession | ETH/66-69 Status handshake builder and validator | `src/eth/eth_peer_session.cpp` |
 | EthWatchRunner | Per-session wrapper: RLPx session + EthWatchService + event callback bridging | `src/eth/eth_watch_runner.cpp` |
-| EthWatchService | Core event subscription engine: Bloom filter → receipt request → log match → ABI decode | `src/eth/eth_watch_service.cpp` |
+| EthWatchService | Core event subscription engine: Bloom filter → receipt request → log match → ABI decode → callback to consumer | `src/eth/eth_watch_service.cpp` |
 | EventFilter | Contract address / event signature filtering with Bloom prefilter | `src/eth/event_filter.cpp` |
 | ABI Decoder | Decode EVM ABI-encoded event log data/topics into typed values | `src/eth/abi_decoder.cpp` |
 | ChainTracker | Block deduplication and chain tip tracking | `src/eth/chain_tracker.cpp` |
 | FinalityPolicy | Chain-specific finality head selection (`finalized`/`safe`/`latest`) | `src/eth/finality_policy.cpp` |
-| RPC Manager | RPC endpoint pool management with priority/weight/rate-limit/health | `src/eth/rpc_manager.cpp` |
+| RPC Manager | **RPC connection maker:** endpoint pool management with priority/weight/rate-limit/health | `src/eth/rpc_manager.cpp` |
+| RPC HTTP Transport | JSON-RPC HTTP transport for receipt fetching | `src/eth/rpc_http_transport.cpp` |
+| RPC Receipt Source | Receipt retrieval via JSON-RPC (alternative to P2P-sourced receipts) | `src/eth/rpc_receipt_source.cpp` |
+| Bridge Event Types | Bridge-specific event normalization, claims, observations, dedup keys, receipt verification | `src/eth/bridge_event.cpp` |
+| ChainPeers | Loads cached peer data from `chain_enodes.json.gz` | `src/discv4/chain_peers.cpp` |
 | Base Utilities | Hex parsing, JSON schema validation, byte encoding, logging | `src/base/*.cpp` |
 
 ## Pattern Overview
@@ -152,7 +168,7 @@
 9. **Receipt Request** — If Bloom matches, `EthWatchService` sends `GetReceipts` for the block via the RLPx session
 10. **Log Matching** — `EventFilter::match_logs_in_receipts()` checks receipt logs for exact address + topic[0] match (`src/eth/event_filter.cpp`)
 11. **ABI Decoding** — `AbiDecoder::decode_event()` decodes log data/topics into typed values (`src/eth/abi_decoder.cpp`)
-12. **Callback Dispatch** — `WatchEventNotificationCallback` is invoked with enriched context (chain, peer, decoded values) (`EthWatchRunner::notify_event()`)
+12. **Callback Dispatch** — `WatchEventNotificationCallback` is invoked with enriched context (chain, peer, decoded values) → delivered to the SuperGenius `src/watcher/` bridge orchestrator for message handling (`EthWatchRunner::notify_event()`)
 
 ### Receipt Retrieval (Alternative Path)
 
@@ -160,6 +176,14 @@
 2. `RpcHttpTransport` sends `eth_getTransactionReceipt` JSON-RPC request (`src/eth/rpc_http_transport.cpp`)
 3. Response is schema-validated via `JsonSchemaObject` and parsed into `TransactionReceipt`
 4. `RpcReceiptSource` provides receipts to `EthWatchService` as an alternative to P2P-sourced receipts
+5. The parent SuperGenius `src/watcher/` orchestrator (and `src/account/` mint code) can also use evmrelay's `RpcManager` directly for independent receipt verification via HTTP RPC calls
+
+### Consumer Integration Boundary
+
+The callback dispatch at step 12 is the primary handoff boundary:
+- **evmrelay** produces `WatchEventNotification` / `BridgeEventClaim` / `BridgeEventObservation` types
+- **SuperGenius `src/watcher/`** consumes these types and orchestrates the message handling lifecycle (dedup, verification, mint triggering)
+- **SuperGenius `src/account/`** uses evmrelay's `RpcManager` / `RpcReceiptSource` to independently verify bridge events via multiple RPC endpoints before constructing mint transactions
 
 ## Key Abstractions
 
@@ -195,7 +219,8 @@
 **eth_watch CLI:**
 - Location: `examples/eth_watch/eth_watch.cpp`
 - Triggers: Command-line invocation with chain/watching parameters
-- Responsibilities: Parse CLI arguments, load chain config, initialize discv4 or discv5 client, create `DialScheduler`, spawn watch coroutines, dispatch matched events
+- Responsibilities: Parse CLI arguments, load chain config, initialize discv4 or discv5 client, create `DialScheduler`, spawn watch coroutines, dispatch matched events via callbacks
+- Note: This example demonstrates evmrelay's watcher service. In production, the SuperGenius `src/watcher/` orchestrator uses evmrelay as a library (not the example binary) and receives events via programmatic callbacks.
 
 **test_enr_survey (discv4 functional harness):**
 - Location: `examples/discovery/test_enr_survey.cpp`

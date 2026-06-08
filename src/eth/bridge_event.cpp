@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include <eth/bridge_event.hpp>
+#include <eth/abi_decoder.hpp>
+#include <base/byte_encoding.hpp>
 #include <algorithm>
 
 namespace eth {
@@ -115,6 +117,25 @@ ReceiptLogVerificationResult verify_receipt_log(
     }
 
     return {};
+}
+
+Hash256 compute_bridge_message_id(
+    uint64_t       src_chain_id,
+    const Address& bridge_contract,
+    const Hash256& tx_hash,
+    uint32_t       log_index) noexcept
+{
+    namespace bytes = rlp::base::byte_encoding;
+
+    bytes::ByteBuffer input;
+    input.reserve(8 + 20 + 32 + 4);
+
+    bytes::append_u64_be(input, src_chain_id);
+    bytes::append_array(input, bridge_contract);
+    bytes::append_array(input, tx_hash);
+    bytes::append_u32_be(input, log_index);
+
+    return abi::keccak256(input.data(), input.size());
 }
 
 } // namespace eth

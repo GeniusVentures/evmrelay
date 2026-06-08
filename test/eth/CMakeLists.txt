@@ -116,6 +116,22 @@ target_link_libraries(bridge_observation_test
     evmrelay
 )
 
+# End-to-end bridge event pipeline tests
+addtest(bridge_event_e2e_test
+    bridge_event_e2e_test.cpp
+)
+target_link_libraries(bridge_event_e2e_test
+    evmrelay
+)
+
+# ChainList provider tests
+addtest(chainlist_provider_test
+    chainlist_provider_test.cpp
+)
+target_link_libraries(chainlist_provider_test
+    evmrelay
+)
+
 # Secp256k1 utility tests
 addtest(secp256k1_utility_test
     secp256k1_utility_test.cpp
@@ -217,5 +233,21 @@ addtest(eth_watch_mock_peer_test
     eth_watch_mock_peer_test.cpp
 )
 target_link_libraries(eth_watch_mock_peer_test
+    evmrelay
+)
+
+# RPC config audit tests
+addtest(rpc_config_audit_test
+    rpc_config_audit_test.cpp
+)
+target_link_libraries(rpc_config_audit_test
+    evmrelay
+)
+
+# Live RPC bridge event detection → receipt verification test
+addtest(rpc_bridge_live_test
+    rpc_bridge_live_test.cpp
+)
+target_link_libraries(rpc_bridge_live_test
     evmrelay
 )

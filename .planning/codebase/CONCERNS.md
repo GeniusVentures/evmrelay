@@ -8,16 +8,17 @@
 
 ### Single-Provider RPC Trust (No Quorum)
 
-- **Risk:** `RpcReceiptSource` accepts a single `JsonRpcTransport` and trusts one RPC response path for `eth_getBlockByNumber`, `eth_getLogs`, and `eth_getTransactionReceipt`. A compromised or malicious RPC provider can inject forged receipts, logs, or block data that would pass current validation.
+- **Risk:** The RPC layer currently lacks multi-provider quorum comparison. `RpcReceiptSource` accepts a single `JsonRpcTransport` and trusts one RPC response. A compromised provider can inject forged receipts. The `RpcEndpointPool` does health-tracking but does not enforce quorum comparison across providers.
 - **Files:** `include/eth/rpc_receipt_source.hpp`, `src/eth/rpc_receipt_source.cpp`, `include/eth/json_rpc.hpp`, `src/eth/json_rpc.cpp`
-- **Current mitigation:** None — no multi-provider quorum exists. The `RpcEndpointPool` in `include/eth/rpc_manager.hpp` does health-tracking but does not enforce quorum comparison across providers.
-- **Recommendations:** Implement the `RpcQuorumPolicy`, `RpcQuorumClient`, and `ProviderVote<T>` types specified in `AgentDocs/EVMRELAY_SECURITY_HARDENING_PLAN.md` Phase 1. At minimum, require responses from multiple independent providers (different trust domains) before producing verification evidence for bridge events.
+- **Current mitigation:** None — no multi-provider quorum exists. The `RpcManager` provides endpoint pooling with priority/weight/health but the quorum comparison layer is not yet built.
+- **Recommendations:** Implement `RpcQuorumClient` and `ProviderVote<T>` types per `AgentDocs/EVMRELAY_SECURITY_HARDENING_PLAN.md` Phase 1. At minimum, require responses from multiple independent providers (different trust domains) before producing verification evidence. **This is evmrelay's responsibility** — it provides the RPC infrastructure; the SuperGenius `src/watcher/` orchestrator consumes verified RPC results.
 
-### No SecurityDecision Object for Bridge Verification
+### No Structured Verifiable Evidence Object for Bridge Events
 
-- **Risk:** Event callbacks from `EthWatchService` and receipt responses from `RpcReceiptSource` pass raw data without binding chain id, block hash, tx hash, log index, quorum metadata, or degraded state into a verifiable decision. The parent watcher/bridge integration at `src/watcher/impl/evm_messaging_watcher.*` currently uses a single WebSocket endpoint and string concatenation for `eth_subscribe` — not verifiable evidence.
-- **Files:** `include/eth/eth_watch_service.hpp`, `src/eth/eth_watch_service.cpp`, `include/eth/rpc_receipt_source.hpp`, parent project: `src/watcher/impl/evm_messaging_watcher.*`
-- **Recommendations:** Add `SecurityDecision` as the structured evidence object per Phase 2 of the hardening plan. Bridge mint paths must consume verified decisions only, not raw P2P observations or single-RPC responses.
+- **Risk:** Event callbacks from `EthWatchService` and receipt responses from `RpcReceiptSource` pass raw data without binding chain id, block hash, tx hash, log index, quorum metadata, or degraded state into a structured verifiable evidence object. The consumer (SuperGenius `src/watcher/`) receives observations without machine-verifiable provenance.
+- **Files:** `include/eth/eth_watch_service.hpp`, `src/eth/eth_watch_service.cpp`, `include/eth/rpc_receipt_source.hpp`
+- **Current mitigation:** `BridgeEventClaim` and `BridgeEventObservation` types exist (`include/eth/bridge_event.hpp`) and `verify_receipt_log()` provides receipt-vs-claim field verification. A richer evidence type with quorum metadata is not yet built.
+- **Recommendations:** Add `SecurityDecision` as the structured evidence object per `AgentDocs/EVMRELAY_SECURITY_HARDENING_PLAN.md` Phase 2. This is an evmrelay-internal type that wraps verified claims with quorum metadata, provider identities, and finality confirmation. The SuperGenius `src/watcher/` orchestrator consumes these decisions — it should not need to reason about individual RPC provider responses.
 
 ### CI/CD Token Exposure
 
@@ -34,12 +35,13 @@
   - ⚠️ Self-hosted runner cleanup (`sudo rm -rf`) remains operationally necessary
   - See `AgentDocs/EVMRELAY_SECURITY_HARDENING_PLAN.md` Phase 7 for the full hardening list.
 
-### No Durable Relay State Machine
+### No Durable Relay State Machine (SuperGenius Concern)
 
-- **Risk:** `EventDeduper` is in-memory only. A crash after observation but before verification could drop bridge events. No replay protection across restarts. No state machine prevents duplicate validator votes or exit submissions after recovery.
-- **Files:** Event deduplication is in-memory (no persistent store found for bridge event lifecycle)
-- **Current mitigation:** None. Restart loses all in-progress bridge event state.
-- **Recommendations:** Implement a persistent `RelayStateMachine` with explicit states (Discovered→QuorumPending→QuorumVerified→Voted→MintConsensusReached→...→Finalized) per Phase 4 of the hardening plan. State identity must bind source chain, tx hash, log index, block hash, and message nonce.
+- **Risk:** `EventDeduper` is in-memory only. A crash after observation but before delivery to the SuperGenius `src/watcher/` orchestrator could drop bridge events. No replay protection across restarts.
+- **Files:** `include/eth/bridge_event.hpp` (EventDeduper), evmrelay event delivery path
+- **Current mitigation:** None. Restart loses all in-progress bridge event state within evmrelay.
+- **Note:** The durable relay state machine (Discovered→QuorumPending→QuorumVerified→Voted→MintConsensusReached→...→Finalized) per `AgentDocs/EVMRELAY_SECURITY_HARDENING_PLAN.md` Phase 4 spans both evmrelay and SuperGenius concerns. evmrelay is responsible for per-observation persistence (seen state, quorum progress). SuperGenius `src/watcher/` is responsible for the bridge consensus state machine (validator voting, mint consensus).
+- **Recommendations:** evmrelay should persist seen block numbers/tx hashes to avoid re-processing on restart. SuperGenius `src/watcher/` handles the bridge consensus FSM.
 
 ### No Production Config Validation
 
@@ -196,15 +198,15 @@
 
 - **What's not tested:** No test verifies that two independent RPC providers returning conflicting receipt data produces a fail-closed result. No test verifies quorum across trust domains.
 - **Files:** `test/eth/rpc_receipt_source_test.cpp`, `test/eth/rpc_manager_test.cpp`
-- **Risk:** Multi-provider verification cannot be validated as fail-closed until tests exist.
-- **Priority:** High — must be added before production bridge verification depends on RPC manager.
+- **Risk:** Multi-provider verification cannot be validated as fail-closed until tests exist. **This is evmrelay's responsibility** — quorum verification is a library feature.
+- **Priority:** High — must be added before evmrelay can claim to provide verifiable bridge evidence.
 
 ### No End-to-End Bridge Verification Tests
 
-- **What's not tested:** The full path from `EthWatchService` observing a candidate bridge event → RPC verification → SecurityDecision → parent watcher callback is not tested end-to-end.
+- **What's not tested:** The full path from `EthWatchService` observing a candidate bridge event → RPC verification → structured evidence → delivery to consumer callback is not tested end-to-end.
 - **Files:** No end-to-end bridge verification test exists.
-- **Risk:** Individual components may work in isolation but the integration may fail (incorrect callback signatures, missing metadata, type mismatches).
-- **Priority:** High — needed before production bridge path is activated.
+- **Risk:** Individual components may work in isolation but the integration chain may fail (incorrect callback signatures, missing metadata, type mismatches). The consumer boundary between evmrelay and SuperGenius `src/watcher/` is untested.
+- **Priority:** High — needed before the parent project integrates evmrelay for bridge event consumption.
 
 ### Live Test Fragility
 
@@ -226,21 +228,22 @@
 
 ### ChainList / Ethereum-Lists RPC Metadata Ingestion
 
-- **Problem:** No automated ingestion of public RPC endpoint metadata from `chainid.network/chains.json` or `ethereum-lists/chains`. RPC endpoints must be manually configured.
+- **Problem:** No automated ingestion of public RPC endpoint metadata from `chainid.network/chains.json` or `ethereum-lists/chains`. RPC endpoints must be manually configured. This is evmrelay's **public RPC list provider** responsibility.
 - **Blocks:** Task 13-15 of `AgentDocs/EVMRELAY_COMPLETION_PLAN.md`. Without this, production deployments need manual RPC endpoint curation.
 - **Files:** None implemented yet. Should live under `include/eth/` / `src/eth/` as `ChainlistProvider` per `RPC_MANAGER_HANDOFF.md`.
 
 ### RPC Receipt Verifier (Bridge Evidence)
 
-- **Problem:** No component verifies an observed bridge event/log against independent RPC endpoints with quorum comparison, receipt field validation, block hash re-check, and finality depth checking.
-- **Blocks:** Bridge mint consensus reliability. Without this, P2P observations cannot be independently verified before entering the validator vote path.
-- **Files:** None implemented yet. Should live under `include/eth/` / `src/eth/` per `EVMRELAY_COMPLETION_PLAN.md` task 18 and `RPC_MANAGER_HANDOFF.md`.
+- **Problem:** No component verifies an observed bridge event/log against independent RPC endpoints with quorum comparison, receipt field validation, block hash re-check, and finality depth checking. Existing `verify_receipt_log()` checks individual receipt-vs-claim fields but does not orchestrate multi-provider quorum.
+- **Blocks:** Reliable bridge event evidence. Without this, P2P observations cannot be independently verified before delivery to the SuperGenius `src/watcher/` orchestrator.
+- **Files:** None implemented yet. Should live under `include/eth/` / `src/eth/` per `EVMRELAY_COMPLETION_PLAN.md` task 18 and `RPC_MANAGER_HANDOFF.md`. **This is evmrelay's responsibility** — providing verified evidence is a core function of the library.
 
 ### Production Config Audit Tool
 
-- **Problem:** No `--dry-run-config-audit` that validates production config completeness (quorum policy, confirmation depth, provider trust domains, bridge thresholds, validator policy) and rejects unsafe configurations at startup.
-- **Blocks:** Safe production deployment. Operators can accidentally run with unsafe defaults.
+- **Problem:** No `--dry-run-config-audit` that validates production config completeness (quorum policy, confirmation depth, provider trust domains, RPC endpoint requirements) and rejects unsafe configurations at startup.
+- **Blocks:** Safe deployment. Operators can accidentally run with unsafe defaults (single provider, zero confirmation depth).
 - **Files:** None implemented yet. Per `EVMRELAY_SECURITY_HARDENING_PLAN.md` Phase 5.
+- **Note:** This is an evmrelay concern — the library must validate its own configuration before producing observations. The SuperGenius `src/watcher/` orchestrator may add additional bridge-specific config validation.
 
 ### Per-Session Liveness Diagnostics
 

@@ -60,5 +60,5 @@ modules.xml
 .idea/misc.xml
 *.ipr
 
-go-ethereum/
-rlp_enodes/
+go-ethereum/**
+rlp_enodes/**

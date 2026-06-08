@@ -1,46 +1,43 @@
----
+# GNUS-NEO-SWARM clang-format configuration
+# Matches CLAUDE.md Code Style + Software Engineering Handbook §4 (Code Layout)
+#
+# Run: clang-format -i <file>          (apply formatting)
+#      clang-format --dry-run <file>    (check only)
+
 BasedOnStyle: Microsoft
-AccessModifierOffset: -4
-AllowAllArgumentsOnNextLine: false
-AllowAllParametersOfDeclarationOnNextLine: false
-AlignConsecutiveAssignments:
-  Enabled: true
-  AlignCompound: true
-AlignConsecutiveBitFields:
-  Enabled: true
-AlignConsecutiveDeclarations:
-  Enabled: true
-AlignConsecutiveShortCaseStatements:
-  Enabled: true
-AllowShortBlocksOnASingleLine: Empty
-AllowShortFunctionsOnASingleLine: Empty
-AlwaysBreakTemplateDeclarations: true
-BraceWrapping:
-  AfterCaseLabel: true
-  BeforeLambdaBody: true
-BinPackArguments: false
-BinPackParameters: false
-BreakConstructorInitializers: AfterColon
-BreakStringLiterals: false
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
 ColumnLimit: 120
-FixNamespaceComments: false
-IndentCaseBlocks: false
+
+# ── Allman / Ullman brace style (Handbook Standard 10) ──
+BreakBeforeBraces: Allman
+
+# ── Never put short bodies on one line ──
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+
+# ── Spacing ──
+SpaceAfterCStyleCast: true
+SpaceBeforeParens: ControlStatements
+SpacesInParentheses: true
+SpacesInAngles: false
+
+# ── Pointers / references ──
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+# ── Access modifiers at same indent as class ──
+AccessModifierOffset: 0
+
+# ── Switch / case ──
 IndentCaseLabels: true
-InsertBraces: true
-InsertNewlineAtEOF: true
-InsertTrailingCommas: Wrapped
-KeepEmptyLinesAtTheStartOfBlocks: false
+IndentCaseBlocks: false
+
+# ── Namespaces ──
 NamespaceIndentation: All
-PackConstructorInitializers: NextLine
-PenaltyBreakAssignment: 190
-PenaltyBreakBeforeFirstCallParameter: 2
-ReflowComments: false
-RemoveParentheses: ReturnStatement
-RemoveSemicolon: true
-SeparateDefinitionBlocks: Always
-SortIncludes: Never
-SpacesInParens: Custom
-SpacesInParensOptions:
-  InConditionalStatements: true
-  Other: true
-Standard: c++17
+
+# ── Include sorting ──
+SortIncludes: true
+IncludeBlocks: Preserve

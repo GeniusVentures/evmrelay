@@ -34,7 +34,7 @@ add_library(evmrelay STATIC
 # Specify public include directory for BUILD interface
 target_include_directories(evmrelay PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/../include>
-    $<INSTALL_INTERFACE:include>
+    $<INSTALL_INTERFACE:include/evmrelay>
     $<BUILD_INTERFACE:${crypto3_INCLUDE_DIR}>
 )
 

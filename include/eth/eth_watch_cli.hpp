@@ -135,13 +135,14 @@ inline EventRegistry& event_registry()
 
         // ── GNUS Bridge (GNUSBridge.sol) ──────────────────────────────────────
         // event BridgeSourceBurned(address indexed sender, uint256 id, uint256 amount,
-        //                          uint256 srcChainID, uint256 destChainID)
-        r.register_event("BridgeSourceBurned(address,uint256,uint256,uint256,uint256)", {
+        //                          uint256 srcChainID, uint256 destChainID, bytes sgnsDestination)
+        r.register_event("BridgeSourceBurned(address,uint256,uint256,uint256,uint256,bytes)", {
             {abi::AbiParamKind::kAddress, true,  "sender"},
             {abi::AbiParamKind::kUint,    false, "id"},
             {abi::AbiParamKind::kUint,    false, "amount"},
             {abi::AbiParamKind::kUint,    false, "srcChainID"},
             {abi::AbiParamKind::kUint,    false, "destChainID"},
+            {abi::AbiParamKind::kBytes,   false, "sgnsDestination"},
         });
 
         return r;

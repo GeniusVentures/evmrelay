@@ -145,6 +145,22 @@ inline EventRegistry& event_registry()
             {abi::AbiParamKind::kBytes,   false, "sgnsDestination"},
         });
 
+        // ── GNUS Bridge V2 (X-only compressed key) ───────────────────────────
+        // event BridgeOutInitiated(address indexed sender, uint256 id, uint256 amount,
+        //                          uint256 srcChainID, uint256 destChainID,
+        //                          bytes32 sgnsDestination, bool destinationYOdd)
+        // Param 5 changed from `bytes` (dynamic) to `bytes32` (fixed 32-byte X-only key);
+        // param 6 `destinationYOdd` carries the Y parity (false=even/0x02, true=odd/0x03).
+        r.register_event("BridgeOutInitiated(address,uint256,uint256,uint256,uint256,bytes32,bool)", {
+            {abi::AbiParamKind::kAddress, true,  "sender"},
+            {abi::AbiParamKind::kUint,    false, "id"},
+            {abi::AbiParamKind::kUint,    false, "amount"},
+            {abi::AbiParamKind::kUint,    false, "srcChainID"},
+            {abi::AbiParamKind::kUint,    false, "destChainID"},
+            {abi::AbiParamKind::kBytes32, false, "sgnsDestination"},
+            {abi::AbiParamKind::kBool,    false, "destinationYOdd"},
+        });
+
         return r;
     }();
     return reg;

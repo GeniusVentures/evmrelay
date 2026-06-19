@@ -241,8 +241,12 @@ std::optional<std::string> DecompressXOnlyPubkey(
     }
 
     // Destination = hex_bytes(contract_X, 32) + hex_bytes(contract_Y, 32) = 128 chars.
-    const std::string destination = rlp::base::parse::hex_bytes(contract_x_bytes.data(), kXOnlyKeyBytes)
-                                  + rlp::base::parse::hex_bytes(contract_y.data(), kXOnlyKeyBytes);
+    // hex_bytes() prepends "0x"; GetAddress() returns a plain 128-char hex string with
+    // no prefix, so strip the leading "0x" from each half before concatenating.
+    const std::string x_hex = rlp::base::parse::hex_bytes(contract_x_bytes.data(), kXOnlyKeyBytes);
+    const std::string y_hex = rlp::base::parse::hex_bytes(contract_y.data(), kXOnlyKeyBytes);
+    const std::string destination = x_hex.substr(rlp::base::parse::kHexCharsPerByte)
+                                  + y_hex.substr(rlp::base::parse::kHexCharsPerByte);
     return destination;
 }
 

@@ -137,6 +137,11 @@ struct JsonParsedArray;
 using JsonParsedObjectPtr = std::shared_ptr<JsonParsedObject>;
 using JsonParsedArrayPtr = std::shared_ptr<JsonParsedArray>;
 
+struct JsonParsedSize
+{
+    size_t value = 0;
+};
+
 struct JsonParsedValue
 {
     using Storage = std::variant<
@@ -145,7 +150,7 @@ struct JsonParsedValue
         uint8_t,
         uint32_t,
         uint64_t,
-        size_t,
+        JsonParsedSize,
         JsonParsedObjectPtr,
         JsonParsedArrayPtr>;
 

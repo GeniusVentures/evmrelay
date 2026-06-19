@@ -126,7 +126,7 @@ template <typename T>
             {
                 return outcome::failure( with_field( parsed.error(), field_path ) );
             }
-            return JsonParsedValue{type, parsed.value()};
+            return JsonParsedValue{type, JsonParsedSize{parsed.value()}};
         }
         case JsonFieldType::kObject:
         {
@@ -608,7 +608,12 @@ JsonResult<size_t> get_parsed_size(
     const JsonParsedObject& object,
     std::string_view        field_name)
 {
-    return get_parsed_as<size_t>( object, field_name, JsonFieldType::kSize );
+    const auto parsed = get_parsed_as<JsonParsedSize>( object, field_name, JsonFieldType::kSize );
+    if ( !parsed )
+    {
+        return outcome::failure( parsed.error() );
+    }
+    return parsed.value().value;
 }
 
 JsonResult<const JsonParsedArray*> get_parsed_array(

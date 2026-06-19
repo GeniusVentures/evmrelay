@@ -17,6 +17,7 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include <windows.h>
 #include <windns.h>
 #else
 #include <arpa/nameser.h>

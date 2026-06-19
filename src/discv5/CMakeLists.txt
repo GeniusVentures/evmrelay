@@ -13,8 +13,13 @@ target_link_libraries(discv5 PUBLIC
         OpenSSL::Crypto
         spdlog::spdlog
         fmt::fmt
-        resolv
 )
+
+if(WIN32)
+        target_link_libraries(discv5 PUBLIC Dnsapi)
+elseif(NOT ANDROID)
+        target_link_libraries(discv5 PUBLIC resolv)
+endif()
 
 target_include_directories(discv5 PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../include>

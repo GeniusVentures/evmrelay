@@ -13,8 +13,15 @@
 #include <string_view>
 #include <unordered_set>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windns.h>
+#else
 #include <arpa/nameser.h>
 #include <resolv.h>
+#endif
 
 namespace discv5
 {
@@ -146,6 +153,53 @@ bool EnrTreeResolver::parse_url(const std::string& value, EnrTreeUrl& out) noexc
 
 std::vector<std::string> EnrTreeResolver::system_txt_lookup(const std::string& name) noexcept
 {
+#if defined(_WIN32)
+    DNS_RECORDA* records = nullptr;
+    const DNS_STATUS status = DnsQuery_A(
+        name.c_str(),
+        DNS_TYPE_TEXT,
+        DNS_QUERY_STANDARD,
+        nullptr,
+        &records,
+        nullptr);
+    if (status != ERROR_SUCCESS)
+    {
+        if (records != nullptr)
+        {
+            DnsRecordListFree(records, DnsFreeRecordList);
+        }
+        return {};
+    }
+
+    std::vector<std::string> text_records;
+    for (const DNS_RECORDA* record = records; record != nullptr; record = record->pNext)
+    {
+        if (record->wType != DNS_TYPE_TEXT)
+        {
+            continue;
+        }
+
+        std::string text;
+        const auto& txt = record->Data.TXT;
+        for (DWORD i = 0; i < txt.dwStringCount; ++i)
+        {
+            if (txt.pStringArray[i] != nullptr)
+            {
+                text.append(txt.pStringArray[i]);
+            }
+        }
+        if (!text.empty())
+        {
+            text_records.push_back(std::move(text));
+        }
+    }
+
+    if (records != nullptr)
+    {
+        DnsRecordListFree(records, DnsFreeRecordList);
+    }
+    return text_records;
+#else
     std::array<unsigned char, kMaxDnsResponseBytes> answer{};
     const int len = res_query(
         name.c_str(),
@@ -198,6 +252,7 @@ std::vector<std::string> EnrTreeResolver::system_txt_lookup(const std::string& n
     }
 
     return records;
+#endif
 }
 
 std::vector<std::string> EnrTreeResolver::resolve(

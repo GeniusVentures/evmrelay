@@ -51,8 +51,13 @@ target_link_libraries(evmrelay PUBLIC
     ZLIB::ZLIB
     spdlog::spdlog
     fmt::fmt
-    resolv
 )
+
+if(WIN32)
+    target_link_libraries(evmrelay PUBLIC Dnsapi)
+elseif(NOT ANDROID)
+    target_link_libraries(evmrelay PUBLIC resolv)
+endif()
 
 # Install the core library and attach it to the export set consumed by
 # the top-level install(EXPORT rlp ...) call.

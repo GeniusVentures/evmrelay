@@ -31,6 +31,14 @@ public:
 
     [[nodiscard]] std::optional<std::string> call(const boost::json::object& request) override;
 
+    /// @brief Perform a one-shot HTTPS GET and return the response body.
+    /// @param url     Fully-qualified https:// URL (host[:port]/target).
+    /// @param options Transport options (timeout, TLS verify).
+    /// @return Response body on HTTP 2xx, or std::nullopt on any failure.
+    [[nodiscard]] static std::optional<std::string> HttpsGet(
+        const std::string&             url,
+        const RpcHttpTransportOptions& options = {});
+
     [[nodiscard]] std::string_view endpoint_url() const noexcept
     {
         return endpoint_url_;

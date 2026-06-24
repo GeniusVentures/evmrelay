@@ -53,6 +53,7 @@ constexpr auto kHttpVersion = 11;
 }
 
 [[nodiscard]] std::optional<std::string> read_https_response(
+    http::verb                    verb,
     const std::string&            host,
     const std::string&            port,
     const std::string&            target,
@@ -123,11 +124,14 @@ constexpr auto kHttpVersion = 11;
         return std::nullopt;
     }
 
-    http::request<http::string_body> req{http::verb::post, target, kHttpVersion};
+    http::request<http::string_body> req{verb, target, kHttpVersion};
     req.set(http::field::host, host);
     req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-    req.set(http::field::content_type, "application/json");
-    req.body() = body;
+    if (verb != http::verb::get && verb != http::verb::head)
+    {
+        req.set(http::field::content_type, "application/json");
+        req.body() = body;
+    }
     req.prepare_payload();
 
     http::write(stream, req, ec);
@@ -218,6 +222,7 @@ std::optional<std::string> RpcHttpTransport::call(const boost::json::object& req
     {
         boost::system::error_code ec;
         return read_https_response(
+            http::verb::post,
             parsed->host,
             parsed->port,
             parsed->target,
@@ -273,6 +278,27 @@ std::optional<std::string> RpcHttpTransport::call(const boost::json::object& req
 
     stream.socket().shutdown(tcp::socket::shutdown_both, ec);
     return response_body;
+}
+
+std::optional<std::string> RpcHttpTransport::HttpsGet(
+    const std::string&            url,
+    const RpcHttpTransportOptions& options)
+{
+    const auto parsed = parse_url(url);
+    if ( !parsed.has_value() || !parsed->is_https )
+    {
+        return std::nullopt;
+    }
+
+    boost::system::error_code ec;
+    return read_https_response(
+        http::verb::get,
+        parsed->host,
+        parsed->port,
+        parsed->target,
+        {},
+        options,
+        ec );
 }
 
 } // namespace eth::rpc

@@ -5,8 +5,11 @@
 
 #include <boost/json/serialize.hpp>
 #include <boost/asio/ssl.hpp>
+#include <boost/thread.hpp>
 #include <openssl/ssl.h>
+#include <base/rlp-logger.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <utility>
 
@@ -21,6 +24,47 @@ namespace ssl = asio::ssl;
 using tcp = asio::ip::tcp;
 
 constexpr auto kHttpVersion = 11;
+
+// ── HTTP status classification thresholds (no magic numbers in bodies) ──────
+constexpr int kHttpSuccessStart      = 200;  ///< First 2xx success status.
+constexpr int kHttpSuccessEnd        = 300;  ///< Exclusive upper bound for 2xx.
+constexpr int kHttpClientErrorStart  = 400;  ///< First 4xx client error (permanent).
+constexpr int kHttpServerErrorStart  = 500;  ///< First 5xx server error (transient).
+constexpr int kHttpUnknownStatusMax  = 600;  ///< Exclusive upper bound for valid status codes.
+
+/**
+ * @brief Classifies an HTTP response outcome for retry decisions (D-23).
+ *
+ * @param[in] status_code  HTTP response status code (res.result_int()).
+ *
+ * @return kSuccess for 2xx/3xx, kPermanentFailure for 4xx (auth/bad-request — never
+ *         succeeds on retry), kTransientFailure for 5xx and 0/unknown.
+ */
+enum class CallOutcome
+{
+    kSuccess,          ///< 2xx/3xx response — return body.
+    kTransientFailure, ///< Connection ec, timeout, or 5xx — retry with backoff.
+    kPermanentFailure  ///< 4xx (auth/bad-request) — bail immediately, no retry.
+};
+
+[[nodiscard]] CallOutcome classify_http_status( int status_code )
+{
+    if ( status_code >= kHttpSuccessStart && status_code < kHttpSuccessEnd )
+    {
+        return CallOutcome::kSuccess;
+    }
+    if ( status_code >= kHttpClientErrorStart && status_code < kHttpServerErrorStart )
+    {
+        return CallOutcome::kPermanentFailure;
+    }
+    if ( status_code >= kHttpServerErrorStart && status_code < kHttpUnknownStatusMax )
+    {
+        return CallOutcome::kTransientFailure;
+    }
+    // 3xx redirects, 1xx informational, or 0/unknown — treat as transient
+    // (redirects are not expected for RPC endpoints; unknown deserves a retry).
+    return CallOutcome::kTransientFailure;
+}
 
 [[nodiscard]] std::optional<std::pair<std::string, std::string>> split_host_port(
     std::string_view authority,
@@ -43,16 +87,19 @@ constexpr auto kHttpVersion = 11;
     return std::pair<std::string, std::string>{std::string(host), std::string(port)};
 }
 
-[[nodiscard]] std::optional<std::string> read_body_from_response(const http::response<http::string_body>& res)
+[[nodiscard]] std::pair<std::optional<std::string>, CallOutcome> read_body_from_response(
+    const http::response<http::string_body>& res)
 {
-    if (res.result_int() < 200 || res.result_int() >= 300)
+    const auto status = res.result_int();
+    if ( status >= kHttpSuccessStart && status < kHttpSuccessEnd )
     {
-        return std::nullopt;
+        return { res.body(), CallOutcome::kSuccess };
     }
-    return res.body();
+    // Non-2xx: classify via HTTP status so callers can decide retry vs bail (D-23).
+    return { std::nullopt, classify_http_status( status ) };
 }
 
-[[nodiscard]] std::optional<std::string> read_https_response(
+[[nodiscard]] std::pair<std::optional<std::string>, CallOutcome> read_https_response(
     http::verb                    verb,
     const std::string&            host,
     const std::string&            port,
@@ -67,7 +114,7 @@ constexpr auto kHttpVersion = 11;
     const auto results = resolver.resolve(host, port, ec);
     if (ec)
     {
-        return std::nullopt;
+        return { std::nullopt, CallOutcome::kTransientFailure };
     }
 
     ssl::context ssl_ctx(ssl::context::tls_client);
@@ -102,7 +149,7 @@ constexpr auto kHttpVersion = 11;
     ssl::stream<beast::tcp_stream> stream(io, ssl_ctx);
     if (!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str()))
     {
-        return std::nullopt;
+        return { std::nullopt, CallOutcome::kTransientFailure };
     }
 
     stream.set_verify_mode(options.verify_peer ? ssl::verify_peer : ssl::verify_none);
@@ -115,13 +162,13 @@ constexpr auto kHttpVersion = 11;
     beast::get_lowest_layer(stream).connect(results, ec);
     if (ec)
     {
-        return std::nullopt;
+        return { std::nullopt, CallOutcome::kTransientFailure };
     }
 
     stream.handshake(ssl::stream_base::client, ec);
     if (ec)
     {
-        return std::nullopt;
+        return { std::nullopt, CallOutcome::kTransientFailure };
     }
 
     http::request<http::string_body> req{verb, target, kHttpVersion};
@@ -137,24 +184,92 @@ constexpr auto kHttpVersion = 11;
     http::write(stream, req, ec);
     if (ec)
     {
-        return std::nullopt;
+        return { std::nullopt, CallOutcome::kTransientFailure };
     }
 
     http::response<http::string_body> res;
     http::read(stream, buffer, res, ec);
     if (ec)
     {
-        return std::nullopt;
+        return { std::nullopt, CallOutcome::kTransientFailure };
     }
 
-    const auto response_body = read_body_from_response(res);
+    auto [response_body, outcome] = read_body_from_response(res);
     if (!response_body.has_value())
     {
-        return std::nullopt;
+        stream.shutdown(ec);
+        return { std::nullopt, outcome };
     }
 
     stream.shutdown(ec);
-    return response_body;
+    return { response_body, CallOutcome::kSuccess };
+}
+
+/**
+ * @brief Performs a single HTTP (non-TLS) RPC attempt with classified outcome (D-23).
+ *
+ * @param[in] verb    HTTP verb (POST for RPC calls).
+ * @param[in] host    Resolved host name.
+ * @param[in] port    Resolved port string.
+ * @param[in] target  Request target (path + query).
+ * @param[in] body    Serialized JSON-RPC request body.
+ * @param[in] options Transport options (timeout, TLS verify — verify_peer ignored for plain HTTP).
+ * @return Pair of {response body or nullopt, CallOutcome} so the caller can decide retry.
+ */
+[[nodiscard]] std::pair<std::optional<std::string>, CallOutcome> attempt_http(
+    http::verb                     verb,
+    const std::string&             host,
+    const std::string&             port,
+    const std::string&             target,
+    const std::string&             body,
+    const RpcHttpTransportOptions& options)
+{
+    asio::io_context    io;
+    beast::flat_buffer  buffer;
+    boost::system::error_code ec;
+
+    tcp::resolver resolver(io);
+    const auto results = resolver.resolve(host, port, ec);
+    if (ec)
+    {
+        return { std::nullopt, CallOutcome::kTransientFailure };
+    }
+
+    http::request<http::string_body> req{ verb, target, kHttpVersion };
+    req.set(http::field::host, host);
+    req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+    req.set(http::field::content_type, "application/json");
+    req.body() = body;
+    req.prepare_payload();
+
+    beast::tcp_stream stream(io);
+    stream.expires_after(options.timeout);
+    stream.connect(results, ec);
+    if (ec)
+    {
+        return { std::nullopt, CallOutcome::kTransientFailure };
+    }
+
+    http::write(stream, req, ec);
+    if (ec)
+    {
+        return { std::nullopt, CallOutcome::kTransientFailure };
+    }
+
+    http::response<http::string_body> res;
+    http::read(stream, buffer, res, ec);
+    if (ec)
+    {
+        return { std::nullopt, CallOutcome::kTransientFailure };
+    }
+
+    auto [response_body, outcome] = read_body_from_response(res);
+    stream.socket().shutdown(tcp::socket::shutdown_both, ec);
+    if (!response_body.has_value())
+    {
+        return { std::nullopt, outcome };
+    }
+    return { response_body, CallOutcome::kSuccess };
 }
 
 } // namespace
@@ -218,66 +333,64 @@ std::optional<std::string> RpcHttpTransport::call(const boost::json::object& req
 
     const auto body = boost::json::serialize(request);
 
-    if (parsed->is_https)
+    // Retry loop with exponential backoff on transient failures (D-23 Approach A).
+    // Permanent failures (4xx) bail immediately; transient failures (connection ec,
+    // timeout ec, 5xx) retry up to options_.retry_count times.
+    auto logger = rlp::base::createLogger( "rpc_http_transport" );
+    for ( unsigned int attempt = 0u; attempt <= options_.retry_count; ++attempt )
     {
-        boost::system::error_code ec;
-        return read_https_response(
-            http::verb::post,
-            parsed->host,
-            parsed->port,
-            parsed->target,
-            body,
-            options_,
-            ec);
+        std::pair<std::optional<std::string>, CallOutcome> result;
+        if ( parsed->is_https )
+        {
+            boost::system::error_code ec;
+            result = read_https_response(
+                http::verb::post,
+                parsed->host,
+                parsed->port,
+                parsed->target,
+                body,
+                options_,
+                ec );
+        }
+        else
+        {
+            result = attempt_http(
+                http::verb::post,
+                parsed->host,
+                parsed->port,
+                parsed->target,
+                body,
+                options_ );
+        }
+
+        if ( result.first.has_value() )
+        {
+            return result.first;
+        }
+
+        if ( result.second == CallOutcome::kPermanentFailure )
+        {
+            // 4xx (auth/bad-request) — retrying cannot help, bail immediately.
+            return std::nullopt;
+        }
+
+        if ( attempt < options_.retry_count )
+        {
+            // Transient failure: backoff = min(base * 2^attempt, cap) (D-23).
+            const auto raw_backoff = options_.retry_backoff.count() * ( 1ull << attempt );
+            const auto capped_backoff = std::min(
+                raw_backoff,
+                static_cast<unsigned long long>( RpcHttpTransportOptions::kMaxRetryBackoffMs ) );
+            logger->debug( "RpcHttpTransport::call transient failure on attempt {}/{} — "
+                           "retrying in {} ms",
+                           attempt + 1u,
+                           options_.retry_count,
+                           capped_backoff );
+            boost::this_thread::sleep_for( boost::chrono::milliseconds( capped_backoff ) );
+        }
     }
 
-    asio::io_context io;
-    beast::flat_buffer buffer;
-    boost::system::error_code ec;
-
-    tcp::resolver resolver(io);
-    const auto results = resolver.resolve(parsed->host, parsed->port, ec);
-    if (ec)
-    {
-        return std::nullopt;
-    }
-
-    http::request<http::string_body> req{http::verb::post, parsed->target, kHttpVersion};
-    req.set(http::field::host, parsed->host);
-    req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-    req.set(http::field::content_type, "application/json");
-    req.body() = body;
-    req.prepare_payload();
-
-    beast::tcp_stream stream(io);
-    stream.expires_after(options_.timeout);
-    stream.connect(results, ec);
-    if (ec)
-    {
-        return std::nullopt;
-    }
-
-    http::write(stream, req, ec);
-    if (ec)
-    {
-        return std::nullopt;
-    }
-
-    http::response<http::string_body> res;
-    http::read(stream, buffer, res, ec);
-    if (ec)
-    {
-        return std::nullopt;
-    }
-
-    const auto response_body = read_body_from_response(res);
-    if (!response_body.has_value())
-    {
-        return std::nullopt;
-    }
-
-    stream.socket().shutdown(tcp::socket::shutdown_both, ec);
-    return response_body;
+    return std::nullopt;
 }
 
 std::optional<std::string> RpcHttpTransport::HttpsGet(
@@ -291,7 +404,7 @@ std::optional<std::string> RpcHttpTransport::HttpsGet(
     }
 
     boost::system::error_code ec;
-    return read_https_response(
+    const auto [response_body, outcome] = read_https_response(
         http::verb::get,
         parsed->host,
         parsed->port,
@@ -299,6 +412,8 @@ std::optional<std::string> RpcHttpTransport::HttpsGet(
         {},
         options,
         ec );
+    (void)outcome; // HttpsGet is single-attempt (Option A, D-23) — caller handles failure.
+    return response_body;
 }
 
 } // namespace eth::rpc

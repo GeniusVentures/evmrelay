@@ -18,8 +18,19 @@ namespace eth::rpc {
 
 struct RpcHttpTransportOptions
 {
+    /// @brief Default retry attempt count for transient failures (D-23).
+    static constexpr unsigned int kDefaultRetryCount     = 3u;
+    /// @brief Default base backoff delay in ms; doubled each attempt (D-23).
+    static constexpr unsigned int kDefaultRetryBackoffMs = 1000u;
+    /// @brief Cap (ms) for the doubled backoff so high retry_count cannot stall (D-23).
+    static constexpr unsigned int kMaxRetryBackoffMs     = 8000u;
+
     std::chrono::seconds timeout{30};
     bool                 verify_peer = true;
+    /// @brief Max retry attempts on transient failure (0 = no retry, D-23).
+    unsigned int              retry_count = kDefaultRetryCount;
+    /// @brief Base backoff delay; doubled each attempt (D-23).
+    std::chrono::milliseconds retry_backoff{kDefaultRetryBackoffMs};
 };
 
 class RpcHttpTransport final : public JsonRpcTransport
@@ -35,6 +46,8 @@ public:
     /// @param url     Fully-qualified https:// URL (host[:port]/target).
     /// @param options Transport options (timeout, TLS verify).
     /// @return Response body on HTTP 2xx, or std::nullopt on any failure.
+    /// @note   Single-attempt; instance call() retries on transient failure per D-23.
+    ///         Callers needing retry should construct an RpcHttpTransport and call().
     [[nodiscard]] static std::optional<std::string> HttpsGet(
         const std::string&             url,
         const RpcHttpTransportOptions& options = {});

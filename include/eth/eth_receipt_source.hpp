@@ -5,11 +5,16 @@
 #define EVMRELAY_INCLUDE_ETH_ETH_RECEIPT_SOURCE_HPP
 
 #include <eth/eth_watch_service.hpp>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <vector>
 
 namespace eth {
+
+/// @brief Narrow a receipt-local log ordinal without truncation.
+/// @return The ordinal as uint32_t, or nullopt when it exceeds UINT32_MAX.
+[[nodiscard]] std::optional<uint32_t> checked_receipt_log_ordinal(uint64_t ordinal) noexcept;
 
 /// @brief Receipt plus the chain context needed to verify and deduplicate a log.
 struct ReceiptResult

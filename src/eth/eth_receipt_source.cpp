@@ -3,8 +3,18 @@
 
 #include <eth/eth_receipt_source.hpp>
 #include <algorithm>
+#include <limits>
 
 namespace eth {
+
+std::optional<uint32_t> checked_receipt_log_ordinal(uint64_t ordinal) noexcept
+{
+    if (ordinal > std::numeric_limits<uint32_t>::max())
+    {
+        return std::nullopt;
+    }
+    return static_cast<uint32_t>(ordinal);
+}
 
 EventFilter make_event_filter(
     const codec::Address&   contract_address,

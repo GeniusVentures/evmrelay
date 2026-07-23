@@ -46,11 +46,12 @@ struct EventFilter
 /// @brief A matched event: the original log decorated with block context.
 struct MatchedEvent
 {
-    codec::LogEntry log;          ///< The raw log entry
-    uint64_t        block_number; ///< Block the log appeared in
-    codec::Hash256  block_hash;   ///< Hash of that block (if known)
-    codec::Hash256  tx_hash;      ///< Transaction hash (if known)
-    uint32_t        log_index;    ///< Position within the block's log set
+    codec::LogEntry          log;                     ///< The raw log entry
+    uint64_t                 block_number;            ///< Block the log appeared in
+    codec::Hash256           block_hash;              ///< Hash of that block (if known)
+    codec::Hash256           tx_hash;                 ///< Transaction hash (if known)
+    uint32_t                 log_index;               ///< Position within the block's log set
+    std::optional<uint32_t>  receipt_log_index;       ///< Absolute zero-based position in receipt.logs
 };
 
 /// @brief Registration handle returned by EventWatcher::watch().

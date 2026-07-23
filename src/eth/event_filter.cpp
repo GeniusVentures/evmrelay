@@ -97,7 +97,8 @@ size_t EventWatcher::process_block_logs(
                     block_number,
                     block_hash,
                     codec::Hash256{},   // tx_hash unknown at block-log level
-                    log_index
+                    log_index,
+                    std::nullopt
                 };
                 sub.callback(event);
             }
@@ -120,6 +121,7 @@ size_t EventWatcher::process_receipt(
 {
     size_t matched_logs = 0;
     uint32_t log_index = first_log_index;
+    uint32_t receipt_log_index = 0;
     for (const auto& log : receipt.logs)
     {
         bool matched = false;
@@ -133,7 +135,8 @@ size_t EventWatcher::process_receipt(
                     block_number,
                     block_hash,
                     tx_hash,
-                    log_index
+                    log_index,
+                    receipt_log_index
                 };
                 sub.callback(event);
             }
@@ -143,6 +146,7 @@ size_t EventWatcher::process_receipt(
             ++matched_logs;
         }
         ++log_index;
+        ++receipt_log_index;
     }
     return matched_logs;
 }

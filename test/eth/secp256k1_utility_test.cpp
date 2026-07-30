@@ -115,13 +115,13 @@ struct KnownKeyMaterial
     bool                                     y_odd = false;
 };
 
-/// @brief Convert a big-endian byte array to "contract byte order" (reverse).
+/// @brief Copy a canonical big-endian coordinate into the ABI bytes32 value.
 std::array<uint8_t, kXOnlyKeyBytes> to_contract_order(const uint8_t* big_endian)
 {
     std::array<uint8_t, kXOnlyKeyBytes> out{};
     for (size_t i = 0; i < kXOnlyKeyBytes; ++i)
     {
-        out[i] = big_endian[kXOnlyKeyBytes - 1 - i];
+        out[i] = big_endian[i];
     }
     return out;
 }
@@ -165,7 +165,7 @@ std::optional<KnownKeyMaterial> build_known_material(uint8_t seed_byte)
 }
 
 /// @brief Build the expected 128-char destination for a known key material:
-///        hex_bytes(contract_X) + hex_bytes(contract_Y), each with the "0x" prefix
+///        hex_bytes(big-endian X) + hex_bytes(big-endian Y), each with the "0x" prefix
 ///        stripped (matching GetAddress()'s plain-hex output).
 std::string expected_destination(const KnownKeyMaterial& material)
 {

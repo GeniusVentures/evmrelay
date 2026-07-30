@@ -189,18 +189,11 @@ std::optional<std::string> DecompressXOnlyPubkey(
     // the event (D-09). false = even Y (0x02), true = odd Y (0x03).
     const uint8_t prefix = destination_y_odd ? kOddYParityPrefix : kEvenYParityPrefix;
 
-    // libsecp256k1 expects the X coordinate in big-endian (MSB first).  Contract
-    // bytes are stored in reverse order (LSB first in hex), so reverse them.
-    std::array<uint8_t, kXOnlyKeyBytes> x_bigendian{};
-    for (size_t i = 0; i < kXOnlyKeyBytes; ++i)
-    {
-        x_bigendian[i] = contract_x_bytes[kXOnlyKeyBytes - 1 - i];
-    }
-
-    // Build the 33-byte compressed key: [prefix][X_bigendian].
+    // ABI bytes32 values and Genius public-key coordinates are both rendered in
+    // canonical big-endian order. Build [prefix][X] without byte reversal.
     std::array<uint8_t, kCompressedKeyLen> compressed{};
     compressed[0] = prefix;
-    std::copy(x_bigendian.begin(), x_bigendian.end(), compressed.begin() + 1);
+    std::copy(contract_x_bytes.begin(), contract_x_bytes.end(), compressed.begin() + 1);
 
     secp256k1_context* context = secp256k1_context_create(SECP256K1_CONTEXT_NONE);
     if (context == nullptr)
@@ -230,21 +223,13 @@ std::optional<std::string> DecompressXOnlyPubkey(
         SECP256K1_EC_UNCOMPRESSED);
     secp256k1_context_destroy(context);
 
-    // uncompressed = [0x04][X_bigendian(32)][Y_bigendian(32)] (65 bytes, indices 0..64).
-    // Y_bigendian occupies indices 33..64.  Reverse to contract byte order so that
-    // hex_bytes() reproduces the same ordering used by GetAddress():
-    //   contract_y[i] = Y_bigendian[31 - i] = uncompressed[33 + (31 - i)] = uncompressed[64 - i].
-    std::array<uint8_t, kXOnlyKeyBytes> contract_y{};
-    for (size_t i = 0; i < kXOnlyKeyBytes; ++i)
-    {
-        contract_y[i] = uncompressed[kUncompressedPublicKeyBytes - 1 - i];
-    }
-
-    // Destination = hex_bytes(contract_X, 32) + hex_bytes(contract_Y, 32) = 128 chars.
-    // hex_bytes() prepends "0x"; GetAddress() returns a plain 128-char hex string with
-    // no prefix, so strip the leading "0x" from each half before concatenating.
+    // Destination = canonical big-endian X||Y, matching GeniusAccount::GetAddress().
+    std::array<uint8_t, kXOnlyKeyBytes> y_bigendian{};
+    std::copy(uncompressed.begin() + 1 + kXOnlyKeyBytes,
+              uncompressed.end(),
+              y_bigendian.begin());
     const std::string x_hex = rlp::base::parse::hex_bytes(contract_x_bytes.data(), kXOnlyKeyBytes);
-    const std::string y_hex = rlp::base::parse::hex_bytes(contract_y.data(), kXOnlyKeyBytes);
+    const std::string y_hex = rlp::base::parse::hex_bytes(y_bigendian.data(), kXOnlyKeyBytes);
     const std::string destination = x_hex.substr(rlp::base::parse::kHexCharsPerByte)
                                   + y_hex.substr(rlp::base::parse::kHexCharsPerByte);
     return destination;

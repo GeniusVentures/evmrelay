@@ -30,11 +30,11 @@ using Secp256k1PrivateKey = std::array<uint8_t, 32>;
 /// decompression is deterministic -- no parity trial is needed because the event
 /// carries the ground-truth parity bit.
 ///
-/// @param contract_x_bytes   32 bytes from the ABI-decoded bytes32 parameter
-///                           (contract byte order: LSB first in hex).
+/// @param contract_x_bytes   32-byte big-endian X coordinate from the
+///                           ABI-decoded bytes32 parameter.
 /// @param destination_y_odd  Parity of Y from the event (false=even/0x02,
 ///                           true=odd/0x03).
-/// @return 128-char hex destination string (X+Y concatenated in contract order),
+/// @return 128-char hex destination string (big-endian X+Y),
 ///         or nullopt if X is all-zero or the X+parity combination is not on the
 ///         curve.
 [[nodiscard]] std::optional<std::string> DecompressXOnlyPubkey(

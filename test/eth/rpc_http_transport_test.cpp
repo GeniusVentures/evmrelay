@@ -281,3 +281,23 @@ TEST(RpcHttpTransportTest, PostsJsonRpcRequestOverHttps)
     EXPECT_EQ(server.received_json.at("method").as_string(), "eth_blockNumber");
     EXPECT_EQ(server.received_json.at("id").as_int64(), 7);
 }
+
+// A listening socket that never accepts: the client connects (kernel backlog),
+// writes, then waits for a response that never comes. The timeout must bound it.
+TEST(RpcHttpTransportTest, TimesOutOnSilentServer)
+{
+    asio::io_context io;
+    tcp::acceptor    silent(io, tcp::endpoint(asio::ip::address_v4::loopback(), 0));
+
+    eth::rpc::RpcHttpTransportOptions options;
+    options.timeout = std::chrono::seconds(1);
+    eth::rpc::RpcHttpTransport transport(
+        "http://127.0.0.1:" + std::to_string(silent.local_endpoint().port()) + "/rpc", options);
+
+    const auto started = std::chrono::steady_clock::now();
+    const auto response = transport.call({{"jsonrpc", "2.0"}, {"id", 1}, {"method", "eth_chainId"}});
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+
+    EXPECT_FALSE(response.has_value());
+    EXPECT_LT(elapsed, std::chrono::seconds(5));
+}

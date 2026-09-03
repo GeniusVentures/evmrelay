@@ -52,23 +52,94 @@ constexpr auto kHttpVersion = 11;
     return res.body();
 }
 
+// Beast's expires_after() only governs async operations, so the former sync
+// connect/handshake/write/read chain could block a caller forever on a stalled
+// peer (io_context threads then never joined at shutdown). One deadline timer
+// bounds the whole exchange, including DNS resolution.
+template <typename Stream, typename Handshake>
+[[nodiscard]] std::optional<std::string> exchange(
+    asio::io_context&                io,
+    Stream&                          stream,
+    const std::string&               host,
+    const std::string&               port,
+    http::request<http::string_body> req,
+    std::chrono::seconds             timeout,
+    Handshake                        handshake)
+{
+    tcp::resolver                     resolver(io);
+    asio::steady_timer                deadline(io);
+    beast::flat_buffer                buffer;
+    http::response<http::string_body> res;
+    std::optional<std::string>        result;
+
+    deadline.expires_after(timeout);
+    deadline.async_wait([&](boost::system::error_code ec)
+    {
+        if (!ec)
+        {
+            resolver.cancel();
+            beast::get_lowest_layer(stream).close();
+        }
+    });
+    auto done = [&]() { deadline.cancel(); };
+
+    resolver.async_resolve(host, port, [&](boost::system::error_code ec, tcp::resolver::results_type results)
+    {
+        if (ec) { return done(); }
+        beast::get_lowest_layer(stream).async_connect(results, [&](boost::system::error_code ec, auto)
+        {
+            if (ec) { return done(); }
+            handshake([&](boost::system::error_code ec)
+            {
+                if (ec) { return done(); }
+                http::async_write(stream, req, [&](boost::system::error_code ec, std::size_t)
+                {
+                    if (ec) { return done(); }
+                    http::async_read(stream, buffer, res, [&](boost::system::error_code ec, std::size_t)
+                    {
+                        if (!ec)
+                        {
+                            result = read_body_from_response(res);
+                        }
+                        done();
+                    });
+                });
+            });
+        });
+    });
+
+    io.run();
+    return result;
+}
+
+[[nodiscard]] http::request<http::string_body> make_request(
+    http::verb         verb,
+    const std::string& host,
+    const std::string& target,
+    const std::string& body)
+{
+    http::request<http::string_body> req{verb, target, kHttpVersion};
+    req.set(http::field::host, host);
+    req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+    if (verb != http::verb::get && verb != http::verb::head)
+    {
+        req.set(http::field::content_type, "application/json");
+        req.body() = body;
+    }
+    req.prepare_payload();
+    return req;
+}
+
 [[nodiscard]] std::optional<std::string> read_https_response(
     http::verb                    verb,
     const std::string&            host,
     const std::string&            port,
     const std::string&            target,
     const std::string&            body,
-    const RpcHttpTransportOptions& options,
-    boost::system::error_code&    ec)
+    const RpcHttpTransportOptions& options)
 {
     asio::io_context io;
-    beast::flat_buffer buffer;
-    tcp::resolver resolver(io);
-    const auto results = resolver.resolve(host, port, ec);
-    if (ec)
-    {
-        return std::nullopt;
-    }
+    boost::system::error_code ec;
 
     ssl::context ssl_ctx(ssl::context::tls_client);
 
@@ -111,50 +182,8 @@ constexpr auto kHttpVersion = 11;
         stream.set_verify_callback(ssl::rfc2818_verification(host));
     }
 
-    beast::get_lowest_layer(stream).expires_after(options.timeout);
-    beast::get_lowest_layer(stream).connect(results, ec);
-    if (ec)
-    {
-        return std::nullopt;
-    }
-
-    stream.handshake(ssl::stream_base::client, ec);
-    if (ec)
-    {
-        return std::nullopt;
-    }
-
-    http::request<http::string_body> req{verb, target, kHttpVersion};
-    req.set(http::field::host, host);
-    req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-    if (verb != http::verb::get && verb != http::verb::head)
-    {
-        req.set(http::field::content_type, "application/json");
-        req.body() = body;
-    }
-    req.prepare_payload();
-
-    http::write(stream, req, ec);
-    if (ec)
-    {
-        return std::nullopt;
-    }
-
-    http::response<http::string_body> res;
-    http::read(stream, buffer, res, ec);
-    if (ec)
-    {
-        return std::nullopt;
-    }
-
-    const auto response_body = read_body_from_response(res);
-    if (!response_body.has_value())
-    {
-        return std::nullopt;
-    }
-
-    stream.shutdown(ec);
-    return response_body;
+    return exchange(io, stream, host, port, make_request(verb, host, target, body), options.timeout,
+                    [&](auto&& on_done) { stream.async_handshake(ssl::stream_base::client, on_done); });
 }
 
 } // namespace
@@ -220,64 +249,20 @@ std::optional<std::string> RpcHttpTransport::call(const boost::json::object& req
 
     if (parsed->is_https)
     {
-        boost::system::error_code ec;
         return read_https_response(
             http::verb::post,
             parsed->host,
             parsed->port,
             parsed->target,
             body,
-            options_,
-            ec);
+            options_);
     }
 
-    asio::io_context io;
-    beast::flat_buffer buffer;
-    boost::system::error_code ec;
-
-    tcp::resolver resolver(io);
-    const auto results = resolver.resolve(parsed->host, parsed->port, ec);
-    if (ec)
-    {
-        return std::nullopt;
-    }
-
-    http::request<http::string_body> req{http::verb::post, parsed->target, kHttpVersion};
-    req.set(http::field::host, parsed->host);
-    req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-    req.set(http::field::content_type, "application/json");
-    req.body() = body;
-    req.prepare_payload();
-
+    asio::io_context  io;
     beast::tcp_stream stream(io);
-    stream.expires_after(options_.timeout);
-    stream.connect(results, ec);
-    if (ec)
-    {
-        return std::nullopt;
-    }
-
-    http::write(stream, req, ec);
-    if (ec)
-    {
-        return std::nullopt;
-    }
-
-    http::response<http::string_body> res;
-    http::read(stream, buffer, res, ec);
-    if (ec)
-    {
-        return std::nullopt;
-    }
-
-    const auto response_body = read_body_from_response(res);
-    if (!response_body.has_value())
-    {
-        return std::nullopt;
-    }
-
-    stream.socket().shutdown(tcp::socket::shutdown_both, ec);
-    return response_body;
+    return exchange(io, stream, parsed->host, parsed->port,
+                    make_request(http::verb::post, parsed->host, parsed->target, body), options_.timeout,
+                    [](auto&& on_done) { on_done(boost::system::error_code{}); });
 }
 
 std::optional<std::string> RpcHttpTransport::HttpsGet(
@@ -290,15 +275,13 @@ std::optional<std::string> RpcHttpTransport::HttpsGet(
         return std::nullopt;
     }
 
-    boost::system::error_code ec;
     return read_https_response(
         http::verb::get,
         parsed->host,
         parsed->port,
         parsed->target,
         {},
-        options,
-        ec );
+        options );
 }
 
 } // namespace eth::rpc
